@@ -1,0 +1,27 @@
+---
+description: Learning philosophy — problem-driven architecture evolution
+alwaysApply: true
+---
+
+# Learning Philosophy
+
+Repository = destination, not answer key.
+
+Natural product evolution:
+
+```
+Single Express API → REST → Business Logic → Validation → Auth
+→ Persistence → Repository → DI → Background Jobs → RabbitMQ
+→ Microservices → EDA → CQRS → Saga → Monitoring → Production
+```
+
+Before introducing any technique, answer:
+
+1. What problem does the current system have?
+2. Why is the current approach no longer enough?
+3. How does the new technique solve it?
+4. What are the trade-offs?
+5. Why does the final repo use it?
+6. Why do we NOT need it today?
+
+Student must write their own code. Short config/snippets OK for clarity.
