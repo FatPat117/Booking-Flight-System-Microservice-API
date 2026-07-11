@@ -23,7 +23,7 @@ Compared after trim + uppercase.
 
 ### Rule 5 — Date-time
 
-ISO-8601 with explicit timezone (`Z` or `±HH:MM`). `arrivalAt` must be after `departureAt`. Stored as UTC (`toISOString()`).
+ISO-8601 with explicit timezone (`Z` or `±HH:MM`). Calendar components must exist (no Feb 30, no hour 25; leap years handled). `arrivalAt` must be after `departureAt`. Stored as UTC (`toISOString()`).
 
 ### Rule 6 — Price
 
@@ -45,10 +45,13 @@ Only `VND` and `USD` (normalized to uppercase).
 
 | Case | Status |
 |------|--------|
-| Invalid JSON syntax | `400` (Express parser) |
-| Shape / business rule failure | `422` + `VALIDATION_FAILED` |
+| Malformed JSON (syntax error) | `400` (Express parser) |
+| Valid JSON but wrong top-level shape (`null`, `"x"`, `123`, `[]`) | `422` + `INVALID_BODY` |
+| Object with field / business rule failures | `422` + `VALIDATION_FAILED` |
 | Duplicate scheduled flight | `409` + `FLIGHT_ALREADY_EXISTS` |
 | Created | `201` + `Location` |
+
+Parser uses `express.json({ strict: false })` so any `JSON.parse()` value reaches the validator. Shape checks live at the trust boundary, not in the parser.
 
 ## Current limitations
 

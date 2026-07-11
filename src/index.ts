@@ -12,7 +12,10 @@ const PORT = 3000;
 const flights: Flight[] = [];
 const SUPPORTED_CURRENCIES = new Set(["VND", "USD"]);
 
-app.use(express.json());
+// strict: false → parser accepts any JSON.parse() value (null, string, number…).
+// Shape ownership stays with validateCreateFlightInput → 422 INVALID_BODY.
+// Malformed JSON still fails at the parser → 400.
+app.use(express.json({ strict: false }));
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
@@ -58,15 +61,47 @@ function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
-/** Accepts ISO-8601 with explicit Z or ±HH:MM offset. */
-function hasExplicitTimezone(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.test(
-    value,
-  );
+const ISO_DATETIME_WITH_TZ =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
+
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
 
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    return isLeapYear(year) ? 29 : 28;
+  }
+  if (month === 4 || month === 6 || month === 9 || month === 11) {
+    return 30;
+  }
+  return 31;
+}
+
+/**
+ * Parse ISO-8601 with explicit timezone and reject non-existent calendar dates.
+ * Do not trust `new Date()` alone — JS may overflow Feb 30 → Mar 2.
+ */
 function tryParseUtcIso(value: string): string | null {
-  if (!hasExplicitTimezone(value)) {
+  const match = ISO_DATETIME_WITH_TZ.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+
+  if (month < 1 || month > 12) {
+    return null;
+  }
+  if (day < 1 || day > daysInMonth(year, month)) {
+    return null;
+  }
+  if (hour > 23 || minute > 59 || second > 59) {
     return null;
   }
 

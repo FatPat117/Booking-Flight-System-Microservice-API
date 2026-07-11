@@ -1,22 +1,12 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 2 (mentor-reviewed & fixed)
-**Current day:** Ready for Day 3
-**Status:** Day 2 complete after corrections
+**Last completed day:** Day 1
+**Current day:** Day 2 — PR correction (calendar dates + JSON primitives)
+**Status:** Implementation complete — awaiting re-review
 
-## Day 2 key fixes applied
+## Gate fixes in this correction
 
-- `unknown` + pure `validateCreateFlightInput`
-- Collect all field issues → `422 VALIDATION_FAILED`
-- Duplicate `flightNumber + departureAt` → `409`
-- Airport codes on origin/destination (not flightNumber)
-- `availableSeats = 0` allowed
-- No string→number coercion
-- Explicit Flight mapping; UTC normalize
-- Error contract `{ error: { code, message, details? } }`
+1. Calendar components validated before `Date` (reject overflow like Feb 30)
+2. `express.json({ strict: false })` → primitives reach validator → `422 INVALID_BODY`
 
-## Architecture
-
-```text
-Client → express.json() → validate → normalize → rules → conflict → Flight[]
-```
+## Do not mark Ready for Day 3 until re-review approves

@@ -2,7 +2,7 @@
 
 **Date started:** 2026-07-11
 **Theme:** Runtime validation + Flight business rules (manual, no libraries)
-**Status:** COMPLETED (2026-07-11) — mentor reviewed & corrected implementation
+**Status:** Request changes addressed — awaiting re-review (calendar + JSON primitives)
 
 ## Architecture end of day
 
