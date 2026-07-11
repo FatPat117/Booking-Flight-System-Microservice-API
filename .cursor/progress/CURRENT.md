@@ -1,12 +1,12 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 1
-**Current day:** Day 2 — PR correction (calendar dates + JSON primitives)
-**Status:** Implementation complete — awaiting re-review
+**Last completed day:** Day 2
+**Current day:** Day 3 — Automated API testing
+**Status:** Implementation complete — awaiting review
 
-## Gate fixes in this correction
+## Done in session
 
-1. Calendar components validated before `Date` (reject overflow like Feb 30)
-2. `express.json({ strict: false })` → primitives reach validator → `422 INVALID_BODY`
-
-## Do not mark Ready for Day 3 until re-review approves
+- Full `tests/flights.api.test.ts` (37 assertions/cases)
+- Fixed duplicate `express.json()` so primitives reach validator
+- Aligned `tsconfig.test.json` with Day 3 curriculum
+- Gate: `typecheck` / `typecheck:test` / `build` / `test` all pass
