@@ -8,7 +8,16 @@ export type Flight = {
   priceInCents: number;
   currency: string;
   availableSeats: number;
-  createdAt?: string;
-  updatedAt?: string;
-}
+};
+
 export type CreateFlightRequest = Omit<Flight, "id">;
+
+export type ValidationIssue = {
+  field: string;
+  code: string;
+  message: string;
+};
+
+export type ValidationResult<T> =
+  | { success: true; value: T }
+  | { success: false; issues: ValidationIssue[] };

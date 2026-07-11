@@ -1,29 +1,22 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 1
-**Current day:** Ready for Day 2
-**Status:** Day 1 fully complete
+**Last completed day:** Day 2 (mentor-reviewed & fixed)
+**Current day:** Ready for Day 3
+**Status:** Day 2 complete after corrections
 
-## Day 1 verification (final)
+## Day 2 key fixes applied
 
-| Item | Result |
-|------|--------|
-| Project init | OK |
-| typecheck / build | OK |
-| GET /health → 200 | OK |
-| Flight type + in-memory | OK |
-| GET /api/flights | OK |
-| GET /api/flights/:id | OK |
-| POST → 201 + UUID | OK |
-| Location header | OK (`Location: /api/flights/{id}`) |
-| Invalid body accepted | Accepted limitation |
+- `unknown` + pure `validateCreateFlightInput`
+- Collect all field issues → `422 VALIDATION_FAILED`
+- Duplicate `flightNumber + departureAt` → `409`
+- Airport codes on origin/destination (not flightNumber)
+- `availableSeats = 0` allowed
+- No string→number coercion
+- Explicit Flight mapping; UTC normalize
+- Error contract `{ error: { code, message, details? } }`
 
-## Current Architecture
+## Architecture
 
 ```text
-Client → Express Routes → In-memory Flight[]
+Client → express.json() → validate → normalize → rules → conflict → Flight[]
 ```
-
-## Next Day Goal
-
-Business rules on Flight; observe when route handler gains too many responsibilities — before adding new layers.
