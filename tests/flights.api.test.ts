@@ -174,11 +174,54 @@ test("rejects valid JSON primitives and arrays with INVALID_BODY", async (t) => 
   }
 });
 
-test("malformed JSON returns 400", async () => {
+test("malformed JSON returns 400 MALFORMED_JSON as JSON", async () => {
   const app = createApp();
   const response = await postRawJson(app, '{"flightNumber":');
 
   assert.equal(response.status, 400);
+  assert.match(response.headers["content-type"] ?? "", /application\/json/);
+  assert.equal(response.body.error.code, "MALFORMED_JSON");
+  assert.equal(typeof response.body.error.message, "string");
+  assert.equal(response.body.error.stack, undefined);
+  assert.equal(response.body.stack, undefined);
+  assert.ok(!JSON.stringify(response.body).includes("flightNumber"));
+});
+
+test("GET /api/unknown returns 404 ROUTE_NOT_FOUND", async () => {
+  const app = createApp();
+  const response = await request(app).get("/api/unknown");
+
+  assert.equal(response.status, 404);
+  assert.match(response.headers["content-type"] ?? "", /application\/json/);
+  assert.equal(response.body.error.code, "ROUTE_NOT_FOUND");
+});
+
+test("PUT /api/flights currently resolves as ROUTE_NOT_FOUND", async () => {
+  const app = createApp();
+  const response = await request(app).put("/api/flights").send(makeValidFlight());
+
+  assert.equal(response.status, 404);
+  assert.equal(response.body.error.code, "ROUTE_NOT_FOUND");
+});
+
+test("unexpected errors return generic 500 without leaking internals", async () => {
+  const express = (await import("express")).default;
+  const { errorHandler } = await import("../src/http-errors.js");
+
+  const testApp = express();
+  testApp.get("/boom", () => {
+    throw new Error("sensitive internal message");
+  });
+  testApp.use(errorHandler);
+
+  const response = await request(testApp).get("/boom");
+
+  assert.equal(response.status, 500);
+  assert.equal(response.body.error.code, "INTERNAL_SERVER_ERROR");
+  assert.equal(typeof response.body.error.message, "string");
+  assert.ok(!JSON.stringify(response.body).includes("sensitive internal message"));
+  assert.equal(response.body.error.stack, undefined);
+  assert.equal(response.body.stack, undefined);
 });
 
 // ---------------------------------------------------------------------------

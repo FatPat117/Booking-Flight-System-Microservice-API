@@ -21,3 +21,13 @@ export type ValidationIssue = {
 export type ValidationResult<T> =
   | { success: true; value: T }
   | { success: false; issues: ValidationIssue[] };
+
+export type ApiErrorDescriptor = {
+  code: string;
+  message: string;
+  details?: ValidationIssue[];
+};
+
+export type ApiErrorResponse = {
+  error: ApiErrorDescriptor;
+};

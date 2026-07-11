@@ -1,38 +1,46 @@
 import express from "express";
-import type { CreateFlightRequest, Flight, ValidationIssue, ValidationResult } from "./types.js";
-export function createApp(){
+
+import {
+  errorHandler,
+  notFoundHandler,
+  sendApiError,
+} from "./http-errors.js";
+import type {
+  CreateFlightRequest,
+  Flight,
+  ValidationIssue,
+  ValidationResult,
+} from "./types.js";
+
+export function createApp() {
   const app = express();
-  const flights:Flight[] = []
+  const flights: Flight[] = [];
 
   // Middleware — strict: false so valid JSON primitives reach the validator (422),
   // while malformed JSON still fails at the parser (400).
   app.use(express.json({ strict: false }));
 
-  // Routes
-
   const SUPPORTED_CURRENCIES = new Set(["VND", "USD"]);
-  
+
   app.get("/health", (_req, res) => {
     res.status(200).json({ status: "ok" });
   });
-  
+
   app.get("/api/flights", (_req, res) => {
     res.status(200).json(flights);
   });
-  
+
   app.get("/api/flights/:id", (req, res) => {
     const { id } = req.params;
     const flight = flights.find((f) => f.id === id);
-  
+
     if (!flight) {
-      return res.status(404).json({
-        error: {
-          code: "FLIGHT_NOT_FOUND",
-          message: "Flight was not found",
-        },
+      return sendApiError(res, 404, {
+        code: "FLIGHT_NOT_FOUND",
+        message: "Flight was not found",
       });
     }
-  
+
     return res.status(200).json(flight);
   });
   
@@ -328,35 +336,31 @@ export function createApp(){
   app.post("/api/flights", (req, res) => {
     const rawBody: unknown = req.body;
     const result = validateCreateFlightInput(rawBody);
-  
+
     if (!result.success) {
-      return res.status(422).json({
-        error: {
-          code: "VALIDATION_FAILED",
-          message: "Request contains invalid flight data",
-          details: result.issues,
-        },
+      return sendApiError(res, 422, {
+        code: "VALIDATION_FAILED",
+        message: "Request contains invalid flight data",
+        details: result.issues,
       });
     }
-  
+
     const validated = result.value;
-  
+
     const duplicate = findDuplicateFlight(
       flights,
       validated.flightNumber,
       validated.departureAt,
     );
-  
+
     if (duplicate) {
-      return res.status(409).json({
-        error: {
-          code: "FLIGHT_ALREADY_EXISTS",
-          message:
-            "A flight with the same flight number and departure time already exists",
-        },
+      return sendApiError(res, 409, {
+        code: "FLIGHT_ALREADY_EXISTS",
+        message:
+          "A flight with the same flight number and departure time already exists",
       });
     }
-  
+
     // Explicit mapping — never spread req.body
     const flight: Flight = {
       id: crypto.randomUUID(),
@@ -369,12 +373,16 @@ export function createApp(){
       currency: validated.currency,
       availableSeats: validated.availableSeats,
     };
-  
+
     flights.push(flight);
-  
+
     res.setHeader("Location", `/api/flights/${flight.id}`);
     return res.status(201).json(flight);
   });
+
+  // After all routes: unmatched path → 404; parser/unexpected → errorHandler
+  app.use(notFoundHandler);
+  app.use(errorHandler);
 
   return app;
 }

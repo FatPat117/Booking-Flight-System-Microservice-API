@@ -1,12 +1,14 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 2
-**Current day:** Day 3 — Automated API testing
+**Last completed day:** Day 4
+**Current day:** Ready for Day 5 (awaiting formal review if desired)
 **Status:** Implementation complete — awaiting review
 
-## Done in session
+## Day 4 done
 
-- Full `tests/flights.api.test.ts` (37 assertions/cases)
-- Fixed duplicate `express.json()` so primitives reach validator
-- Aligned `tsconfig.test.json` with Day 3 curriculum
-- Gate: `typecheck` / `typecheck:test` / `build` / `test` all pass
+- `src/http-errors.ts`: sendApiError, notFoundHandler, errorHandler
+- Middleware order: json → routes → 404 → error
+- Routes use sendApiError; business codes stay in routes
+- Tests: MALFORMED_JSON, ROUTE_NOT_FOUND, PUT→404, generic 500
+- README error table updated
+- Gate: typecheck / typecheck:test / build / test = pass

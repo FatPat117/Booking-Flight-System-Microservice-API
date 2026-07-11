@@ -41,22 +41,55 @@ Only `VND` and `USD` (normalized to uppercase).
 
 `flightNumber + departureAt` (canonical UTC) must be unique → otherwise `409 Conflict`.
 
-## HTTP status convention
+## HTTP status / error convention
 
-| Case | Status |
-|------|--------|
-| Malformed JSON (syntax error) | `400` (Express parser) |
-| Valid JSON but wrong top-level shape (`null`, `"x"`, `123`, `[]`) | `422` + `INVALID_BODY` |
-| Object with field / business rule failures | `422` + `VALIDATION_FAILED` |
-| Duplicate scheduled flight | `409` + `FLIGHT_ALREADY_EXISTS` |
-| Created | `201` + `Location` |
+All errors use:
 
-Parser uses `express.json({ strict: false })` so any `JSON.parse()` value reaches the validator. Shape checks live at the trust boundary, not in the parser.
+```json
+{
+  "error": {
+    "code": "STABLE_CODE",
+    "message": "Human-readable message"
+  }
+}
+```
+
+Validation failures also include `details: ValidationIssue[]`.
+
+| Status | Code | Meaning |
+|-------:|------|---------|
+| 400 | `MALFORMED_JSON` | Body failed JSON parse |
+| 404 | `ROUTE_NOT_FOUND` | No matching endpoint (also unsupported methods for now) |
+| 404 | `FLIGHT_NOT_FOUND` | Flight route matched; resource missing |
+| 409 | `FLIGHT_ALREADY_EXISTS` | Conflict with current state |
+| 422 | `VALIDATION_FAILED` | Shape / business rule failure (`details` may include `INVALID_BODY`, etc.) |
+| 500 | `INTERNAL_SERVER_ERROR` | Unexpected failure (no internal leak) |
+| 201 | — | Created (+ `Location`) |
+
+Parser uses `express.json({ strict: false })` so any `JSON.parse()` value reaches the validator. Shape checks live at the trust boundary. Malformed JSON is mapped in the central error middleware.
+
+Middleware order:
+
+```text
+express.json → routes → notFoundHandler → errorHandler
+```
+
+## Scripts
+
+```bash
+npm run dev
+npm run typecheck
+npm run typecheck:test
+npm run build
+npm test
+npm start
+```
 
 ## Current limitations
 
 - In-memory store: data lost on restart
 - Duplicate check is not concurrency-safe across multiple processes
 - Manual validation (no Joi/Zod yet — on purpose)
-- No automated tests yet
-- Route handler owns many responsibilities (observed pressure, not refactored yet)
+- Route handler still owns many Flight responsibilities
+- Unsupported HTTP method currently returns `ROUTE_NOT_FOUND`, not `405`
+- Logging is only `console.error` for unexpected errors (no structured logger / request IDs)
