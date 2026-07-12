@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import request from "supertest";
+import type { TestContext } from "node:test";
 import type { Express } from "express";
+import type { DatabaseSync } from "node:sqlite";
+import request from "supertest";
 
 import { createApp } from "../src/app.js";
+import { openDatabase } from "../src/database.js";
 
 type FlightPayload = {
   flightNumber: string;
@@ -31,6 +37,20 @@ function makeValidFlight(
     availableSeats: 120,
     ...overrides,
   };
+}
+
+function createTestContext(t: TestContext): {
+  app: Express;
+  database: DatabaseSync;
+} {
+  const database = openDatabase(":memory:");
+  const app = createApp(database);
+
+  t.after(() => {
+    database.close();
+  });
+
+  return { app, database };
 }
 
 async function postRawJson(app: Express, rawJson: string) {
@@ -70,24 +90,24 @@ function assertValidationFailed(
 // Health & reads
 // ---------------------------------------------------------------------------
 
-test("GET /health returns application health", async () => {
-  const app = createApp();
+test("GET /health returns application health", async (t) => {
+  const { app } = createTestContext(t);
   const response = await request(app).get("/health");
 
   assert.equal(response.status, 200);
   assert.deepEqual(response.body, { status: "ok" });
 });
 
-test("GET /api/flights returns empty collection", async () => {
-  const app = createApp();
+test("GET /api/flights returns empty collection", async (t) => {
+  const { app } = createTestContext(t);
   const response = await request(app).get("/api/flights");
 
   assert.equal(response.status, 200);
   assert.deepEqual(response.body, []);
 });
 
-test("GET /api/flights/:id returns 404 for missing flight", async () => {
-  const app = createApp();
+test("GET /api/flights/:id returns 404 for missing flight", async (t) => {
+  const { app } = createTestContext(t);
   const response = await request(app).get("/api/flights/not-found-id");
 
   assert.equal(response.status, 404);
@@ -98,8 +118,8 @@ test("GET /api/flights/:id returns 404 for missing flight", async () => {
 // Successful creation contract
 // ---------------------------------------------------------------------------
 
-test("POST /api/flights creates a normalized flight with Location header", async () => {
-  const app = createApp();
+test("POST /api/flights creates a normalized flight with Location header", async (t) => {
+  const { app } = createTestContext(t);
 
   const response = await request(app)
     .post("/api/flights")
@@ -131,6 +151,7 @@ test("POST /api/flights creates a normalized flight with Location header", async
   assert.equal(response.body.availableSeats, 120);
   assert.equal(response.body.isAdmin, undefined);
   assert.equal(response.body.internalStatus, undefined);
+  assert.equal(response.body.flight_number, undefined);
 
   const getResponse = await request(app).get(
     `/api/flights/${response.body.id}`,
@@ -140,8 +161,8 @@ test("POST /api/flights creates a normalized flight with Location header", async
   assert.equal(getResponse.body.flightNumber, "VN123");
 });
 
-test("POST /api/flights accepts availableSeats = 0", async () => {
-  const app = createApp();
+test("POST /api/flights accepts availableSeats = 0", async (t) => {
+  const { app } = createTestContext(t);
 
   const response = await request(app)
     .post("/api/flights")
@@ -164,8 +185,8 @@ test("rejects valid JSON primitives and arrays with INVALID_BODY", async (t) => 
   ];
 
   for (const testCase of cases) {
-    await t.test(testCase.name, async () => {
-      const app = createApp();
+    await t.test(testCase.name, async (sub) => {
+      const { app } = createTestContext(sub);
       const response = await postRawJson(app, testCase.raw);
 
       assert.equal(response.status, 422);
@@ -174,8 +195,8 @@ test("rejects valid JSON primitives and arrays with INVALID_BODY", async (t) => 
   }
 });
 
-test("malformed JSON returns 400 MALFORMED_JSON as JSON", async () => {
-  const app = createApp();
+test("malformed JSON returns 400 MALFORMED_JSON as JSON", async (t) => {
+  const { app } = createTestContext(t);
   const response = await postRawJson(app, '{"flightNumber":');
 
   assert.equal(response.status, 400);
@@ -187,8 +208,8 @@ test("malformed JSON returns 400 MALFORMED_JSON as JSON", async () => {
   assert.ok(!JSON.stringify(response.body).includes("flightNumber"));
 });
 
-test("GET /api/unknown returns 404 ROUTE_NOT_FOUND", async () => {
-  const app = createApp();
+test("GET /api/unknown returns 404 ROUTE_NOT_FOUND", async (t) => {
+  const { app } = createTestContext(t);
   const response = await request(app).get("/api/unknown");
 
   assert.equal(response.status, 404);
@@ -196,9 +217,11 @@ test("GET /api/unknown returns 404 ROUTE_NOT_FOUND", async () => {
   assert.equal(response.body.error.code, "ROUTE_NOT_FOUND");
 });
 
-test("PUT /api/flights currently resolves as ROUTE_NOT_FOUND", async () => {
-  const app = createApp();
-  const response = await request(app).put("/api/flights").send(makeValidFlight());
+test("PUT /api/flights currently resolves as ROUTE_NOT_FOUND", async (t) => {
+  const { app } = createTestContext(t);
+  const response = await request(app)
+    .put("/api/flights")
+    .send(makeValidFlight());
 
   assert.equal(response.status, 404);
   assert.equal(response.body.error.code, "ROUTE_NOT_FOUND");
@@ -219,7 +242,9 @@ test("unexpected errors return generic 500 without leaking internals", async () 
   assert.equal(response.status, 500);
   assert.equal(response.body.error.code, "INTERNAL_SERVER_ERROR");
   assert.equal(typeof response.body.error.message, "string");
-  assert.ok(!JSON.stringify(response.body).includes("sensitive internal message"));
+  assert.ok(
+    !JSON.stringify(response.body).includes("sensitive internal message"),
+  );
   assert.equal(response.body.error.stack, undefined);
   assert.equal(response.body.stack, undefined);
 });
@@ -228,8 +253,8 @@ test("unexpected errors return generic 500 without leaking internals", async () 
 // Required fields & primitive types
 // ---------------------------------------------------------------------------
 
-test("rejects empty object with missing fields", async () => {
-  const app = createApp();
+test("rejects empty object with missing fields", async (t) => {
+  const { app } = createTestContext(t);
   const response = await request(app).post("/api/flights").send({});
 
   assert.equal(response.status, 422);
@@ -269,11 +294,17 @@ test("rejects wrong primitive types and empty strings", async (t) => {
       code: "INVALID_AVAILABLE_SEATS",
       field: "availableSeats",
     },
+    {
+      name: "unsafe integer price",
+      override: { priceInCents: Number.MAX_SAFE_INTEGER + 1 },
+      code: "INVALID_PRICE",
+      field: "priceInCents",
+    },
   ];
 
   for (const testCase of cases) {
-    await t.test(testCase.name, async () => {
-      const app = createApp();
+    await t.test(testCase.name, async (sub) => {
+      const { app } = createTestContext(sub);
       const response = await request(app)
         .post("/api/flights")
         .send(makeValidFlight(testCase.override));
@@ -325,8 +356,8 @@ test("rejects business invariant violations", async (t) => {
   ];
 
   for (const testCase of cases) {
-    await t.test(testCase.name, async () => {
-      const app = createApp();
+    await t.test(testCase.name, async (sub) => {
+      const { app } = createTestContext(sub);
       const response = await request(app)
         .post("/api/flights")
         .send(makeValidFlight(testCase.override));
@@ -385,8 +416,8 @@ test("calendar date validation", async (t) => {
   ];
 
   for (const testCase of rejectCases) {
-    await t.test(testCase.name, async () => {
-      const app = createApp();
+    await t.test(testCase.name, async (sub) => {
+      const { app } = createTestContext(sub);
       const response = await request(app)
         .post("/api/flights")
         .send(
@@ -401,8 +432,8 @@ test("calendar date validation", async (t) => {
     });
   }
 
-  await t.test("accepts leap day 2028-02-29", async () => {
-    const app = createApp();
+  await t.test("accepts leap day 2028-02-29", async (sub) => {
+    const { app } = createTestContext(sub);
     const response = await request(app)
       .post("/api/flights")
       .send(
@@ -421,13 +452,10 @@ test("calendar date validation", async (t) => {
 // Duplicate & mutation safety
 // ---------------------------------------------------------------------------
 
-test("duplicate flightNumber + departure instant returns 409 and keeps one record", async () => {
-  const app = createApp();
+test("duplicate flightNumber + departure instant returns 409 and keeps one record", async (t) => {
+  const { app } = createTestContext(t);
 
-  const first = await request(app)
-    .post("/api/flights")
-    .send(makeValidFlight());
-
+  const first = await request(app).post("/api/flights").send(makeValidFlight());
   assert.equal(first.status, 201);
 
   const second = await request(app)
@@ -448,8 +476,8 @@ test("duplicate flightNumber + departure instant returns 409 and keeps one recor
   assert.equal(list.body.length, 1);
 });
 
-test("invalid request does not mutate collection", async () => {
-  const app = createApp();
+test("invalid request does not mutate collection", async (t) => {
+  const { app } = createTestContext(t);
 
   const before = await request(app).get("/api/flights");
   assert.equal(before.body.length, 0);
@@ -462,11 +490,11 @@ test("invalid request does not mutate collection", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test isolation
+// Isolation via separate databases
 // ---------------------------------------------------------------------------
 
-test("isolation A: creating a flight does not leak to other apps", async () => {
-  const app = createApp();
+test("isolation A: creating a flight does not leak across memory databases", async (t) => {
+  const { app } = createTestContext(t);
   const created = await request(app)
     .post("/api/flights")
     .send(makeValidFlight());
@@ -476,10 +504,88 @@ test("isolation A: creating a flight does not leak to other apps", async () => {
   assert.equal(list.body.length, 1);
 });
 
-test("isolation B: fresh app starts with empty collection", async () => {
-  const app = createApp();
+test("isolation B: fresh memory database starts empty", async (t) => {
+  const { app } = createTestContext(t);
   const list = await request(app).get("/api/flights");
 
   assert.equal(list.status, 200);
   assert.deepEqual(list.body, []);
+});
+
+// ---------------------------------------------------------------------------
+// Persistence (file-backed)
+// ---------------------------------------------------------------------------
+
+test("flight persists after closing and reopening the same database file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "booking-persist-"));
+  const databasePath = join(dir, "booking.db");
+
+  try {
+    const db1 = openDatabase(databasePath);
+    const app1 = createApp(db1);
+
+    const created = await request(app1)
+      .post("/api/flights")
+      .send(makeValidFlight({ flightNumber: "VN999" }));
+
+    assert.equal(created.status, 201);
+    const createdId = created.body.id as string;
+    db1.close();
+
+    const db2 = openDatabase(databasePath);
+    const app2 = createApp(db2);
+
+    const listed = await request(app2).get("/api/flights");
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.length, 1);
+    assert.equal(listed.body[0].id, createdId);
+    assert.equal(listed.body[0].flightNumber, "VN999");
+
+    const byId = await request(app2).get(`/api/flights/${createdId}`);
+    assert.equal(byId.status, 200);
+    assert.equal(byId.body.flightNumber, "VN999");
+
+    db2.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("two apps sharing one database file see the same source of truth", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "booking-shared-"));
+  const databasePath = join(dir, "booking.db");
+
+  let dbA: DatabaseSync | undefined;
+  let dbB: DatabaseSync | undefined;
+
+  try {
+    dbA = openDatabase(databasePath);
+    dbB = openDatabase(databasePath);
+    const appA = createApp(dbA);
+    const appB = createApp(dbB);
+
+    const created = await request(appA)
+      .post("/api/flights")
+      .send(makeValidFlight({ flightNumber: "VN777" }));
+    assert.equal(created.status, 201);
+
+    const fromB = await request(appB).get(`/api/flights/${created.body.id}`);
+    assert.equal(fromB.status, 200);
+    assert.equal(fromB.body.flightNumber, "VN777");
+
+    const duplicate = await request(appB)
+      .post("/api/flights")
+      .send(
+        makeValidFlight({
+          flightNumber: "VN777",
+          departureAt: "2026-08-10T01:00:00Z",
+          arrivalAt: "2026-08-10T03:00:00Z",
+        }),
+      );
+    assert.equal(duplicate.status, 409);
+  } finally {
+    dbA?.close();
+    dbB?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

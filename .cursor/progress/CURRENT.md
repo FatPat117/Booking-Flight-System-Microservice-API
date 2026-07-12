@@ -1,14 +1,14 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 4
-**Current day:** Ready for Day 5 (awaiting formal review if desired)
+**Last completed day:** Day 5
+**Current day:** Ready for Day 6 (awaiting review)
 **Status:** Implementation complete — awaiting review
 
-## Day 4 done
+## Day 5 corrections applied
 
-- `src/http-errors.ts`: sendApiError, notFoundHandler, errorHandler
-- Middleware order: json → routes → 404 → error
-- Routes use sendApiError; business codes stay in routes
-- Tests: MALFORMED_JSON, ROUTE_NOT_FOUND, PUT→404, generic 500
-- README error table updated
-- Gate: typecheck / typecheck:test / build / test = pass
+- `createApp(database)` — no hardcoded path / no Flight[]
+- Prepared statements + mapFlightRow (camelCase API)
+- INSERT ON CONFLICT DO NOTHING → 409 via `changes`
+- Production: `data/booking.db` + shutdown close
+- Tests: `:memory:` + file persistence + shared file
+- Gate: 43 tests pass

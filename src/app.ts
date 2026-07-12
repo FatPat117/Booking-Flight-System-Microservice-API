@@ -1,4 +1,5 @@
 import express from "express";
+import type { DatabaseSync } from "node:sqlite";
 
 import {
   errorHandler,
@@ -12,12 +13,82 @@ import type {
   ValidationResult,
 } from "./types.js";
 
-export function createApp() {
-  const app = express();
-  const flights: Flight[] = [];
+type FlightRow = {
+  id: string;
+  flight_number: string;
+  origin: string;
+  destination: string;
+  departure_at: string;
+  arrival_at: string;
+  price_in_cents: number;
+  currency: string;
+  available_seats: number;
+};
 
-  // Middleware — strict: false so valid JSON primitives reach the validator (422),
-  // while malformed JSON still fails at the parser (400).
+function mapFlightRow(row: FlightRow): Flight {
+  return {
+    id: row.id,
+    flightNumber: row.flight_number,
+    origin: row.origin,
+    destination: row.destination,
+    departureAt: row.departure_at,
+    arrivalAt: row.arrival_at,
+    priceInCents: row.price_in_cents,
+    currency: row.currency,
+    availableSeats: row.available_seats,
+  };
+}
+
+export function createApp(database: DatabaseSync) {
+  const app = express();
+
+  // Prepare once per app instance — do not prepare inside each request.
+  const selectAllFlights = database.prepare(`
+    SELECT
+      id,
+      flight_number,
+      origin,
+      destination,
+      departure_at,
+      arrival_at,
+      price_in_cents,
+      currency,
+      available_seats
+    FROM flights
+    ORDER BY departure_at ASC, id ASC
+  `);
+
+  const selectFlightById = database.prepare(`
+    SELECT
+      id,
+      flight_number,
+      origin,
+      destination,
+      departure_at,
+      arrival_at,
+      price_in_cents,
+      currency,
+      available_seats
+    FROM flights
+    WHERE id = ?
+  `);
+
+  const insertFlight = database.prepare(`
+    INSERT INTO flights (
+      id,
+      flight_number,
+      origin,
+      destination,
+      departure_at,
+      arrival_at,
+      price_in_cents,
+      currency,
+      available_seats
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (flight_number, departure_at) DO NOTHING
+  `);
+
   app.use(express.json({ strict: false }));
 
   const SUPPORTED_CURRENCIES = new Set(["VND", "USD"]);
@@ -27,50 +98,53 @@ export function createApp() {
   });
 
   app.get("/api/flights", (_req, res) => {
-    res.status(200).json(flights);
+    const rows = selectAllFlights.all() as FlightRow[];
+    return res.status(200).json(rows.map(mapFlightRow));
   });
 
   app.get("/api/flights/:id", (req, res) => {
     const { id } = req.params;
-    const flight = flights.find((f) => f.id === id);
+    const row = selectFlightById.get(id) as FlightRow | undefined;
 
-    if (!flight) {
+    if (!row) {
       return sendApiError(res, 404, {
         code: "FLIGHT_NOT_FOUND",
         message: "Flight was not found",
       });
     }
 
-    return res.status(200).json(flight);
+    return res.status(200).json(mapFlightRow(row));
   });
-  
+
   function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
   }
-  
+
   function isNonEmptyString(value: unknown): value is string {
     return typeof value === "string" && value.trim() !== "";
   }
-  
+
   function isAirportCode(value: string): boolean {
     return /^[A-Z]{3}$/.test(value);
   }
-  
+
   function isPositiveInteger(value: unknown): value is number {
-    return typeof value === "number" && Number.isInteger(value) && value > 0;
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
   }
-  
+
   function isNonNegativeInteger(value: unknown): value is number {
-    return typeof value === "number" && Number.isInteger(value) && value >= 0;
+    return (
+      typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    );
   }
-  
+
   const ISO_DATETIME_WITH_TZ =
     /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
-  
+
   function isLeapYear(year: number): boolean {
     return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
   }
-  
+
   function daysInMonth(year: number, month: number): number {
     if (month === 2) {
       return isLeapYear(year) ? 29 : 28;
@@ -80,24 +154,20 @@ export function createApp() {
     }
     return 31;
   }
-  
-  /**
-   * Parse ISO-8601 with explicit timezone and reject non-existent calendar dates.
-   * Do not trust `new Date()` alone — JS may overflow Feb 30 → Mar 2.
-   */
+
   function tryParseUtcIso(value: string): string | null {
     const match = ISO_DATETIME_WITH_TZ.exec(value);
     if (!match) {
       return null;
     }
-  
+
     const year = Number(match[1]);
     const month = Number(match[2]);
     const day = Number(match[3]);
     const hour = Number(match[4]);
     const minute = Number(match[5]);
     const second = Number(match[6]);
-  
+
     if (month < 1 || month > 12) {
       return null;
     }
@@ -107,24 +177,20 @@ export function createApp() {
     if (hour > 23 || minute > 59 || second > 59) {
       return null;
     }
-  
+
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
       return null;
     }
-  
+
     return date.toISOString();
   }
-  
-  /**
-   * Pure request validation: no access to `flights`, no HTTP, no mutation.
-   * Returns either a trusted CreateFlightRequest or a list of issues.
-   */
+
   function validateCreateFlightInput(
     input: unknown,
   ): ValidationResult<CreateFlightRequest> {
     const issues: ValidationIssue[] = [];
-  
+
     if (!isPlainObject(input)) {
       return {
         success: false,
@@ -137,7 +203,7 @@ export function createApp() {
         ],
       };
     }
-  
+
     const requiredFields = [
       "flightNumber",
       "origin",
@@ -148,7 +214,7 @@ export function createApp() {
       "currency",
       "availableSeats",
     ] as const;
-  
+
     for (const field of requiredFields) {
       if (!(field in input) || input[field] === undefined) {
         issues.push({
@@ -158,8 +224,7 @@ export function createApp() {
         });
       }
     }
-  
-    // --- string fields: type + non-empty ---
+
     const stringFields = [
       "flightNumber",
       "origin",
@@ -168,7 +233,7 @@ export function createApp() {
       "arrivalAt",
       "currency",
     ] as const;
-  
+
     for (const field of stringFields) {
       if (!(field in input) || input[field] === undefined) {
         continue;
@@ -181,26 +246,25 @@ export function createApp() {
         });
       }
     }
-  
-    // Only normalize after we know values are strings
+
     const flightNumberRaw = input.flightNumber;
     const originRaw = input.origin;
     const destinationRaw = input.destination;
     const currencyRaw = input.currency;
     const departureRaw = input.departureAt;
     const arrivalRaw = input.arrivalAt;
-  
+
     let flightNumber = "";
     let origin = "";
     let destination = "";
     let currency = "";
     let departureAtUtc: string | null = null;
     let arrivalAtUtc: string | null = null;
-  
+
     if (isNonEmptyString(flightNumberRaw)) {
       flightNumber = flightNumberRaw.trim().toUpperCase();
     }
-  
+
     if (isNonEmptyString(originRaw)) {
       origin = originRaw.trim().toUpperCase();
       if (!isAirportCode(origin)) {
@@ -211,7 +275,7 @@ export function createApp() {
         });
       }
     }
-  
+
     if (isNonEmptyString(destinationRaw)) {
       destination = destinationRaw.trim().toUpperCase();
       if (!isAirportCode(destination)) {
@@ -222,7 +286,7 @@ export function createApp() {
         });
       }
     }
-  
+
     if (
       isNonEmptyString(originRaw) &&
       isNonEmptyString(destinationRaw) &&
@@ -236,7 +300,7 @@ export function createApp() {
         message: "Origin and destination must be different",
       });
     }
-  
+
     if (isNonEmptyString(currencyRaw)) {
       currency = currencyRaw.trim().toUpperCase();
       if (!SUPPORTED_CURRENCIES.has(currency)) {
@@ -247,7 +311,7 @@ export function createApp() {
         });
       }
     }
-  
+
     if (isNonEmptyString(departureRaw)) {
       departureAtUtc = tryParseUtcIso(departureRaw.trim());
       if (!departureAtUtc) {
@@ -259,7 +323,7 @@ export function createApp() {
         });
       }
     }
-  
+
     if (isNonEmptyString(arrivalRaw)) {
       arrivalAtUtc = tryParseUtcIso(arrivalRaw.trim());
       if (!arrivalAtUtc) {
@@ -270,9 +334,11 @@ export function createApp() {
         });
       }
     }
-  
+
     if (departureAtUtc && arrivalAtUtc) {
-      if (new Date(arrivalAtUtc).getTime() <= new Date(departureAtUtc).getTime()) {
+      if (
+        new Date(arrivalAtUtc).getTime() <= new Date(departureAtUtc).getTime()
+      ) {
         issues.push({
           field: "arrivalAt",
           code: "ARRIVAL_BEFORE_DEPARTURE",
@@ -280,32 +346,33 @@ export function createApp() {
         });
       }
     }
-  
-    // --- numbers: no string coercion ---
+
     if ("priceInCents" in input && input.priceInCents !== undefined) {
       if (!isPositiveInteger(input.priceInCents)) {
         issues.push({
           field: "priceInCents",
           code: "INVALID_PRICE",
-          message: "priceInCents must be an integer greater than 0",
+          message:
+            "priceInCents must be a safe integer greater than 0",
         });
       }
     }
-  
+
     if ("availableSeats" in input && input.availableSeats !== undefined) {
       if (!isNonNegativeInteger(input.availableSeats)) {
         issues.push({
           field: "availableSeats",
           code: "INVALID_AVAILABLE_SEATS",
-          message: "availableSeats must be an integer greater than or equal to 0",
+          message:
+            "availableSeats must be a safe integer greater than or equal to 0",
         });
       }
     }
-  
+
     if (issues.length > 0) {
       return { success: false, issues };
     }
-  
+
     return {
       success: true,
       value: {
@@ -320,19 +387,7 @@ export function createApp() {
       },
     };
   }
-  
-  function findDuplicateFlight(
-    store: Flight[],
-    flightNumber: string,
-    departureAt: string,
-  ): Flight | undefined {
-    return store.find(
-      (flight) =>
-        flight.flightNumber === flightNumber &&
-        flight.departureAt === departureAt,
-    );
-  }
-  
+
   app.post("/api/flights", (req, res) => {
     const rawBody: unknown = req.body;
     const result = validateCreateFlightInput(rawBody);
@@ -346,14 +401,21 @@ export function createApp() {
     }
 
     const validated = result.value;
+    const id = crypto.randomUUID();
 
-    const duplicate = findDuplicateFlight(
-      flights,
+    const insertResult = insertFlight.run(
+      id,
       validated.flightNumber,
+      validated.origin,
+      validated.destination,
       validated.departureAt,
+      validated.arrivalAt,
+      validated.priceInCents,
+      validated.currency,
+      validated.availableSeats,
     );
 
-    if (duplicate) {
+    if (insertResult.changes === 0 || insertResult.changes === 0n) {
       return sendApiError(res, 409, {
         code: "FLIGHT_ALREADY_EXISTS",
         message:
@@ -361,9 +423,8 @@ export function createApp() {
       });
     }
 
-    // Explicit mapping — never spread req.body
     const flight: Flight = {
-      id: crypto.randomUUID(),
+      id,
       flightNumber: validated.flightNumber,
       origin: validated.origin,
       destination: validated.destination,
@@ -374,13 +435,10 @@ export function createApp() {
       availableSeats: validated.availableSeats,
     };
 
-    flights.push(flight);
-
     res.setHeader("Location", `/api/flights/${flight.id}`);
     return res.status(201).json(flight);
   });
 
-  // After all routes: unmatched path → 404; parser/unexpected → errorHandler
   app.use(notFoundHandler);
   app.use(errorHandler);
 
