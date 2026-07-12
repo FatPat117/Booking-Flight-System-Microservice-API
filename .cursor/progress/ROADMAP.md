@@ -9,7 +9,8 @@
 | 3 | Automated API tests + `createApp()` split | Manual matrix cannot protect refactors |
 | 4 | Consistent JSON errors + error middleware | Parser/unknown-route escape the JSON contract |
 | 5 | SQLite persistence (`node:sqlite`) | Data must survive process restart |
-| 6+ | Split boundaries when SQL+HTTP pressure is clear | Only when pain appears |
+| 6 | Repository Pattern (Flight) | SQL+HTTP in one file became real pressure |
+| 7+ | Next boundary only if route still over-orchestrates | Only when pain appears |
 
 Final destination (architecture level only):
 

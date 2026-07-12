@@ -10,6 +10,8 @@ import request from "supertest";
 
 import { createApp } from "../src/app.js";
 import { openDatabase } from "../src/database.js";
+import type { FlightRepository } from "../src/flights/flight-repository.js";
+import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 
 type FlightPayload = {
   flightNumber: string;
@@ -42,15 +44,17 @@ function makeValidFlight(
 function createTestContext(t: TestContext): {
   app: Express;
   database: DatabaseSync;
+  repository: FlightRepository;
 } {
   const database = openDatabase(":memory:");
-  const app = createApp(database);
+  const repository = createSqliteFlightRepository(database);
+  const app = createApp(repository);
 
   t.after(() => {
     database.close();
   });
 
-  return { app, database };
+  return { app, database, repository };
 }
 
 async function postRawJson(app: Express, rawJson: string) {
@@ -512,6 +516,29 @@ test("isolation B: fresh memory database starts empty", async (t) => {
   assert.deepEqual(list.body, []);
 });
 
+test("repository unexpected failure returns generic 500 without leaking internals", async () => {
+  const failingRepository: FlightRepository = {
+    findAll() {
+      throw new Error("sensitive database failure");
+    },
+    findById() {
+      throw new Error("sensitive database failure");
+    },
+    create() {
+      throw new Error("sensitive database failure");
+    },
+  };
+
+  const app = createApp(failingRepository);
+  const response = await request(app).get("/api/flights");
+
+  assert.equal(response.status, 500);
+  assert.equal(response.body.error.code, "INTERNAL_SERVER_ERROR");
+  assert.ok(
+    !JSON.stringify(response.body).includes("sensitive database failure"),
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Persistence (file-backed)
 // ---------------------------------------------------------------------------
@@ -520,9 +547,12 @@ test("flight persists after closing and reopening the same database file", async
   const dir = mkdtempSync(join(tmpdir(), "booking-persist-"));
   const databasePath = join(dir, "booking.db");
 
+  let db1: DatabaseSync | undefined;
+  let db2: DatabaseSync | undefined;
+
   try {
-    const db1 = openDatabase(databasePath);
-    const app1 = createApp(db1);
+    db1 = openDatabase(databasePath);
+    const app1 = createApp(createSqliteFlightRepository(db1));
 
     const created = await request(app1)
       .post("/api/flights")
@@ -530,10 +560,12 @@ test("flight persists after closing and reopening the same database file", async
 
     assert.equal(created.status, 201);
     const createdId = created.body.id as string;
-    db1.close();
 
-    const db2 = openDatabase(databasePath);
-    const app2 = createApp(db2);
+    db1.close();
+    db1 = undefined;
+
+    db2 = openDatabase(databasePath);
+    const app2 = createApp(createSqliteFlightRepository(db2));
 
     const listed = await request(app2).get("/api/flights");
     assert.equal(listed.status, 200);
@@ -544,9 +576,9 @@ test("flight persists after closing and reopening the same database file", async
     const byId = await request(app2).get(`/api/flights/${createdId}`);
     assert.equal(byId.status, 200);
     assert.equal(byId.body.flightNumber, "VN999");
-
-    db2.close();
   } finally {
+    db1?.close();
+    db2?.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -561,8 +593,8 @@ test("two apps sharing one database file see the same source of truth", async ()
   try {
     dbA = openDatabase(databasePath);
     dbB = openDatabase(databasePath);
-    const appA = createApp(dbA);
-    const appB = createApp(dbB);
+    const appA = createApp(createSqliteFlightRepository(dbA));
+    const appB = createApp(createSqliteFlightRepository(dbB));
 
     const created = await request(appA)
       .post("/api/flights")

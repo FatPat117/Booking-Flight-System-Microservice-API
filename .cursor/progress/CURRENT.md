@@ -1,14 +1,14 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 5
-**Current day:** Ready for Day 6 (awaiting review)
+**Last completed day:** Day 6
+**Current day:** Ready for Day 7 (awaiting review)
 **Status:** Implementation complete — awaiting review
 
-## Day 5 corrections applied
+## Day 6 done
 
-- `createApp(database)` — no hardcoded path / no Flight[]
-- Prepared statements + mapFlightRow (camelCase API)
-- INSERT ON CONFLICT DO NOTHING → 409 via `changes`
-- Production: `data/booking.db` + shutdown close
-- Tests: `:memory:` + file persistence + shared file
-- Gate: 43 tests pass
+- `FlightRepository` contract + `createSqliteFlightRepository`
+- `createApp(flightRepository)` — no SQL in `app.ts`
+- Composition: openDB → repo → app
+- Repo tests + failing-repo → 500
+- Persistence cleanup in `finally`
+- Gate: 48 tests pass

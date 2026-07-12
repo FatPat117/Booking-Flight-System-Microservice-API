@@ -1,6 +1,6 @@
 import express from "express";
-import type { DatabaseSync } from "node:sqlite";
 
+import type { FlightRepository } from "./flights/flight-repository.js";
 import {
   errorHandler,
   notFoundHandler,
@@ -13,81 +13,8 @@ import type {
   ValidationResult,
 } from "./types.js";
 
-type FlightRow = {
-  id: string;
-  flight_number: string;
-  origin: string;
-  destination: string;
-  departure_at: string;
-  arrival_at: string;
-  price_in_cents: number;
-  currency: string;
-  available_seats: number;
-};
-
-function mapFlightRow(row: FlightRow): Flight {
-  return {
-    id: row.id,
-    flightNumber: row.flight_number,
-    origin: row.origin,
-    destination: row.destination,
-    departureAt: row.departure_at,
-    arrivalAt: row.arrival_at,
-    priceInCents: row.price_in_cents,
-    currency: row.currency,
-    availableSeats: row.available_seats,
-  };
-}
-
-export function createApp(database: DatabaseSync) {
+export function createApp(flightRepository: FlightRepository) {
   const app = express();
-
-  // Prepare once per app instance — do not prepare inside each request.
-  const selectAllFlights = database.prepare(`
-    SELECT
-      id,
-      flight_number,
-      origin,
-      destination,
-      departure_at,
-      arrival_at,
-      price_in_cents,
-      currency,
-      available_seats
-    FROM flights
-    ORDER BY departure_at ASC, id ASC
-  `);
-
-  const selectFlightById = database.prepare(`
-    SELECT
-      id,
-      flight_number,
-      origin,
-      destination,
-      departure_at,
-      arrival_at,
-      price_in_cents,
-      currency,
-      available_seats
-    FROM flights
-    WHERE id = ?
-  `);
-
-  const insertFlight = database.prepare(`
-    INSERT INTO flights (
-      id,
-      flight_number,
-      origin,
-      destination,
-      departure_at,
-      arrival_at,
-      price_in_cents,
-      currency,
-      available_seats
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT (flight_number, departure_at) DO NOTHING
-  `);
 
   app.use(express.json({ strict: false }));
 
@@ -98,22 +25,21 @@ export function createApp(database: DatabaseSync) {
   });
 
   app.get("/api/flights", (_req, res) => {
-    const rows = selectAllFlights.all() as FlightRow[];
-    return res.status(200).json(rows.map(mapFlightRow));
+    return res.status(200).json(flightRepository.findAll());
   });
 
   app.get("/api/flights/:id", (req, res) => {
     const { id } = req.params;
-    const row = selectFlightById.get(id) as FlightRow | undefined;
+    const flight = flightRepository.findById(id);
 
-    if (!row) {
+    if (!flight) {
       return sendApiError(res, 404, {
         code: "FLIGHT_NOT_FOUND",
         message: "Flight was not found",
       });
     }
 
-    return res.status(200).json(mapFlightRow(row));
+    return res.status(200).json(flight);
   });
 
   function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -352,8 +278,7 @@ export function createApp(database: DatabaseSync) {
         issues.push({
           field: "priceInCents",
           code: "INVALID_PRICE",
-          message:
-            "priceInCents must be a safe integer greater than 0",
+          message: "priceInCents must be a safe integer greater than 0",
         });
       }
     }
@@ -401,30 +326,9 @@ export function createApp(database: DatabaseSync) {
     }
 
     const validated = result.value;
-    const id = crypto.randomUUID();
-
-    const insertResult = insertFlight.run(
-      id,
-      validated.flightNumber,
-      validated.origin,
-      validated.destination,
-      validated.departureAt,
-      validated.arrivalAt,
-      validated.priceInCents,
-      validated.currency,
-      validated.availableSeats,
-    );
-
-    if (insertResult.changes === 0 || insertResult.changes === 0n) {
-      return sendApiError(res, 409, {
-        code: "FLIGHT_ALREADY_EXISTS",
-        message:
-          "A flight with the same flight number and departure time already exists",
-      });
-    }
 
     const flight: Flight = {
-      id,
+      id: crypto.randomUUID(),
       flightNumber: validated.flightNumber,
       origin: validated.origin,
       destination: validated.destination,
@@ -434,6 +338,16 @@ export function createApp(database: DatabaseSync) {
       currency: validated.currency,
       availableSeats: validated.availableSeats,
     };
+
+    const createResult = flightRepository.create(flight);
+
+    if (createResult.outcome === "duplicate") {
+      return sendApiError(res, 409, {
+        code: "FLIGHT_ALREADY_EXISTS",
+        message:
+          "A flight with the same flight number and departure time already exists",
+      });
+    }
 
     res.setHeader("Location", `/api/flights/${flight.id}`);
     return res.status(201).json(flight);

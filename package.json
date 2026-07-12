@@ -8,8 +8,8 @@
                 "build": "tsc",
                 "start": "node dist/index.js",
                 "typecheck": "tsc --noEmit",
-                "test": "node --import tsx --test tests/flights.api.test.ts",
-                "test:watch": "node --import tsx --test --watch tests/flights.api.test.ts",
+                "test": "node --import tsx --test tests/**/*.test.ts",
+                "test:watch": "node --import tsx --test --watch tests/**/*.test.ts",
                 "typecheck:test": "tsc -p tsconfig.test.json"
         },
         "keywords": [],

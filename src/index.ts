@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 
 import { createApp } from "./app.js";
 import { openDatabase } from "./database.js";
+import { createSqliteFlightRepository } from "./flights/sqlite-flight-repository.js";
 
 const PORT = 3000;
 const databasePath = resolve("data/booking.db");
@@ -10,7 +11,8 @@ const databasePath = resolve("data/booking.db");
 mkdirSync(dirname(databasePath), { recursive: true });
 
 const database = openDatabase(databasePath);
-const app = createApp(database);
+const flightRepository = createSqliteFlightRepository(database);
+const app = createApp(flightRepository);
 
 const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
