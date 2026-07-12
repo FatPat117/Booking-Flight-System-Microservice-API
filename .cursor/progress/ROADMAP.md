@@ -10,7 +10,8 @@
 | 4 | Consistent JSON errors + error middleware | Parser/unknown-route escape the JSON contract |
 | 5 | SQLite persistence (`node:sqlite`) | Data must survive process restart |
 | 6 | Repository Pattern (Flight) | SQL+HTTP in one file became real pressure |
-| 7+ | Next boundary only if route still over-orchestrates | Only when pain appears |
+| 7 | CreateFlight Use Case | POST orchestration still lived in Express |
+| 8+ | Config / env only when hardcoding becomes pain | Only when pain appears |
 
 Final destination (architecture level only):
 

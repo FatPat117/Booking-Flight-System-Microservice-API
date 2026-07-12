@@ -10,6 +10,7 @@ import request from "supertest";
 
 import { createApp } from "../src/app.js";
 import { openDatabase } from "../src/database.js";
+import { createCreateFlight } from "../src/flights/create-flight.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 
@@ -41,6 +42,18 @@ function makeValidFlight(
   };
 }
 
+function createAppWithRepository(flightRepository: FlightRepository) {
+  const createFlight = createCreateFlight({
+    flightRepository,
+    generateId: () => crypto.randomUUID(),
+  });
+
+  return createApp({
+    flightRepository,
+    createFlight,
+  });
+}
+
 function createTestContext(t: TestContext): {
   app: Express;
   database: DatabaseSync;
@@ -48,7 +61,7 @@ function createTestContext(t: TestContext): {
 } {
   const database = openDatabase(":memory:");
   const repository = createSqliteFlightRepository(database);
-  const app = createApp(repository);
+  const app = createAppWithRepository(repository);
 
   t.after(() => {
     database.close();
@@ -529,7 +542,7 @@ test("repository unexpected failure returns generic 500 without leaking internal
     },
   };
 
-  const app = createApp(failingRepository);
+  const app = createAppWithRepository(failingRepository);
   const response = await request(app).get("/api/flights");
 
   assert.equal(response.status, 500);
@@ -552,7 +565,7 @@ test("flight persists after closing and reopening the same database file", async
 
   try {
     db1 = openDatabase(databasePath);
-    const app1 = createApp(createSqliteFlightRepository(db1));
+    const app1 = createAppWithRepository(createSqliteFlightRepository(db1));
 
     const created = await request(app1)
       .post("/api/flights")
@@ -565,7 +578,7 @@ test("flight persists after closing and reopening the same database file", async
     db1 = undefined;
 
     db2 = openDatabase(databasePath);
-    const app2 = createApp(createSqliteFlightRepository(db2));
+    const app2 = createAppWithRepository(createSqliteFlightRepository(db2));
 
     const listed = await request(app2).get("/api/flights");
     assert.equal(listed.status, 200);
@@ -593,8 +606,8 @@ test("two apps sharing one database file see the same source of truth", async ()
   try {
     dbA = openDatabase(databasePath);
     dbB = openDatabase(databasePath);
-    const appA = createApp(createSqliteFlightRepository(dbA));
-    const appB = createApp(createSqliteFlightRepository(dbB));
+    const appA = createAppWithRepository(createSqliteFlightRepository(dbA));
+    const appB = createAppWithRepository(createSqliteFlightRepository(dbB));
 
     const created = await request(appA)
       .post("/api/flights")

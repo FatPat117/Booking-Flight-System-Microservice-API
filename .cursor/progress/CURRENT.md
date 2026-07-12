@@ -1,14 +1,15 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 6
-**Current day:** Ready for Day 7 (awaiting review)
+**Last completed day:** Day 7
+**Current day:** Ready for Day 8 (awaiting review)
 **Status:** Implementation complete — awaiting review
 
-## Day 6 done
+## Day 7 done
 
-- `FlightRepository` contract + `createSqliteFlightRepository`
-- `createApp(flightRepository)` — no SQL in `app.ts`
-- Composition: openDB → repo → app
-- Repo tests + failing-repo → 500
-- Persistence cleanup in `finally`
-- Gate: 48 tests pass
+- `CreateFlightInput` (explicit)
+- `flight-validation.ts` extracted
+- `create-flight.ts` use case + outcomes
+- Thin POST route; GET still direct to repo
+- Unit tests without Express/SQLite
+- Note: `generateId: () => crypto.randomUUID()` (not unbound method)
+- Gate: 53 tests pass

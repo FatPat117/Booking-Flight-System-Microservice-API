@@ -10,7 +10,17 @@ export type Flight = {
   availableSeats: number;
 };
 
-export type CreateFlightRequest = Omit<Flight, "id">;
+/** Trusted create payload after validation — not derived from stored Flight. */
+export type CreateFlightInput = {
+  flightNumber: string;
+  origin: string;
+  destination: string;
+  departureAt: string;
+  arrivalAt: string;
+  priceInCents: number;
+  currency: string;
+  availableSeats: number;
+};
 
 export type ValidationIssue = {
   field: string;

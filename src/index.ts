@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 
 import { createApp } from "./app.js";
 import { openDatabase } from "./database.js";
+import { createCreateFlight } from "./flights/create-flight.js";
 import { createSqliteFlightRepository } from "./flights/sqlite-flight-repository.js";
 
 const PORT = 3000;
@@ -12,7 +13,16 @@ mkdirSync(dirname(databasePath), { recursive: true });
 
 const database = openDatabase(databasePath);
 const flightRepository = createSqliteFlightRepository(database);
-const app = createApp(flightRepository);
+
+const createFlight = createCreateFlight({
+  flightRepository,
+  generateId: () => crypto.randomUUID(),
+});
+
+const app = createApp({
+  flightRepository,
+  createFlight,
+});
 
 const server = app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);

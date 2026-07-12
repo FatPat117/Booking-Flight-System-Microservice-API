@@ -2,36 +2,36 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 6)
+## Architecture (Day 7)
 
 ```text
-Client
-  → Express (HTTP + validation + status decisions)
-  → FlightRepository (application contract)
-  → SqliteFlightRepository (SQL + row mapping)
-  → SQLite file
+POST /api/flights
+  → CreateFlight Use Case
+  → FlightRepository
+  → SqliteFlightRepository
+  → SQLite
+
+GET /api/flights
+  → FlightRepository (no use case — intentional)
 ```
 
-Composition root (`index.ts`):
+Composition (`index.ts`):
 
 ```text
-openDatabase → createSqliteFlightRepository → createApp(repository) → listen
+openDatabase
+  → createSqliteFlightRepository
+  → createCreateFlight({ repository, generateId })
+  → createApp({ flightRepository, createFlight })
+  → listen
 ```
 
-## Flight creation rules
+## Create outcomes
 
-Same as Day 5. Uniqueness enforced by SQLite `UNIQUE (flight_number, departure_at)`. Repository translates `changes === 0` → `{ outcome: "duplicate" }`; route maps that to `409`.
-
-## HTTP errors
-
-| Status | Code |
-|-------:|------|
-| 400 | `MALFORMED_JSON` |
-| 404 | `ROUTE_NOT_FOUND` / `FLIGHT_NOT_FOUND` |
-| 409 | `FLIGHT_ALREADY_EXISTS` |
-| 422 | `VALIDATION_FAILED` |
-| 500 | `INTERNAL_SERVER_ERROR` |
-| 201 | Created (+ `Location`) |
+| Application outcome | HTTP |
+|---------------------|------|
+| `created` | `201` + `Location` |
+| `validation_failed` | `422 VALIDATION_FAILED` |
+| `duplicate` | `409 FLIGHT_ALREADY_EXISTS` |
 
 ## Scripts
 
@@ -45,9 +45,9 @@ npm start
 
 ## Current limitations
 
-- Validation + orchestration still live in `app.ts` (no Service Layer yet)
-- Repository API is synchronous (`DatabaseSync` can block the event loop)
+- Read routes call repository directly (no GetFlight use cases yet)
+- Use case / repository still synchronous
+- Manual validation (verbose on purpose)
 - Schema via `CREATE TABLE IF NOT EXISTS` — not migrations
 - Port / DB path hardcoded
-- Unsupported method → `ROUTE_NOT_FOUND` (not `405`)
-- No auth, structured logging, pagination
+- No auth, pagination, structured logging, events
