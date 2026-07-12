@@ -2,36 +2,46 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 7)
+## Architecture (Day 8)
 
 ```text
-POST /api/flights
-  → CreateFlight Use Case
-  → FlightRepository
-  → SqliteFlightRepository
-  → SQLite
-
-GET /api/flights
-  → FlightRepository (no use case — intentional)
+Environment / .env
+  → parseConfig() → AppConfig
+  → Composition root (index.ts)
+  → Express / CreateFlight / Repository / SQLite
 ```
 
-Composition (`index.ts`):
+## Configuration
+
+| Variable | Required | Default | Meaning |
+|----------|----------|---------|---------|
+| `PORT` | No | `3000` | HTTP listening port (`1–65535`) |
+| `DATABASE_PATH` | No | `data/booking.db` | SQLite database file (relative or absolute) |
+
+Precedence:
 
 ```text
-openDatabase
-  → createSqliteFlightRepository
-  → createCreateFlight({ repository, generateId })
-  → createApp({ flightRepository, createFlight })
-  → listen
+Operating-system environment
+  → .env (if loaded)
+  → Application defaults
 ```
 
-## Create outcomes
+Missing values use defaults. Blank or invalid **provided** values fail startup (fail-fast).
 
-| Application outcome | HTTP |
-|---------------------|------|
-| `created` | `201` + `Location` |
-| `validation_failed` | `422 VALIDATION_FAILED` |
-| `duplicate` | `409 FLIGHT_ALREADY_EXISTS` |
+Local setup:
+
+```bash
+cp .env.example .env
+# edit if needed
+npm run dev
+```
+
+## Application flow
+
+```text
+POST → CreateFlight → FlightRepository → SQLite
+GET  → FlightRepository
+```
 
 ## Scripts
 
@@ -45,9 +55,9 @@ npm start
 
 ## Current limitations
 
-- Read routes call repository directly (no GetFlight use cases yet)
+- Configuration only covers port and SQLite path
+- No external secret/config management
 - Use case / repository still synchronous
 - Manual validation (verbose on purpose)
 - Schema via `CREATE TABLE IF NOT EXISTS` — not migrations
-- Port / DB path hardcoded
 - No auth, pagination, structured logging, events

@@ -1,15 +1,14 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 7
-**Current day:** Ready for Day 8 (awaiting review)
+**Last completed day:** Day 8
+**Current day:** Ready for Day 9 (awaiting review)
 **Status:** Implementation complete — awaiting review
 
-## Day 7 done
+## Day 8 done
 
-- `CreateFlightInput` (explicit)
-- `flight-validation.ts` extracted
-- `create-flight.ts` use case + outcomes
-- Thin POST route; GET still direct to repo
-- Unit tests without Express/SQLite
-- Note: `generateId: () => crypto.randomUUID()` (not unbound method)
-- Gate: 53 tests pass
+- `parseConfig(environment) → AppConfig`
+- `index.ts` uses typed config before DB open
+- `.env.example` + ignore `.env.*` (keep example)
+- Scripts: `--env-file-if-exists=.env`
+- `config.test.ts` (no process.env mutation)
+- Gate: 65 tests pass; `PORT=hello` fails before listen

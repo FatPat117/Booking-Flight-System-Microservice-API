@@ -11,7 +11,8 @@
 | 5 | SQLite persistence (`node:sqlite`) | Data must survive process restart |
 | 6 | Repository Pattern (Flight) | SQL+HTTP in one file became real pressure |
 | 7 | CreateFlight Use Case | POST orchestration still lived in Express |
-| 8+ | Config / env only when hardcoding becomes pain | Only when pain appears |
+| 8 | Typed config + env vars | Port/DB path hardcoded blocked multi-env runs |
+| 9+ | Next runtime concern only when real pain appears | Only when pain appears |
 
 Final destination (architecture level only):
 

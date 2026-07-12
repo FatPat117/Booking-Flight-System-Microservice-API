@@ -3,12 +3,7 @@ dist/
 data/
 flights.db
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-.env.development
-.env.test
-.env.production
+.env.*
+!.env.example
 coverage/
 *.log
