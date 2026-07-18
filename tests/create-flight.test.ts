@@ -24,7 +24,7 @@ test("valid input creates a normalized flight via repository", () => {
   let generateIdCalls = 0;
 
   const repository: FlightRepository = {
-    findAll: () => [],
+    findPage: () => ({ items: [], totalItems: 0 }),
     findById: () => undefined,
     create(flight) {
       createdFlights.push(flight);
@@ -64,7 +64,7 @@ test("invalid input does not generate ID or call repository", () => {
   let generateIdCalls = 0;
 
   const repository: FlightRepository = {
-    findAll: () => [],
+    findPage: () => ({ items: [], totalItems: 0 }),
     findById: () => undefined,
     create() {
       createCalls += 1;
@@ -94,7 +94,7 @@ test("invalid input does not generate ID or call repository", () => {
 
 test("repository duplicate becomes application duplicate", () => {
   const repository: FlightRepository = {
-    findAll: () => [],
+    findPage: () => ({ items: [], totalItems: 0 }),
     findById: () => undefined,
     create() {
       return { outcome: "duplicate" };
@@ -114,7 +114,7 @@ test("ID generator value is passed to repository", () => {
   let persistedId: string | undefined;
 
   const repository: FlightRepository = {
-    findAll: () => [],
+    findPage: () => ({ items: [], totalItems: 0 }),
     findById: () => undefined,
     create(flight) {
       persistedId = flight.id;
@@ -133,7 +133,7 @@ test("ID generator value is passed to repository", () => {
 
 test("unexpected repository failure is not swallowed", () => {
   const repository: FlightRepository = {
-    findAll: () => [],
+    findPage: () => ({ items: [], totalItems: 0 }),
     findById: () => undefined,
     create() {
       throw new Error("database failure");

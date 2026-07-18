@@ -12,6 +12,7 @@ import { createApp } from "../src/app.js";
 import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
+import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 
 type FlightPayload = {
@@ -48,9 +49,14 @@ function createAppWithRepository(flightRepository: FlightRepository) {
     generateId: () => crypto.randomUUID(),
   });
 
+  const listFlights = createListFlights({
+    flightRepository,
+  });
+
   return createApp({
     flightRepository,
     createFlight,
+    listFlights,
   });
 }
 
@@ -115,12 +121,20 @@ test("GET /health returns application health", async (t) => {
   assert.deepEqual(response.body, { status: "ok" });
 });
 
-test("GET /api/flights returns empty collection", async (t) => {
+test("GET /api/flights returns an empty paginated collection", async (t) => {
   const { app } = createTestContext(t);
   const response = await request(app).get("/api/flights");
 
   assert.equal(response.status, 200);
-  assert.deepEqual(response.body, []);
+  assert.deepEqual(response.body, {
+    items: [],
+    pagination: {
+      page: 1,
+      pageSize: 20,
+      totalItems: 0,
+      totalPages: 0,
+    },
+  });
 });
 
 test("GET /api/flights/:id returns 404 for missing flight", async (t) => {
@@ -490,20 +504,21 @@ test("duplicate flightNumber + departure instant returns 409 and keeps one recor
 
   const list = await request(app).get("/api/flights");
   assert.equal(list.status, 200);
-  assert.equal(list.body.length, 1);
+  assert.equal(list.body.items.length, 1);
+  assert.equal(list.body.pagination.totalItems, 1);
 });
 
 test("invalid request does not mutate collection", async (t) => {
   const { app } = createTestContext(t);
 
   const before = await request(app).get("/api/flights");
-  assert.equal(before.body.length, 0);
+  assert.equal(before.body.items.length, 0);
 
   const invalid = await request(app).post("/api/flights").send({});
   assert.equal(invalid.status, 422);
 
   const after = await request(app).get("/api/flights");
-  assert.equal(after.body.length, 0);
+  assert.equal(after.body.items.length, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -518,7 +533,7 @@ test("isolation A: creating a flight does not leak across memory databases", asy
   assert.equal(created.status, 201);
 
   const list = await request(app).get("/api/flights");
-  assert.equal(list.body.length, 1);
+  assert.equal(list.body.items.length, 1);
 });
 
 test("isolation B: fresh memory database starts empty", async (t) => {
@@ -526,12 +541,20 @@ test("isolation B: fresh memory database starts empty", async (t) => {
   const list = await request(app).get("/api/flights");
 
   assert.equal(list.status, 200);
-  assert.deepEqual(list.body, []);
+  assert.deepEqual(list.body, {
+    items: [],
+    pagination: {
+      page: 1,
+      pageSize: 20,
+      totalItems: 0,
+      totalPages: 0,
+    },
+  });
 });
 
 test("repository unexpected failure returns generic 500 without leaking internals", async () => {
   const failingRepository: FlightRepository = {
-    findAll() {
+    findPage() {
       throw new Error("sensitive database failure");
     },
     findById() {
@@ -582,9 +605,10 @@ test("flight persists after closing and reopening the same database file", async
 
     const listed = await request(app2).get("/api/flights");
     assert.equal(listed.status, 200);
-    assert.equal(listed.body.length, 1);
-    assert.equal(listed.body[0].id, createdId);
-    assert.equal(listed.body[0].flightNumber, "VN999");
+    assert.equal(listed.body.items.length, 1);
+    assert.equal(listed.body.items[0].id, createdId);
+    assert.equal(listed.body.items[0].flightNumber, "VN999");
+    assert.equal(listed.body.pagination.totalItems, 1);
 
     const byId = await request(app2).get(`/api/flights/${createdId}`);
     assert.equal(byId.status, 200);
@@ -633,4 +657,104 @@ test("two apps sharing one database file see the same source of truth", async ()
     dbB?.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Pagination
+// ---------------------------------------------------------------------------
+
+test("GET /api/flights returns the requested page", async (t) => {
+  const { app } = createTestContext(t);
+
+  const departures = [
+    "2026-08-11T08:00:00Z",
+    "2026-08-12T08:00:00Z",
+    "2026-08-13T08:00:00Z",
+    "2026-08-14T08:00:00Z",
+    "2026-08-15T08:00:00Z",
+  ];
+
+  for (let index = 0; index < departures.length; index += 1) {
+    const departureAt = departures[index]!;
+    const arrivalDate = new Date(departureAt);
+    arrivalDate.setUTCHours(arrivalDate.getUTCHours() + 2);
+
+    const response = await request(app)
+      .post("/api/flights")
+      .send(
+        makeValidFlight({
+          flightNumber: `VN10${index + 1}`,
+          departureAt,
+          arrivalAt: arrivalDate.toISOString(),
+        }),
+      );
+
+    assert.equal(response.status, 201);
+  }
+
+  const response = await request(app).get(
+    "/api/flights?page=2&pageSize=2",
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.items.length, 2);
+  assert.deepEqual(
+    response.body.items.map(
+      (flight: { flightNumber: string }) => flight.flightNumber,
+    ),
+    ["VN103", "VN104"],
+  );
+  assert.deepEqual(response.body.pagination, {
+    page: 2,
+    pageSize: 2,
+    totalItems: 5,
+    totalPages: 3,
+  });
+});
+
+test("GET /api/flights rejects invalid page", async (t) => {
+  const { app } = createTestContext(t);
+  const response = await request(app).get("/api/flights?page=0");
+
+  assert.equal(response.status, 422);
+  assertValidationFailed(response.body, "INVALID_PAGE", "page");
+});
+
+test("GET /api/flights rejects pageSize above maximum", async (t) => {
+  const { app } = createTestContext(t);
+  const response = await request(app).get("/api/flights?pageSize=101");
+
+  assert.equal(response.status, 422);
+  assertValidationFailed(response.body, "INVALID_PAGE_SIZE", "pageSize");
+});
+
+test("GET /api/flights rejects repeated page parameters", async (t) => {
+  const { app } = createTestContext(t);
+  const response = await request(app).get("/api/flights?page=1&page=2");
+
+  assert.equal(response.status, 422);
+  assertValidationFailed(response.body, "INVALID_PAGE", "page");
+});
+
+test("GET /api/flights returns an empty page beyond the end", async (t) => {
+  const { app } = createTestContext(t);
+
+  const created = await request(app)
+    .post("/api/flights")
+    .send(makeValidFlight());
+
+  assert.equal(created.status, 201);
+
+  const response = await request(app).get(
+    "/api/flights?page=10&pageSize=2",
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.items, []);
+  assert.deepEqual(response.body.pagination, {
+    page: 10,
+    pageSize: 2,
+    totalItems: 1,
+    totalPages: 1,
+  });
 });

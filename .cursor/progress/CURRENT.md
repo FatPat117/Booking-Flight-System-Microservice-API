@@ -1,14 +1,23 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 8
-**Current day:** Ready for Day 9 (awaiting review)
-**Status:** Implementation complete — awaiting review
+**Last completed day:** Day 9
+**Current day:** Day 9 — Paginated Flight Query
+**Status:** Completed — awaiting mentor review / commit
 
-## Day 8 done
+## Day 9 delivered
 
-- `parseConfig(environment) → AppConfig`
-- `index.ts` uses typed config before DB open
-- `.env.example` + ignore `.env.*` (keep example)
-- Scripts: `--env-file-if-exists=.env`
-- `config.test.ts` (no process.env mutation)
-- Gate: 65 tests pass; `PORT=hello` fails before listen
+```text
+GET /api/flights?page=&pageSize=
+  → ListFlights Use Case
+  → findPage(limit/offset)
+  → SQLite LIMIT/OFFSET + COUNT(*)
+```
+
+- Defaults: page=1, pageSize=20, max=100
+- Invalid query → 422; beyond-end → 200 empty items
+- findAll() removed
+- Quality gate: typecheck + typecheck:test + build + **81 tests pass**
+
+## Next
+
+Day 10 curriculum when assigned (observability / request tracing pressure).

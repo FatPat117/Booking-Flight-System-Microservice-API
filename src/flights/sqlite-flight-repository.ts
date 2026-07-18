@@ -3,6 +3,8 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Flight } from "../types.js";
 import type {
   CreateFlightRepositoryResult,
+  FlightPage,
+  FlightPageRequest,
   FlightRepository,
 } from "./flight-repository.js";
 
@@ -16,6 +18,10 @@ type FlightRow = {
   price_in_cents: number;
   currency: string;
   available_seats: number;
+};
+
+type FlightCountRow = {
+  total_items: number;
 };
 
 function mapFlightRow(row: FlightRow): Flight {
@@ -35,7 +41,7 @@ function mapFlightRow(row: FlightRow): Flight {
 export function createSqliteFlightRepository(
   database: DatabaseSync,
 ): FlightRepository {
-  const selectAllFlights = database.prepare(`
+  const selectFlightPage = database.prepare(`
     SELECT
       id,
       flight_number,
@@ -47,7 +53,17 @@ export function createSqliteFlightRepository(
       currency,
       available_seats
     FROM flights
-    ORDER BY departure_at ASC, id ASC
+    ORDER BY
+      departure_at ASC,
+      id ASC
+    LIMIT ?
+    OFFSET ?
+  `);
+
+  const countFlights = database.prepare(`
+    SELECT
+      COUNT(*) AS total_items
+    FROM flights
   `);
 
   const selectFlightById = database.prepare(`
@@ -78,13 +94,26 @@ export function createSqliteFlightRepository(
       available_seats
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT (flight_number, departure_at) DO NOTHING
+    ON CONFLICT (
+      flight_number,
+      departure_at
+    )
+    DO NOTHING
   `);
 
   return {
-    findAll(): Flight[] {
-      const rows = selectAllFlights.all() as FlightRow[];
-      return rows.map(mapFlightRow);
+    findPage(request: FlightPageRequest): FlightPage {
+      const rows = selectFlightPage.all(
+        request.limit,
+        request.offset,
+      ) as FlightRow[];
+
+      const countRow = countFlights.get() as FlightCountRow | undefined;
+
+      return {
+        items: rows.map(mapFlightRow),
+        totalItems: countRow?.total_items ?? 0,
+      };
     },
 
     findById(id: string): Flight | undefined {
@@ -106,10 +135,14 @@ export function createSqliteFlightRepository(
       );
 
       if (result.changes === 0 || result.changes === 0n) {
-        return { outcome: "duplicate" };
+        return {
+          outcome: "duplicate",
+        };
       }
 
-      return { outcome: "created" };
+      return {
+        outcome: "created",
+      };
     },
   };
 }

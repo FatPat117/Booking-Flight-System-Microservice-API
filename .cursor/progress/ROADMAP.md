@@ -12,7 +12,8 @@
 | 6 | Repository Pattern (Flight) | SQL+HTTP in one file became real pressure |
 | 7 | CreateFlight Use Case | POST orchestration still lived in Express |
 | 8 | Typed config + env vars | Port/DB path hardcoded blocked multi-env runs |
-| 9+ | Next runtime concern only when real pain appears | Only when pain appears |
+| 9 | Paginated ListFlights | findAll() unbounded after durable storage |
+| 10+ | Observability when debugging becomes real pain | Only when pain appears |
 
 Final destination (architecture level only):
 

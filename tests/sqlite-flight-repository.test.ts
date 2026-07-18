@@ -32,9 +32,18 @@ function createRepo(t: TestContext) {
   return repository;
 }
 
-test("findAll returns empty array for a new repository", (t) => {
+test("findPage returns empty page for a new repository", (t) => {
   const repository = createRepo(t);
-  assert.deepEqual(repository.findAll(), []);
+
+  const result = repository.findPage({
+    limit: 20,
+    offset: 0,
+  });
+
+  assert.deepEqual(result, {
+    items: [],
+    totalItems: 0,
+  });
 });
 
 test("create then findById returns the same Flight in camelCase", (t) => {
@@ -46,7 +55,10 @@ test("create then findById returns the same Flight in camelCase", (t) => {
 
   const found = repository.findById("flight-1");
   assert.deepEqual(found, flight);
-  assert.equal((found as Flight & { flight_number?: string }).flight_number, undefined);
+  assert.equal(
+    (found as Flight & { flight_number?: string }).flight_number,
+    undefined,
+  );
 });
 
 test("duplicate create returns duplicate and leaves one row", (t) => {
@@ -60,42 +72,98 @@ test("duplicate create returns duplicate and leaves one row", (t) => {
 
   assert.equal(repository.create(first).outcome, "created");
   assert.equal(repository.create(second).outcome, "duplicate");
-  assert.equal(repository.findAll().length, 1);
+
+  const page = repository.findPage({
+    limit: 20,
+    offset: 0,
+  });
+
+  assert.equal(page.items.length, 1);
+  assert.equal(page.totalItems, 1);
   assert.equal(repository.findById("a")?.id, "a");
   assert.equal(repository.findById("b"), undefined);
 });
 
-test("findAll orders by departureAt then id", (t) => {
+test("findPage returns ordered pages with totalItems", (t) => {
   const repository = createRepo(t);
 
   repository.create(
     makeFlight({
-      id: "later-a",
+      id: "flight-5",
+      flightNumber: "VN105",
+      departureAt: "2026-08-15T01:00:00.000Z",
+      arrivalAt: "2026-08-15T03:00:00.000Z",
+    }),
+  );
+  repository.create(
+    makeFlight({
+      id: "flight-1",
+      flightNumber: "VN101",
+      departureAt: "2026-08-11T01:00:00.000Z",
+      arrivalAt: "2026-08-11T03:00:00.000Z",
+    }),
+  );
+  repository.create(
+    makeFlight({
+      id: "flight-4",
+      flightNumber: "VN104",
+      departureAt: "2026-08-14T01:00:00.000Z",
+      arrivalAt: "2026-08-14T03:00:00.000Z",
+    }),
+  );
+  repository.create(
+    makeFlight({
+      id: "flight-2",
+      flightNumber: "VN102",
       departureAt: "2026-08-12T01:00:00.000Z",
       arrivalAt: "2026-08-12T03:00:00.000Z",
-      flightNumber: "VN200",
     }),
   );
   repository.create(
     makeFlight({
-      id: "earlier",
-      departureAt: "2026-08-10T01:00:00.000Z",
-      arrivalAt: "2026-08-10T03:00:00.000Z",
-      flightNumber: "VN100",
-    }),
-  );
-  repository.create(
-    makeFlight({
-      id: "later-b",
-      departureAt: "2026-08-12T01:00:00.000Z",
-      arrivalAt: "2026-08-12T04:00:00.000Z",
-      flightNumber: "VN201",
+      id: "flight-3",
+      flightNumber: "VN103",
+      departureAt: "2026-08-13T01:00:00.000Z",
+      arrivalAt: "2026-08-13T03:00:00.000Z",
     }),
   );
 
-  const all = repository.findAll();
+  const firstPage = repository.findPage({
+    limit: 2,
+    offset: 0,
+  });
+
+  assert.equal(firstPage.totalItems, 5);
   assert.deepEqual(
-    all.map((flight) => flight.id),
-    ["earlier", "later-a", "later-b"],
+    firstPage.items.map((flight) => flight.id),
+    ["flight-1", "flight-2"],
   );
+
+  const secondPage = repository.findPage({
+    limit: 2,
+    offset: 2,
+  });
+
+  assert.deepEqual(
+    secondPage.items.map((flight) => flight.id),
+    ["flight-3", "flight-4"],
+  );
+
+  const lastPage = repository.findPage({
+    limit: 2,
+    offset: 4,
+  });
+
+  assert.deepEqual(
+    lastPage.items.map((flight) => flight.id),
+    ["flight-5"],
+  );
+
+  const beyondEnd = repository.findPage({
+    limit: 2,
+    offset: 20,
+  });
+
+  assert.deepEqual(beyondEnd.items, []);
+  assert.equal(beyondEnd.totalItems, 5);
 });

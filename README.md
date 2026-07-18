@@ -2,13 +2,17 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 8)
+## Architecture (Day 9)
 
 ```text
 Environment / .env
   → parseConfig() → AppConfig
   → Composition root (index.ts)
-  → Express / CreateFlight / Repository / SQLite
+      ├── SQLite FlightRepository
+      ├── CreateFlight
+      └── ListFlights
+            ↓
+          Express
 ```
 
 ## Configuration
@@ -39,9 +43,38 @@ npm run dev
 ## Application flow
 
 ```text
-POST → CreateFlight → FlightRepository → SQLite
-GET  → FlightRepository
+POST /api/flights
+  → CreateFlight → FlightRepository → SQLite
+
+GET /api/flights?page=&pageSize=
+  → ListFlights → findPage(limit/offset) → SQLite
+
+GET /api/flights/:id
+  → FlightRepository.findById
 ```
+
+### List flights pagination
+
+| Param | Default | Rules |
+|-------|---------|-------|
+| `page` | `1` | Positive safe integer |
+| `pageSize` | `20` | Integer `1–100` |
+
+Response shape:
+
+```json
+{
+  "items": [],
+  "pagination": {
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 0,
+    "totalPages": 0
+  }
+}
+```
+
+Invalid pagination → `422`. Empty page beyond the end → `200` with empty `items`.
 
 ## Scripts
 
@@ -55,9 +88,10 @@ npm start
 
 ## Current limitations
 
+- Offset pagination only (no cursor)
+- Page + count queries are not a single snapshot transaction
 - Configuration only covers port and SQLite path
-- No external secret/config management
 - Use case / repository still synchronous
 - Manual validation (verbose on purpose)
 - Schema via `CREATE TABLE IF NOT EXISTS` — not migrations
-- No auth, pagination, structured logging, events
+- No auth, structured logging, events

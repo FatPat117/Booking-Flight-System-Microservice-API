@@ -5,6 +5,7 @@ import { createApp } from "./app.js";
 import { parseConfig } from "./config.js";
 import { openDatabase } from "./database.js";
 import { createCreateFlight } from "./flights/create-flight.js";
+import { createListFlights } from "./flights/list-flights.js";
 import { createSqliteFlightRepository } from "./flights/sqlite-flight-repository.js";
 
 const config = parseConfig(process.env);
@@ -20,9 +21,14 @@ const createFlight = createCreateFlight({
   generateId: () => crypto.randomUUID(),
 });
 
+const listFlights = createListFlights({
+  flightRepository,
+});
+
 const app = createApp({
   flightRepository,
   createFlight,
+  listFlights,
 });
 
 const server = app.listen(config.port, () => {
