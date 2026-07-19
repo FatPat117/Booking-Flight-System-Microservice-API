@@ -2,17 +2,21 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 9)
+## Architecture (Day 10)
 
 ```text
 Environment / .env
   → parseConfig() → AppConfig
   → Composition root (index.ts)
+      ├── Console Logger
       ├── SQLite FlightRepository
       ├── CreateFlight
       └── ListFlights
             ↓
           Express
+            ├── Request observability (x-request-id, start/finish logs)
+            ├── Routes / use cases
+            └── Structured unexpected-error logs
 ```
 
 ## Configuration
@@ -43,15 +47,18 @@ npm run dev
 ## Application flow
 
 ```text
-POST /api/flights
-  → CreateFlight → FlightRepository → SQLite
+Request
+  → observability middleware (requestId + logs)
+  → express.json / routes
+  → CreateFlight | ListFlights | findById
+  → FlightRepository → SQLite
 
-GET /api/flights?page=&pageSize=
-  → ListFlights → findPage(limit/offset) → SQLite
-
-GET /api/flights/:id
-  → FlightRepository.findById
+Unexpected errors
+  → structured logger.error (server-side)
+  → generic 500 JSON (client)
 ```
+
+Every response includes header `x-request-id` (generated or echoed from the client).
 
 ### List flights pagination
 
@@ -88,10 +95,11 @@ npm start
 
 ## Current limitations
 
+- Logs go to console only (no transports / log level config)
 - Offset pagination only (no cursor)
 - Page + count queries are not a single snapshot transaction
 - Configuration only covers port and SQLite path
 - Use case / repository still synchronous
 - Manual validation (verbose on purpose)
 - Schema via `CREATE TABLE IF NOT EXISTS` — not migrations
-- No auth, structured logging, events
+- No auth, metrics, distributed tracing, or events

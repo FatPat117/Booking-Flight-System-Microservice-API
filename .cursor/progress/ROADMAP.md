@@ -13,7 +13,8 @@
 | 7 | CreateFlight Use Case | POST orchestration still lived in Express |
 | 8 | Typed config + env vars | Port/DB path hardcoded blocked multi-env runs |
 | 9 | Paginated ListFlights | findAll() unbounded after durable storage |
-| 10+ | Observability when debugging becomes real pain | Only when pain appears |
+| 10 | Request ID + structured logs | Multi-layer stack; 500s hard to correlate |
+| 11+ | Health that checks DB (when needed) | /health only proves process is alive |
 
 Final destination (architecture level only):
 

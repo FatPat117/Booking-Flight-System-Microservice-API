@@ -14,6 +14,7 @@ import { createCreateFlight } from "../src/flights/create-flight.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
+import type { Logger, LogFields } from "../src/observability/logger.js";
 
 type FlightPayload = {
   flightNumber: string;
@@ -26,6 +27,40 @@ type FlightPayload = {
   availableSeats: number;
   [key: string]: unknown;
 };
+
+function createMemoryLogger() {
+  const entries: Array<{
+    level: string;
+    message: string;
+    fields?: LogFields;
+  }> = [];
+
+  const logger: Logger = {
+    info(message, fields) {
+      entries.push(
+        fields === undefined
+          ? { level: "info", message }
+          : { level: "info", message, fields },
+      );
+    },
+    warn(message, fields) {
+      entries.push(
+        fields === undefined
+          ? { level: "warn", message }
+          : { level: "warn", message, fields },
+      );
+    },
+    error(message, fields) {
+      entries.push(
+        fields === undefined
+          ? { level: "error", message }
+          : { level: "error", message, fields },
+      );
+    },
+  };
+
+  return { logger, entries };
+}
 
 function makeValidFlight(
   overrides: Partial<FlightPayload> = {},
@@ -53,10 +88,13 @@ function createAppWithRepository(flightRepository: FlightRepository) {
     flightRepository,
   });
 
+  const { logger } = createMemoryLogger();
+
   return createApp({
     flightRepository,
     createFlight,
     listFlights,
+    logger,
   });
 }
 
@@ -260,13 +298,14 @@ test("PUT /api/flights currently resolves as ROUTE_NOT_FOUND", async (t) => {
 
 test("unexpected errors return generic 500 without leaking internals", async () => {
   const express = (await import("express")).default;
-  const { errorHandler } = await import("../src/http-errors.js");
+  const { createErrorHandler } = await import("../src/http-errors.js");
+  const { logger } = createMemoryLogger();
 
   const testApp = express();
   testApp.get("/boom", () => {
     throw new Error("sensitive internal message");
   });
-  testApp.use(errorHandler);
+  testApp.use(createErrorHandler(logger));
 
   const response = await request(testApp).get("/boom");
 

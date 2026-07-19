@@ -4,21 +4,26 @@ import type { CreateFlight } from "./flights/create-flight.js";
 import type { FlightRepository } from "./flights/flight-repository.js";
 import type { ListFlights } from "./flights/list-flights.js";
 import {
-  errorHandler,
+  createErrorHandler,
   notFoundHandler,
   sendApiError,
 } from "./http-errors.js";
+import type { Logger } from "./observability/logger.js";
+import { createRequestObservabilityMiddleware } from "./observability/request-observability.js";
 
 export type AppDependencies = {
   flightRepository: FlightRepository;
   createFlight: CreateFlight;
   listFlights: ListFlights;
+  logger: Logger;
 };
 
 export function createApp(dependencies: AppDependencies) {
-  const { flightRepository, createFlight, listFlights } = dependencies;
+  const { flightRepository, createFlight, listFlights, logger } =
+    dependencies;
   const app = express();
 
+  app.use(createRequestObservabilityMiddleware(logger));
   app.use(express.json({ strict: false }));
 
   app.get("/health", (_req, res) => {
@@ -83,7 +88,7 @@ export function createApp(dependencies: AppDependencies) {
   });
 
   app.use(notFoundHandler);
-  app.use(errorHandler);
+  app.use(createErrorHandler(logger));
 
   return app;
 }
