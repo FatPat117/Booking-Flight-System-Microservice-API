@@ -3,6 +3,7 @@ import express from "express";
 import type { CreateFlight } from "./flights/create-flight.js";
 import type { FlightRepository } from "./flights/flight-repository.js";
 import type { ListFlights } from "./flights/list-flights.js";
+import type { HealthChecks } from "./health/health-checks.js";
 import {
   createErrorHandler,
   notFoundHandler,
@@ -16,18 +17,39 @@ export type AppDependencies = {
   createFlight: CreateFlight;
   listFlights: ListFlights;
   logger: Logger;
+  healthChecks: HealthChecks;
 };
 
 export function createApp(dependencies: AppDependencies) {
-  const { flightRepository, createFlight, listFlights, logger } =
-    dependencies;
+  const {
+    flightRepository,
+    createFlight,
+    listFlights,
+    logger,
+    healthChecks,
+  } = dependencies;
   const app = express();
 
   app.use(createRequestObservabilityMiddleware(logger));
   app.use(express.json({ strict: false }));
 
-  app.get("/health", (_req, res) => {
-    res.status(200).json({ status: "ok" });
+  app.get("/live", (_request, response) => {
+    return response.status(200).json({
+      status: "ok",
+    });
+  });
+
+  app.get("/health", (_request, response) => {
+    return response.status(200).json({
+      status: "ok",
+    });
+  });
+
+  app.get("/ready", (_request, response) => {
+    const readiness = healthChecks.checkReadiness();
+    const statusCode = readiness.status === "ok" ? 200 : 503;
+
+    return response.status(statusCode).json(readiness);
   });
 
   app.get("/api/flights", (req, res) => {

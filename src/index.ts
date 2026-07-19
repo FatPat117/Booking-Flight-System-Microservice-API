@@ -7,6 +7,7 @@ import { openDatabase } from "./database.js";
 import { createCreateFlight } from "./flights/create-flight.js";
 import { createListFlights } from "./flights/list-flights.js";
 import { createSqliteFlightRepository } from "./flights/sqlite-flight-repository.js";
+import { createHealthChecks } from "./health/health-checks.js";
 import { createConsoleLogger } from "./observability/logger.js";
 
 const config = parseConfig(process.env);
@@ -17,6 +18,7 @@ mkdirSync(dirname(databasePath), { recursive: true });
 
 const database = openDatabase(databasePath);
 const flightRepository = createSqliteFlightRepository(database);
+const healthChecks = createHealthChecks(database);
 
 const createFlight = createCreateFlight({
   flightRepository,
@@ -32,6 +34,7 @@ const app = createApp({
   createFlight,
   listFlights,
   logger,
+  healthChecks,
 });
 
 const server = app.listen(config.port, () => {

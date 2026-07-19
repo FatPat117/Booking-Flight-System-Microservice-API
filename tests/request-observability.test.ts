@@ -9,6 +9,7 @@ import { createCreateFlight } from "../src/flights/create-flight.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
+import { createHealthChecks } from "../src/health/health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 
 type MemoryLogEntry = {
@@ -70,6 +71,7 @@ function createTestContext(t: TestContext) {
     createFlight,
     listFlights,
     logger,
+    healthChecks: createHealthChecks(database),
   });
 
   t.after(() => {
@@ -169,6 +171,18 @@ test("logs unexpected errors with request id without leaking them to client", as
     createFlight,
     listFlights,
     logger,
+    healthChecks: {
+      checkReadiness() {
+        return {
+          status: "ok",
+          checks: {
+            database: {
+              status: "ok",
+            },
+          },
+        };
+      },
+    },
   });
 
   const response = await request(app)

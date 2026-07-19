@@ -2,20 +2,22 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 10)
+## Architecture (Day 11)
 
 ```text
 Environment / .env
   → parseConfig() → AppConfig
   → Composition root (index.ts)
       ├── Console Logger
+      ├── HealthChecks (SQLite SELECT 1)
       ├── SQLite FlightRepository
       ├── CreateFlight
       └── ListFlights
             ↓
           Express
-            ├── Request observability (x-request-id, start/finish logs)
-            ├── Routes / use cases
+            ├── Request observability
+            ├── /live /health /ready
+            ├── API routes / use cases
             └── Structured unexpected-error logs
 ```
 
@@ -43,6 +45,41 @@ cp .env.example .env
 # edit if needed
 npm run dev
 ```
+
+## Health endpoints
+
+### GET /live
+
+Liveness check. Returns 200 when the HTTP process is alive.
+
+```json
+{
+  "status": "ok"
+}
+```
+
+### GET /health
+
+Backward-compatible alias for `/live`.
+
+### GET /ready
+
+Readiness check. Verifies that the application can query its SQLite database.
+
+Healthy response:
+
+```json
+{
+  "status": "ok",
+  "checks": {
+    "database": {
+      "status": "ok"
+    }
+  }
+}
+```
+
+If a critical dependency is unavailable, returns `503 Service Unavailable`.
 
 ## Application flow
 
@@ -95,6 +132,7 @@ npm start
 
 ## Current limitations
 
+- Current health checks only verify SQLite with a lightweight `SELECT 1`. They do not check disk space, migration version, write capability, broker dependencies, or downstream services.
 - Logs go to console only (no transports / log level config)
 - Offset pagination only (no cursor)
 - Page + count queries are not a single snapshot transaction

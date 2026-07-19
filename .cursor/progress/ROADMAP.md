@@ -14,7 +14,8 @@
 | 8 | Typed config + env vars | Port/DB path hardcoded blocked multi-env runs |
 | 9 | Paginated ListFlights | findAll() unbounded after durable storage |
 | 10 | Request ID + structured logs | Multi-layer stack; 500s hard to correlate |
-| 11+ | Health that checks DB (when needed) | /health only proves process is alive |
+| 11 | Liveness + readiness (SQLite) | /health only proved process was alive |
+| 12+ | Auth when who-can-create-Flight becomes real | Next production pressure |
 
 Final destination (architecture level only):
 

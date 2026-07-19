@@ -14,6 +14,8 @@ import { createCreateFlight } from "../src/flights/create-flight.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
+import type { HealthChecks } from "../src/health/health-checks.js";
+import { createHealthChecks } from "../src/health/health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 
 type FlightPayload = {
@@ -78,7 +80,23 @@ function makeValidFlight(
   };
 }
 
-function createAppWithRepository(flightRepository: FlightRepository) {
+const healthyHealthChecks: HealthChecks = {
+  checkReadiness() {
+    return {
+      status: "ok",
+      checks: {
+        database: {
+          status: "ok",
+        },
+      },
+    };
+  },
+};
+
+function createAppWithRepository(
+  flightRepository: FlightRepository,
+  healthChecks: HealthChecks = healthyHealthChecks,
+) {
   const createFlight = createCreateFlight({
     flightRepository,
     generateId: () => crypto.randomUUID(),
@@ -95,6 +113,7 @@ function createAppWithRepository(flightRepository: FlightRepository) {
     createFlight,
     listFlights,
     logger,
+    healthChecks,
   });
 }
 
@@ -105,7 +124,10 @@ function createTestContext(t: TestContext): {
 } {
   const database = openDatabase(":memory:");
   const repository = createSqliteFlightRepository(database);
-  const app = createAppWithRepository(repository);
+  const app = createAppWithRepository(
+    repository,
+    createHealthChecks(database),
+  );
 
   t.after(() => {
     database.close();

@@ -1,22 +1,22 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 10
-**Current day:** Day 10 — Request Observability
+**Last completed day:** Day 11
+**Current day:** Day 11 — Liveness & Readiness
 **Status:** Completed — awaiting mentor review / commit
 
-## Day 10 delivered
+## Day 11 delivered
 
 ```text
-Request → observability middleware (x-request-id, start/finish)
-       → Express / use cases / repository
-       → createErrorHandler logs unexpected_error with requestId
+GET /live   → process liveness
+GET /health → alias for /live
+GET /ready  → SQLite SELECT 1 → 200 | 503
 ```
 
-- Logger interface + console JSON logger
-- AsyncLocalStorage request context
-- Memory logger in tests
-- Quality gate: typecheck + typecheck:test + build + **85 tests pass**
+- `src/health/health-checks.ts`
+- Wired into AppDependencies + index.ts
+- Tests: health.api + health-checks unit
+- Quality gate: **91 tests pass**
 
 ## Next
 
-Day 11 when assigned (health that checks database dependency).
+Day 12 when assigned (auth / who can create Flight).
