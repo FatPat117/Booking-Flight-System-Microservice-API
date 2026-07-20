@@ -2,23 +2,19 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 11)
+## Architecture (Day 12)
 
 ```text
 Environment / .env
   → parseConfig() → AppConfig
   → Composition root (index.ts)
       ├── Console Logger
-      ├── HealthChecks (SQLite SELECT 1)
+      ├── HealthChecks
       ├── SQLite FlightRepository
-      ├── CreateFlight
-      └── ListFlights
+      ├── CreateFlight / ListFlights
+      └── API key auth (POST only)
             ↓
           Express
-            ├── Request observability
-            ├── /live /health /ready
-            ├── API routes / use cases
-            └── Structured unexpected-error logs
 ```
 
 ## Configuration
@@ -27,24 +23,50 @@ Environment / .env
 |----------|----------|---------|---------|
 | `PORT` | No | `3000` | HTTP listening port (`1–65535`) |
 | `DATABASE_PATH` | No | `data/booking.db` | SQLite database file (relative or absolute) |
+| `ADMIN_API_KEY` | Yes | none | Bearer token required for `POST /api/flights` |
+
+`ADMIN_API_KEY` is required at startup. The application fails fast if it is missing, blank, or shorter than 16 characters.
 
 Precedence:
 
 ```text
 Operating-system environment
   → .env (if loaded)
-  → Application defaults
+  → Application defaults (PORT, DATABASE_PATH only)
 ```
-
-Missing values use defaults. Blank or invalid **provided** values fail startup (fail-fast).
 
 Local setup:
 
 ```bash
 cp .env.example .env
-# edit if needed
+# set ADMIN_API_KEY to a local secret (at least 16 characters)
 npm run dev
 ```
+
+Do not commit `.env`. Only commit `.env.example` with placeholder values.
+
+## Authentication
+
+Public endpoints (no credential):
+
+```text
+GET /live
+GET /health
+GET /ready
+GET /api/flights
+GET /api/flights/:id
+```
+
+Protected write endpoint:
+
+```http
+POST /api/flights
+Authorization: Bearer <ADMIN_API_KEY>
+```
+
+Missing or invalid credentials return `401 Unauthorized` with `WWW-Authenticate: Bearer`.
+
+This is minimal API key authentication — not JWT, OAuth, or role-based access control.
 
 ## Health endpoints
 
@@ -87,12 +109,9 @@ If a critical dependency is unavailable, returns `503 Service Unavailable`.
 Request
   → observability middleware (requestId + logs)
   → express.json / routes
+  → optional API key auth (POST /api/flights only)
   → CreateFlight | ListFlights | findById
   → FlightRepository → SQLite
-
-Unexpected errors
-  → structured logger.error (server-side)
-  → generic 500 JSON (client)
 ```
 
 Every response includes header `x-request-id` (generated or echoed from the client).
@@ -132,12 +151,11 @@ npm start
 
 ## Current limitations
 
-- Current health checks only verify SQLite with a lightweight `SELECT 1`. They do not check disk space, migration version, write capability, broker dependencies, or downstream services.
+- API key is a single shared secret (no per-user identity, rotation, or expiry)
+- Current health checks only verify SQLite with a lightweight `SELECT 1`
 - Logs go to console only (no transports / log level config)
 - Offset pagination only (no cursor)
-- Page + count queries are not a single snapshot transaction
-- Configuration only covers port and SQLite path
+- Configuration only covers port, database path, and admin API key
 - Use case / repository still synchronous
-- Manual validation (verbose on purpose)
 - Schema via `CREATE TABLE IF NOT EXISTS` — not migrations
-- No auth, metrics, distributed tracing, or events
+- No JWT, OAuth, RBAC, metrics, distributed tracing, or events

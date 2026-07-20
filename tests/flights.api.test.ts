@@ -18,6 +18,8 @@ import type { HealthChecks } from "../src/health/health-checks.js";
 import { createHealthChecks } from "../src/health/health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 
+const TEST_ADMIN_API_KEY = "test-admin-key-123456";
+
 type FlightPayload = {
   flightNumber: string;
   origin: string;
@@ -114,7 +116,19 @@ function createAppWithRepository(
     listFlights,
     logger,
     healthChecks,
+    adminApiKey: TEST_ADMIN_API_KEY,
   });
+}
+
+function withAdminAuth(builder: request.Test) {
+  return builder.set(
+    "Authorization",
+    `Bearer ${TEST_ADMIN_API_KEY}`,
+  );
+}
+
+function postFlight(app: Express) {
+  return withAdminAuth(request(app).post("/api/flights"));
 }
 
 function createTestContext(t: TestContext): {
@@ -137,10 +151,11 @@ function createTestContext(t: TestContext): {
 }
 
 async function postRawJson(app: Express, rawJson: string) {
-  return request(app)
-    .post("/api/flights")
-    .set("Content-Type", "application/json")
-    .send(rawJson);
+  return withAdminAuth(
+    request(app)
+      .post("/api/flights")
+      .set("Content-Type", "application/json"),
+  ).send(rawJson);
 }
 
 function assertValidationFailed(
@@ -212,8 +227,7 @@ test("GET /api/flights/:id returns 404 for missing flight", async (t) => {
 test("POST /api/flights creates a normalized flight with Location header", async (t) => {
   const { app } = createTestContext(t);
 
-  const response = await request(app)
-    .post("/api/flights")
+  const response = await postFlight(app)
     .send(
       makeValidFlight({
         flightNumber: "vn123",
@@ -255,8 +269,7 @@ test("POST /api/flights creates a normalized flight with Location header", async
 test("POST /api/flights accepts availableSeats = 0", async (t) => {
   const { app } = createTestContext(t);
 
-  const response = await request(app)
-    .post("/api/flights")
+  const response = await postFlight(app)
     .send(makeValidFlight({ availableSeats: 0 }));
 
   assert.equal(response.status, 201);
@@ -347,7 +360,7 @@ test("unexpected errors return generic 500 without leaking internals", async () 
 
 test("rejects empty object with missing fields", async (t) => {
   const { app } = createTestContext(t);
-  const response = await request(app).post("/api/flights").send({});
+  const response = await postFlight(app).send({});
 
   assert.equal(response.status, 422);
   assertValidationFailed(response.body);
@@ -397,8 +410,7 @@ test("rejects wrong primitive types and empty strings", async (t) => {
   for (const testCase of cases) {
     await t.test(testCase.name, async (sub) => {
       const { app } = createTestContext(sub);
-      const response = await request(app)
-        .post("/api/flights")
+      const response = await postFlight(app)
         .send(makeValidFlight(testCase.override));
 
       assert.equal(response.status, 422);
@@ -450,8 +462,7 @@ test("rejects business invariant violations", async (t) => {
   for (const testCase of cases) {
     await t.test(testCase.name, async (sub) => {
       const { app } = createTestContext(sub);
-      const response = await request(app)
-        .post("/api/flights")
+      const response = await postFlight(app)
         .send(makeValidFlight(testCase.override));
 
       assert.equal(response.status, 422);
@@ -510,8 +521,7 @@ test("calendar date validation", async (t) => {
   for (const testCase of rejectCases) {
     await t.test(testCase.name, async (sub) => {
       const { app } = createTestContext(sub);
-      const response = await request(app)
-        .post("/api/flights")
+      const response = await postFlight(app)
         .send(
           makeValidFlight({
             departureAt: testCase.departureAt,
@@ -526,8 +536,7 @@ test("calendar date validation", async (t) => {
 
   await t.test("accepts leap day 2028-02-29", async (sub) => {
     const { app } = createTestContext(sub);
-    const response = await request(app)
-      .post("/api/flights")
+    const response = await postFlight(app)
       .send(
         makeValidFlight({
           departureAt: "2028-02-29T08:00:00Z",
@@ -547,11 +556,10 @@ test("calendar date validation", async (t) => {
 test("duplicate flightNumber + departure instant returns 409 and keeps one record", async (t) => {
   const { app } = createTestContext(t);
 
-  const first = await request(app).post("/api/flights").send(makeValidFlight());
+  const first = await postFlight(app).send(makeValidFlight());
   assert.equal(first.status, 201);
 
-  const second = await request(app)
-    .post("/api/flights")
+  const second = await postFlight(app)
     .send(
       makeValidFlight({
         flightNumber: "vn123",
@@ -575,7 +583,7 @@ test("invalid request does not mutate collection", async (t) => {
   const before = await request(app).get("/api/flights");
   assert.equal(before.body.items.length, 0);
 
-  const invalid = await request(app).post("/api/flights").send({});
+  const invalid = await postFlight(app).send({});
   assert.equal(invalid.status, 422);
 
   const after = await request(app).get("/api/flights");
@@ -588,8 +596,7 @@ test("invalid request does not mutate collection", async (t) => {
 
 test("isolation A: creating a flight does not leak across memory databases", async (t) => {
   const { app } = createTestContext(t);
-  const created = await request(app)
-    .post("/api/flights")
+  const created = await postFlight(app)
     .send(makeValidFlight());
   assert.equal(created.status, 201);
 
@@ -651,8 +658,7 @@ test("flight persists after closing and reopening the same database file", async
     db1 = openDatabase(databasePath);
     const app1 = createAppWithRepository(createSqliteFlightRepository(db1));
 
-    const created = await request(app1)
-      .post("/api/flights")
+    const created = await postFlight(app1)
       .send(makeValidFlight({ flightNumber: "VN999" }));
 
     assert.equal(created.status, 201);
@@ -694,8 +700,7 @@ test("two apps sharing one database file see the same source of truth", async ()
     const appA = createAppWithRepository(createSqliteFlightRepository(dbA));
     const appB = createAppWithRepository(createSqliteFlightRepository(dbB));
 
-    const created = await request(appA)
-      .post("/api/flights")
+    const created = await postFlight(appA)
       .send(makeValidFlight({ flightNumber: "VN777" }));
     assert.equal(created.status, 201);
 
@@ -703,8 +708,7 @@ test("two apps sharing one database file see the same source of truth", async ()
     assert.equal(fromB.status, 200);
     assert.equal(fromB.body.flightNumber, "VN777");
 
-    const duplicate = await request(appB)
-      .post("/api/flights")
+    const duplicate = await postFlight(appB)
       .send(
         makeValidFlight({
           flightNumber: "VN777",
@@ -740,8 +744,7 @@ test("GET /api/flights returns the requested page", async (t) => {
     const arrivalDate = new Date(departureAt);
     arrivalDate.setUTCHours(arrivalDate.getUTCHours() + 2);
 
-    const response = await request(app)
-      .post("/api/flights")
+    const response = await postFlight(app)
       .send(
         makeValidFlight({
           flightNumber: `VN10${index + 1}`,
@@ -800,8 +803,7 @@ test("GET /api/flights rejects repeated page parameters", async (t) => {
 test("GET /api/flights returns an empty page beyond the end", async (t) => {
   const { app } = createTestContext(t);
 
-  const created = await request(app)
-    .post("/api/flights")
+  const created = await postFlight(app)
     .send(makeValidFlight());
 
   assert.equal(created.status, 201);

@@ -1,6 +1,7 @@
 export type AppConfig = Readonly<{
   port: number;
   databasePath: string;
+  adminApiKey: string;
 }>;
 
 type Environment = Record<string, string | undefined>;
@@ -13,10 +14,35 @@ const DEFAULT_DATABASE_PATH = "data/booking.db";
  * Does not read process.env — caller passes the environment object.
  */
 export function parseConfig(environment: Environment): AppConfig {
+  const port = parsePort(environment.PORT);
+  const databasePath = parseDatabasePath(environment.DATABASE_PATH);
+  const adminApiKey = parseAdminApiKey(environment.ADMIN_API_KEY);
+
   return {
-    port: parsePort(environment.PORT),
-    databasePath: parseDatabasePath(environment.DATABASE_PATH),
+    port,
+    databasePath,
+    adminApiKey,
   };
+}
+
+function parseAdminApiKey(raw: string | undefined): string {
+  if (raw === undefined) {
+    throw new Error("Missing required configuration: ADMIN_API_KEY");
+  }
+
+  const adminApiKey = raw.trim();
+
+  if (adminApiKey.length === 0) {
+    throw new Error("Invalid ADMIN_API_KEY: value must not be blank");
+  }
+
+  if (adminApiKey.length < 16) {
+    throw new Error(
+      "Invalid ADMIN_API_KEY: expected at least 16 characters",
+    );
+  }
+
+  return adminApiKey;
 }
 
 function parsePort(raw: string | undefined): number {

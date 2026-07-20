@@ -12,6 +12,8 @@ import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repos
 import { createHealthChecks } from "../src/health/health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 
+const TEST_ADMIN_API_KEY = "test-admin-key-123456";
+
 type MemoryLogEntry = {
   level: "info" | "warn" | "error";
   message: string;
@@ -72,6 +74,7 @@ function createTestContext(t: TestContext) {
     listFlights,
     logger,
     healthChecks: createHealthChecks(database),
+    adminApiKey: TEST_ADMIN_API_KEY,
   });
 
   t.after(() => {
@@ -183,6 +186,7 @@ test("logs unexpected errors with request id without leaking them to client", as
         };
       },
     },
+    adminApiKey: TEST_ADMIN_API_KEY,
   });
 
   const response = await request(app)

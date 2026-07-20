@@ -1,5 +1,6 @@
 import express from "express";
 
+import { createApiKeyAuthMiddleware } from "./auth/api-key-auth.js";
 import type { CreateFlight } from "./flights/create-flight.js";
 import type { FlightRepository } from "./flights/flight-repository.js";
 import type { ListFlights } from "./flights/list-flights.js";
@@ -18,6 +19,7 @@ export type AppDependencies = {
   listFlights: ListFlights;
   logger: Logger;
   healthChecks: HealthChecks;
+  adminApiKey: string;
 };
 
 export function createApp(dependencies: AppDependencies) {
@@ -27,8 +29,13 @@ export function createApp(dependencies: AppDependencies) {
     listFlights,
     logger,
     healthChecks,
+    adminApiKey,
   } = dependencies;
   const app = express();
+
+  const requireAdminApiKey = createApiKeyAuthMiddleware({
+    adminApiKey,
+  });
 
   app.use(createRequestObservabilityMiddleware(logger));
   app.use(express.json({ strict: false }));
@@ -86,7 +93,7 @@ export function createApp(dependencies: AppDependencies) {
     return res.status(200).json(flight);
   });
 
-  app.post("/api/flights", (req, res) => {
+  app.post("/api/flights", requireAdminApiKey, (req, res) => {
     const result = createFlight(req.body);
 
     if (result.outcome === "validation_failed") {

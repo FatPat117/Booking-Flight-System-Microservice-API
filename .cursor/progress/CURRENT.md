@@ -1,22 +1,23 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 11
-**Current day:** Day 11 — Liveness & Readiness
+**Last completed day:** Day 12
+**Current day:** Day 12 — API Key Authentication
 **Status:** Completed — awaiting mentor review / commit
 
-## Day 11 delivered
+## Day 12 delivered
 
 ```text
-GET /live   → process liveness
-GET /health → alias for /live
-GET /ready  → SQLite SELECT 1 → 200 | 503
+ADMIN_API_KEY required in config (min 16 chars, fail-fast)
+POST /api/flights → Authorization: Bearer <key>
+GET + health endpoints remain public
 ```
 
-- `src/health/health-checks.ts`
-- Wired into AppDependencies + index.ts
-- Tests: health.api + health-checks unit
-- Quality gate: **91 tests pass**
+- `src/auth/api-key-auth.ts`
+- Config + tests updated
+- `tests/api-key-auth.test.ts`
+- `.env.example` + README
+- Quality gate: **101 tests pass**
 
 ## Next
 
-Day 12 when assigned (auth / who can create Flight).
+Day 13 when assigned (audit trail for write actions).

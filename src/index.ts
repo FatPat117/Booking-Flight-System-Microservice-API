@@ -35,6 +35,7 @@ const app = createApp({
   listFlights,
   logger,
   healthChecks,
+  adminApiKey: config.adminApiKey,
 });
 
 const server = app.listen(config.port, () => {

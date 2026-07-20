@@ -12,6 +12,8 @@ import type { HealthChecks } from "../src/health/health-checks.js";
 import { createHealthChecks } from "../src/health/health-checks.js";
 import type { Logger } from "../src/observability/logger.js";
 
+const TEST_ADMIN_API_KEY = "test-admin-key-123456";
+
 function createMemoryLogger(): Logger {
   return {
     info() {},
@@ -42,6 +44,7 @@ function createTestContext(t: TestContext) {
     listFlights,
     logger: createMemoryLogger(),
     healthChecks,
+    adminApiKey: TEST_ADMIN_API_KEY,
   });
 
   t.after(() => {
@@ -126,6 +129,7 @@ test("GET /ready returns 503 when database is unavailable", async (t) => {
     listFlights,
     logger: createMemoryLogger(),
     healthChecks: unhealthyHealthChecks,
+    adminApiKey: TEST_ADMIN_API_KEY,
   });
 
   t.after(() => {
