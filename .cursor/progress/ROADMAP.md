@@ -16,7 +16,8 @@
 | 10 | Request ID + structured logs | Multi-layer stack; 500s hard to correlate |
 | 11 | Liveness + readiness (SQLite) | /health only proved process was alive |
 | 12 | API key auth for POST /api/flights | Unprotected write endpoint |
-| 13+ | Audit trail for write actions (when needed) | After knowing who may write |
+| 13 | Audit trail (FLIGHT_CREATED) | Who/when/requestId not persisted after write |
+| 14+ | Transaction boundary | Flight + audit not atomic (Day 13 limitation) |
 
 Final destination (architecture level only):
 

@@ -9,6 +9,7 @@ import type { DatabaseSync } from "node:sqlite";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
+import { createSqliteAuditRecorder } from "../src/audit/sqlite-audit-recorder.js";
 import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
@@ -17,6 +18,7 @@ import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repos
 import type { HealthChecks } from "../src/health/health-checks.js";
 import { createHealthChecks } from "../src/health/health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
+import { getRequestContext } from "../src/observability/request-context.js";
 
 const TEST_ADMIN_API_KEY = "test-admin-key-123456";
 
@@ -96,12 +98,19 @@ const healthyHealthChecks: HealthChecks = {
 };
 
 function createAppWithRepository(
+  database: DatabaseSync,
   flightRepository: FlightRepository,
   healthChecks: HealthChecks = healthyHealthChecks,
 ) {
+  const auditRecorder = createSqliteAuditRecorder(database);
+
   const createFlight = createCreateFlight({
     flightRepository,
+    auditRecorder,
     generateId: () => crypto.randomUUID(),
+    generateAuditId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
   });
 
   const listFlights = createListFlights({
@@ -139,6 +148,7 @@ function createTestContext(t: TestContext): {
   const database = openDatabase(":memory:");
   const repository = createSqliteFlightRepository(database);
   const app = createAppWithRepository(
+    database,
     repository,
     createHealthChecks(database),
   );
@@ -633,7 +643,8 @@ test("repository unexpected failure returns generic 500 without leaking internal
     },
   };
 
-  const app = createAppWithRepository(failingRepository);
+  const database = openDatabase(":memory:");
+  const app = createAppWithRepository(database, failingRepository);
   const response = await request(app).get("/api/flights");
 
   assert.equal(response.status, 500);
@@ -656,7 +667,7 @@ test("flight persists after closing and reopening the same database file", async
 
   try {
     db1 = openDatabase(databasePath);
-    const app1 = createAppWithRepository(createSqliteFlightRepository(db1));
+    const app1 = createAppWithRepository(db1, createSqliteFlightRepository(db1));
 
     const created = await postFlight(app1)
       .send(makeValidFlight({ flightNumber: "VN999" }));
@@ -668,7 +679,7 @@ test("flight persists after closing and reopening the same database file", async
     db1 = undefined;
 
     db2 = openDatabase(databasePath);
-    const app2 = createAppWithRepository(createSqliteFlightRepository(db2));
+    const app2 = createAppWithRepository(db2, createSqliteFlightRepository(db2));
 
     const listed = await request(app2).get("/api/flights");
     assert.equal(listed.status, 200);
@@ -697,8 +708,8 @@ test("two apps sharing one database file see the same source of truth", async ()
   try {
     dbA = openDatabase(databasePath);
     dbB = openDatabase(databasePath);
-    const appA = createAppWithRepository(createSqliteFlightRepository(dbA));
-    const appB = createAppWithRepository(createSqliteFlightRepository(dbB));
+    const appA = createAppWithRepository(dbA, createSqliteFlightRepository(dbA));
+    const appB = createAppWithRepository(dbB, createSqliteFlightRepository(dbB));
 
     const created = await postFlight(appA)
       .send(makeValidFlight({ flightNumber: "VN777" }));
@@ -820,4 +831,137 @@ test("GET /api/flights returns an empty page beyond the end", async (t) => {
     totalItems: 1,
     totalPages: 1,
   });
+});
+
+// ---------------------------------------------------------------------------
+// Audit trail
+// ---------------------------------------------------------------------------
+
+test("POST /api/flights records an audit log when created", async (t) => {
+  const { app, database } = createTestContext(t);
+
+  const response = await request(app)
+    .post("/api/flights")
+    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .set("x-request-id", "audit-request-1")
+    .send(makeValidFlight());
+
+  assert.equal(response.status, 201);
+
+  const createdFlightId = response.body.id;
+
+  const row = database
+    .prepare(
+      `
+        SELECT
+          action,
+          actor_type,
+          actor_id,
+          target_type,
+          target_id,
+          request_id,
+          metadata_json
+        FROM audit_logs
+        WHERE target_type = ?
+          AND target_id = ?
+        `,
+    )
+    .get("flight", createdFlightId) as
+    | {
+        action: string;
+        actor_type: string;
+        actor_id: string;
+        target_type: string;
+        target_id: string;
+        request_id: string | null;
+        metadata_json: string;
+      }
+    | undefined;
+
+  assert.ok(row);
+  assert.equal(row.action, "FLIGHT_CREATED");
+  assert.equal(row.actor_type, "admin_api_key");
+  assert.equal(row.actor_id, "admin");
+  assert.equal(row.target_type, "flight");
+  assert.equal(row.target_id, createdFlightId);
+  assert.equal(row.request_id, "audit-request-1");
+  assert.deepEqual(JSON.parse(row.metadata_json), {
+    flightNumber: "VN123",
+    origin: "SGN",
+    destination: "HAN",
+  });
+});
+
+test("unauthenticated create request does not record audit", async (t) => {
+  const { app, database } = createTestContext(t);
+
+  const response = await request(app)
+    .post("/api/flights")
+    .send(makeValidFlight());
+
+  assert.equal(response.status, 401);
+
+  const countRow = database
+    .prepare(
+      `
+        SELECT COUNT(*) AS count
+        FROM audit_logs
+        `,
+    )
+    .get() as { count: number };
+
+  assert.equal(countRow.count, 0);
+});
+
+test("invalid create request does not record audit", async (t) => {
+  const { app, database } = createTestContext(t);
+
+  const response = await request(app)
+    .post("/api/flights")
+    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .send({});
+
+  assert.equal(response.status, 422);
+
+  const countRow = database
+    .prepare(
+      `
+        SELECT COUNT(*) AS count
+        FROM audit_logs
+        `,
+    )
+    .get() as { count: number };
+
+  assert.equal(countRow.count, 0);
+});
+
+test("duplicate create request does not record an additional audit log", async (t) => {
+  const { app, database } = createTestContext(t);
+
+  const payload = makeValidFlight();
+
+  const first = await request(app)
+    .post("/api/flights")
+    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .send(payload);
+
+  assert.equal(first.status, 201);
+
+  const duplicate = await request(app)
+    .post("/api/flights")
+    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .send(payload);
+
+  assert.equal(duplicate.status, 409);
+
+  const countRow = database
+    .prepare(
+      `
+        SELECT COUNT(*) AS count
+        FROM audit_logs
+        `,
+    )
+    .get() as { count: number };
+
+  assert.equal(countRow.count, 1);
 });

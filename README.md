@@ -2,7 +2,7 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 12)
+## Architecture (Day 13)
 
 ```text
 Environment / .env
@@ -11,6 +11,7 @@ Environment / .env
       ├── Console Logger
       ├── HealthChecks
       ├── SQLite FlightRepository
+      ├── SQLite AuditRecorder
       ├── CreateFlight / ListFlights
       └── API key auth (POST only)
             ↓
@@ -68,6 +69,39 @@ Missing or invalid credentials return `401 Unauthorized` with `WWW-Authenticate:
 
 This is minimal API key authentication — not JWT, OAuth, or role-based access control.
 
+## Audit trail
+
+Successful flight creation records an audit entry in the local SQLite database.
+
+Current audited action:
+
+| Action | Trigger |
+|---|---|
+| `FLIGHT_CREATED` | Successful `POST /api/flights` |
+
+Stored audit fields include:
+
+- audit id
+- action
+- actor type and id
+- target type and id
+- request id
+- occurred timestamp
+- metadata JSON
+
+Current actor model:
+
+```text
+actorType = admin_api_key
+actorId   = admin
+```
+
+Because the system currently uses one shared admin API key, audit logs do not identify an individual human user.
+
+Current audit recording is not transactionally atomic with flight creation yet.
+If the flight insert succeeds but audit insert fails, the system can temporarily produce a created flight without a matching audit row.
+This is intentionally deferred until a transaction boundary is introduced.
+
 ## Health endpoints
 
 ### GET /live
@@ -111,7 +145,8 @@ Request
   → express.json / routes
   → optional API key auth (POST /api/flights only)
   → CreateFlight | ListFlights | findById
-  → FlightRepository → SQLite
+  → FlightRepository → SQLite flights
+  → AuditRecorder → SQLite audit_logs (successful create only)
 ```
 
 Every response includes header `x-request-id` (generated or echoed from the client).
@@ -149,8 +184,13 @@ npm test
 npm start
 ```
 
+## Postman
+
+Import `postman/Booking-microservices.postman_collection.json` and `postman/Booking-microservices.local.postman_environment.json`. See `postman/README.md`.
+
 ## Current limitations
 
+- Flight insert and audit insert are not yet one atomic transaction
 - API key is a single shared secret (no per-user identity, rotation, or expiry)
 - Current health checks only verify SQLite with a lightweight `SELECT 1`
 - Logs go to console only (no transports / log level config)

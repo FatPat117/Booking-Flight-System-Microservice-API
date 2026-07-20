@@ -1,0 +1,289 @@
+{
+  "info": {
+    "name": "Booking Microservices (Day 13)",
+    "description": "Local API collection for the Booking-microservices-pitachiti learning project.\n\nProgress covered:\n- Day 9: paginated GET /api/flights\n- Day 10: x-request-id + structured logs\n- Day 11: /live, /health, /ready\n- Day 12: Bearer ADMIN_API_KEY for POST /api/flights\n- Day 13: FLIGHT_CREATED audit on successful create\n\nImport together with Booking-microservices.local.postman_environment.json.\nSet adminApiKey to match your local .env ADMIN_API_KEY.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "adminApiKey",
+      "value": "local-admin-key-123456789"
+    },
+    {
+      "key": "flightId",
+      "value": ""
+    },
+    {
+      "key": "requestId",
+      "value": "postman-{{$timestamp}}"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "description": "Public liveness and readiness checks (Day 11).",
+      "item": [
+        {
+          "name": "GET /live",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}",
+                "description": "Optional. Server echoes or generates one."
+              }
+            ],
+            "url": "{{baseUrl}}/live"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /ready",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/ready"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Flights (Read)",
+      "description": "Public read endpoints. No authentication required.",
+      "item": [
+        {
+          "name": "GET /api/flights",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/flights?page=1&pageSize=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "flights"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Default: 1"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20",
+                  "description": "Default: 20, max: 100"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/flights/:id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{flightId}}",
+            "description": "Uses {{flightId}} from a previous create. Run POST /api/flights first or set flightId manually."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Flights (Write)",
+      "description": "Protected write endpoint (Day 12). Requires Authorization: Bearer {{adminApiKey}}.\nSuccessful create also writes FLIGHT_CREATED audit (Day 13).",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{adminApiKey}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "POST /api/flights",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  if (body && body.id) {",
+                  "    pm.collectionVariables.set('flightId', body.id);",
+                  "    pm.environment.set('flightId', body.id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}",
+                "description": "Correlates request logs and audit_logs.request_id"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-08-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-08-10T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 120\n}"
+            },
+            "url": "{{baseUrl}}/api/flights",
+            "description": "201 Created + Location header.\nAudit: FLIGHT_CREATED with actor admin_api_key/admin."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/flights (duplicate)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}-duplicate"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-08-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-08-10T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 120\n}"
+            },
+            "url": "{{baseUrl}}/api/flights",
+            "description": "Run after a successful create with the same payload. Expect 409 FLIGHT_ALREADY_EXISTS. No extra audit row."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Examples (Errors)",
+      "description": "Quick manual checks for auth and validation behavior.",
+      "item": [
+        {
+          "name": "POST /api/flights (missing auth → 401)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}-no-auth"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN999\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-08-11T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-08-11T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 120\n}"
+            },
+            "url": "{{baseUrl}}/api/flights"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/flights (invalid body → 422)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminApiKey}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}-invalid"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/api/flights"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/flights (invalid page → 422)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}-bad-page"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights?page=0"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

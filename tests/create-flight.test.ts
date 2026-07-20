@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type {
+  AuditRecordInput,
+  AuditRecorder,
+} from "../src/audit/audit-recorder.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import type { Flight } from "../src/types.js";
+
+const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
 
 function makeValidRawInput(overrides: Record<string, unknown> = {}) {
   return {
@@ -17,6 +23,35 @@ function makeValidRawInput(overrides: Record<string, unknown> = {}) {
     availableSeats: 120,
     ...overrides,
   };
+}
+
+function createCapturingAuditRecorder() {
+  const records: AuditRecordInput[] = [];
+
+  const auditRecorder: AuditRecorder = {
+    record(input) {
+      records.push(input);
+    },
+  };
+
+  return {
+    auditRecorder,
+    records,
+  };
+}
+
+function createUseCase(
+  repository: FlightRepository,
+  auditRecorder: AuditRecorder = createCapturingAuditRecorder().auditRecorder,
+) {
+  return createCreateFlight({
+    flightRepository: repository,
+    auditRecorder,
+    generateId: () => "fixed-flight-id",
+    generateAuditId: () => "fixed-audit-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => FIXED_TIME,
+  });
 }
 
 test("valid input creates a normalized flight via repository", () => {
@@ -34,10 +69,14 @@ test("valid input creates a normalized flight via repository", () => {
 
   const createFlight = createCreateFlight({
     flightRepository: repository,
+    auditRecorder: createCapturingAuditRecorder().auditRecorder,
     generateId: () => {
       generateIdCalls += 1;
       return "flight-fixed-id";
     },
+    generateAuditId: () => "fixed-audit-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => FIXED_TIME,
   });
 
   const result = createFlight(makeValidRawInput());
@@ -72,12 +111,18 @@ test("invalid input does not generate ID or call repository", () => {
     },
   };
 
+  const { auditRecorder, records } = createCapturingAuditRecorder();
+
   const createFlight = createCreateFlight({
     flightRepository: repository,
+    auditRecorder,
     generateId: () => {
       generateIdCalls += 1;
       return "should-not-be-used";
     },
+    generateAuditId: () => "fixed-audit-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => FIXED_TIME,
   });
 
   const result = createFlight({});
@@ -90,6 +135,7 @@ test("invalid input does not generate ID or call repository", () => {
   assert.ok(result.issues.length > 0);
   assert.equal(createCalls, 0);
   assert.equal(generateIdCalls, 0);
+  assert.deepEqual(records, []);
 });
 
 test("repository duplicate becomes application duplicate", () => {
@@ -101,13 +147,12 @@ test("repository duplicate becomes application duplicate", () => {
     },
   };
 
-  const createFlight = createCreateFlight({
-    flightRepository: repository,
-    generateId: () => "known-id",
-  });
+  const { auditRecorder, records } = createCapturingAuditRecorder();
+  const createFlight = createUseCase(repository, auditRecorder);
 
   const result = createFlight(makeValidRawInput());
   assert.equal(result.outcome, "duplicate");
+  assert.deepEqual(records, []);
 });
 
 test("ID generator value is passed to repository", () => {
@@ -122,13 +167,10 @@ test("ID generator value is passed to repository", () => {
     },
   };
 
-  const createFlight = createCreateFlight({
-    flightRepository: repository,
-    generateId: () => "known-id",
-  });
+  const createFlight = createUseCase(repository);
 
   createFlight(makeValidRawInput());
-  assert.equal(persistedId, "known-id");
+  assert.equal(persistedId, "fixed-flight-id");
 });
 
 test("unexpected repository failure is not swallowed", () => {
@@ -140,14 +182,144 @@ test("unexpected repository failure is not swallowed", () => {
     },
   };
 
-  const createFlight = createCreateFlight({
-    flightRepository: repository,
-    generateId: () => "known-id",
-  });
+  const createFlight = createUseCase(repository);
 
   assert.throws(
     () => createFlight(makeValidRawInput()),
     (error: unknown) =>
       error instanceof Error && error.message === "database failure",
+  );
+});
+
+test("records audit log when flight is created", () => {
+  const repository: FlightRepository = {
+    findPage: () => ({ items: [], totalItems: 0 }),
+    findById: () => undefined,
+    create() {
+      return { outcome: "created" };
+    },
+  };
+
+  const { auditRecorder, records } = createCapturingAuditRecorder();
+
+  const createFlight = createCreateFlight({
+    flightRepository: repository,
+    auditRecorder,
+    generateId: () => "fixed-flight-id",
+    generateAuditId: () => "fixed-audit-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const result = createFlight(makeValidRawInput());
+
+  assert.equal(result.outcome, "created");
+
+  assert.deepEqual(records, [
+    {
+      id: "fixed-audit-id",
+      action: "FLIGHT_CREATED",
+      actor: {
+        type: "admin_api_key",
+        id: "admin",
+      },
+      target: {
+        type: "flight",
+        id: "fixed-flight-id",
+      },
+      requestId: "fixed-request-id",
+      occurredAt: "2026-07-20T00:00:00.000Z",
+      metadata: {
+        flightNumber: "VN123",
+        origin: "SGN",
+        destination: "HAN",
+      },
+    },
+  ]);
+});
+
+test("does not record audit when validation fails", () => {
+  let repositoryCreateCalls = 0;
+
+  const repository: FlightRepository = {
+    findPage: () => ({ items: [], totalItems: 0 }),
+    findById: () => undefined,
+    create() {
+      repositoryCreateCalls += 1;
+      return { outcome: "created" };
+    },
+  };
+
+  const { auditRecorder, records } = createCapturingAuditRecorder();
+
+  const createFlight = createCreateFlight({
+    flightRepository: repository,
+    auditRecorder,
+    generateId: () => "fixed-flight-id",
+    generateAuditId: () => "fixed-audit-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const result = createFlight({});
+
+  assert.equal(result.outcome, "validation_failed");
+  assert.equal(repositoryCreateCalls, 0);
+  assert.deepEqual(records, []);
+});
+
+test("does not record audit when flight is duplicate", () => {
+  const repository: FlightRepository = {
+    findPage: () => ({ items: [], totalItems: 0 }),
+    findById: () => undefined,
+    create() {
+      return { outcome: "duplicate" };
+    },
+  };
+
+  const { auditRecorder, records } = createCapturingAuditRecorder();
+
+  const createFlight = createCreateFlight({
+    flightRepository: repository,
+    auditRecorder,
+    generateId: () => "fixed-flight-id",
+    generateAuditId: () => "fixed-audit-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const result = createFlight(makeValidRawInput());
+
+  assert.equal(result.outcome, "duplicate");
+  assert.deepEqual(records, []);
+});
+
+test("propagates audit recorder failures", () => {
+  const repository: FlightRepository = {
+    findPage: () => ({ items: [], totalItems: 0 }),
+    findById: () => undefined,
+    create() {
+      return { outcome: "created" };
+    },
+  };
+
+  const failingAuditRecorder: AuditRecorder = {
+    record() {
+      throw new Error("audit database failure");
+    },
+  };
+
+  const createFlight = createCreateFlight({
+    flightRepository: repository,
+    auditRecorder: failingAuditRecorder,
+    generateId: () => "fixed-flight-id",
+    generateAuditId: () => "fixed-audit-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  assert.throws(
+    () => createFlight(makeValidRawInput()),
+    /audit database failure/,
   );
 });

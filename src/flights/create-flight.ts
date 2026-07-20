@@ -1,3 +1,4 @@
+import type { AuditRecorder } from "../audit/audit-recorder.js";
 import type { Flight, ValidationIssue } from "../types.js";
 import type { FlightRepository } from "./flight-repository.js";
 import { validateCreateFlightInput } from "./flight-validation.js";
@@ -11,7 +12,11 @@ export type CreateFlight = (input: unknown) => CreateFlightResult;
 
 type CreateFlightDependencies = {
   flightRepository: FlightRepository;
+  auditRecorder: AuditRecorder;
   generateId: () => string;
+  generateAuditId: () => string;
+  getRequestId: () => string | undefined;
+  getCurrentTime: () => Date;
 };
 
 /**
@@ -21,7 +26,14 @@ type CreateFlightDependencies = {
 export function createCreateFlight(
   dependencies: CreateFlightDependencies,
 ): CreateFlight {
-  const { flightRepository, generateId } = dependencies;
+  const {
+    flightRepository,
+    auditRecorder,
+    generateId,
+    generateAuditId,
+    getRequestId,
+    getCurrentTime,
+  } = dependencies;
 
   return (input: unknown): CreateFlightResult => {
     const validation = validateCreateFlightInput(input);
@@ -52,6 +64,28 @@ export function createCreateFlight(
     if (persistResult.outcome === "duplicate") {
       return { outcome: "duplicate" };
     }
+
+    const requestId = getRequestId();
+
+    auditRecorder.record({
+      id: generateAuditId(),
+      action: "FLIGHT_CREATED",
+      actor: {
+        type: "admin_api_key",
+        id: "admin",
+      },
+      target: {
+        type: "flight",
+        id: flight.id,
+      },
+      ...(requestId === undefined ? {} : { requestId }),
+      occurredAt: getCurrentTime().toISOString(),
+      metadata: {
+        flightNumber: flight.flightNumber,
+        origin: flight.origin,
+        destination: flight.destination,
+      },
+    });
 
     return { outcome: "created", flight };
   };

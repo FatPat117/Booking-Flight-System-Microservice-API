@@ -4,6 +4,7 @@ import type { TestContext } from "node:test";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
+import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createListFlights } from "../src/flights/list-flights.js";
@@ -12,6 +13,12 @@ import { createHealthChecks } from "../src/health/health-checks.js";
 import type { Logger } from "../src/observability/logger.js";
 
 const TEST_ADMIN_API_KEY = "test-admin-key-123456";
+
+function createNoopAuditRecorder(): AuditRecorder {
+  return {
+    record() {},
+  };
+}
 
 type FlightPayload = {
   flightNumber: string;
@@ -54,7 +61,11 @@ function createTestContext(t: TestContext) {
 
   const createFlight = createCreateFlight({
     flightRepository,
+    auditRecorder: createNoopAuditRecorder(),
     generateId: () => "fixed-flight-id",
+    generateAuditId: () => "fixed-audit-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
   });
 
   const listFlights = createListFlights({
