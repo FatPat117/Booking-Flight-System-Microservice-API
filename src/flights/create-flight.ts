@@ -1,4 +1,5 @@
 import type { AuditRecorder } from "../audit/audit-recorder.js";
+import type { TransactionRunner } from "../transactions/transaction-runner.js";
 import type { Flight, ValidationIssue } from "../types.js";
 import type { FlightRepository } from "./flight-repository.js";
 import { validateCreateFlightInput } from "./flight-validation.js";
@@ -13,6 +14,7 @@ export type CreateFlight = (input: unknown) => CreateFlightResult;
 type CreateFlightDependencies = {
   flightRepository: FlightRepository;
   auditRecorder: AuditRecorder;
+  transactionRunner: TransactionRunner;
   generateId: () => string;
   generateAuditId: () => string;
   getRequestId: () => string | undefined;
@@ -29,6 +31,7 @@ export function createCreateFlight(
   const {
     flightRepository,
     auditRecorder,
+    transactionRunner,
     generateId,
     generateAuditId,
     getRequestId,
@@ -59,34 +62,36 @@ export function createCreateFlight(
       availableSeats: validated.availableSeats,
     };
 
-    const persistResult = flightRepository.create(flight);
+    return transactionRunner.run(() => {
+      const persistResult = flightRepository.create(flight);
 
-    if (persistResult.outcome === "duplicate") {
-      return { outcome: "duplicate" };
-    }
+      if (persistResult.outcome === "duplicate") {
+        return { outcome: "duplicate" };
+      }
 
-    const requestId = getRequestId();
+      const requestId = getRequestId();
 
-    auditRecorder.record({
-      id: generateAuditId(),
-      action: "FLIGHT_CREATED",
-      actor: {
-        type: "admin_api_key",
-        id: "admin",
-      },
-      target: {
-        type: "flight",
-        id: flight.id,
-      },
-      ...(requestId === undefined ? {} : { requestId }),
-      occurredAt: getCurrentTime().toISOString(),
-      metadata: {
-        flightNumber: flight.flightNumber,
-        origin: flight.origin,
-        destination: flight.destination,
-      },
+      auditRecorder.record({
+        id: generateAuditId(),
+        action: "FLIGHT_CREATED",
+        actor: {
+          type: "admin_api_key",
+          id: "admin",
+        },
+        target: {
+          type: "flight",
+          id: flight.id,
+        },
+        ...(requestId === undefined ? {} : { requestId }),
+        occurredAt: getCurrentTime().toISOString(),
+        metadata: {
+          flightNumber: flight.flightNumber,
+          origin: flight.origin,
+          destination: flight.destination,
+        },
+      });
+
+      return { outcome: "created", flight };
     });
-
-    return { outcome: "created", flight };
   };
 }

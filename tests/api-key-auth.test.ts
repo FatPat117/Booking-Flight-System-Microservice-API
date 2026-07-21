@@ -11,12 +11,21 @@ import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 import { createHealthChecks } from "../src/health/health-checks.js";
 import type { Logger } from "../src/observability/logger.js";
+import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 
 const TEST_ADMIN_API_KEY = "test-admin-key-123456";
 
 function createNoopAuditRecorder(): AuditRecorder {
   return {
     record() {},
+  };
+}
+
+function createPassthroughTransactionRunner(): TransactionRunner {
+  return {
+    run(operation) {
+      return operation();
+    },
   };
 }
 
@@ -62,6 +71,7 @@ function createTestContext(t: TestContext) {
   const createFlight = createCreateFlight({
     flightRepository,
     auditRecorder: createNoopAuditRecorder(),
+    transactionRunner: createPassthroughTransactionRunner(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
     getRequestId: () => "fixed-request-id",

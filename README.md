@@ -2,7 +2,7 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 13)
+## Architecture (Day 14)
 
 ```text
 Environment / .env
@@ -12,6 +12,7 @@ Environment / .env
       ├── HealthChecks
       ├── SQLite FlightRepository
       ├── SQLite AuditRecorder
+      ├── SQLite TransactionRunner
       ├── CreateFlight / ListFlights
       └── API key auth (POST only)
             ↓
@@ -98,9 +99,9 @@ actorId   = admin
 
 Because the system currently uses one shared admin API key, audit logs do not identify an individual human user.
 
-Current audit recording is not transactionally atomic with flight creation yet.
-If the flight insert succeeds but audit insert fails, the system can temporarily produce a created flight without a matching audit row.
-This is intentionally deferred until a transaction boundary is introduced.
+Flight creation and its `FLIGHT_CREATED` audit record are written inside a single SQLite transaction.
+
+If audit recording fails after the flight insert, the transaction is rolled back and the flight is not persisted.
 
 ## Health endpoints
 
@@ -145,8 +146,9 @@ Request
   → express.json / routes
   → optional API key auth (POST /api/flights only)
   → CreateFlight | ListFlights | findById
-  → FlightRepository → SQLite flights
-  → AuditRecorder → SQLite audit_logs (successful create only)
+  → TransactionRunner (create only)
+      ├── FlightRepository → SQLite flights
+      └── AuditRecorder → SQLite audit_logs
 ```
 
 Every response includes header `x-request-id` (generated or echoed from the client).
@@ -190,7 +192,10 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 
 ## Current limitations
 
-- Flight insert and audit insert are not yet one atomic transaction
+- Transaction support is local to one SQLite database connection
+- No nested transaction or savepoint support yet
+- No cross-service or distributed transaction
+- No outbox pattern yet
 - API key is a single shared secret (no per-user identity, rotation, or expiry)
 - Current health checks only verify SQLite with a lightweight `SELECT 1`
 - Logs go to console only (no transports / log level config)

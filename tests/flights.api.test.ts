@@ -9,6 +9,7 @@ import type { DatabaseSync } from "node:sqlite";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
+import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { createSqliteAuditRecorder } from "../src/audit/sqlite-audit-recorder.js";
 import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
@@ -19,6 +20,7 @@ import type { HealthChecks } from "../src/health/health-checks.js";
 import { createHealthChecks } from "../src/health/health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 import { getRequestContext } from "../src/observability/request-context.js";
+import { createSqliteTransactionRunner } from "../src/transactions/sqlite-transaction-runner.js";
 
 const TEST_ADMIN_API_KEY = "test-admin-key-123456";
 
@@ -103,10 +105,12 @@ function createAppWithRepository(
   healthChecks: HealthChecks = healthyHealthChecks,
 ) {
   const auditRecorder = createSqliteAuditRecorder(database);
+  const transactionRunner = createSqliteTransactionRunner(database);
 
   const createFlight = createCreateFlight({
     flightRepository,
     auditRecorder,
+    transactionRunner,
     generateId: () => crypto.randomUUID(),
     generateAuditId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
@@ -850,6 +854,18 @@ test("POST /api/flights records an audit log when created", async (t) => {
 
   const createdFlightId = response.body.id;
 
+  const flightRow = database
+    .prepare(
+      `
+        SELECT id
+        FROM flights
+        WHERE id = ?
+        `,
+    )
+    .get(createdFlightId);
+
+  assert.ok(flightRow);
+
   const row = database
     .prepare(
       `
@@ -964,4 +980,78 @@ test("duplicate create request does not record an additional audit log", async (
     .get() as { count: number };
 
   assert.equal(countRow.count, 1);
+});
+
+test("rolls back flight creation when audit recording fails", async (t) => {
+  const database = openDatabase(":memory:");
+
+  t.after(() => {
+    database.close();
+  });
+
+  const flightRepository = createSqliteFlightRepository(database);
+
+  const failingAuditRecorder: AuditRecorder = {
+    record() {
+      throw new Error("audit database failure");
+    },
+  };
+
+  const transactionRunner = createSqliteTransactionRunner(database);
+
+  const createFlight = createCreateFlight({
+    flightRepository,
+    auditRecorder: failingAuditRecorder,
+    transactionRunner,
+    generateId: () => "rollback-flight-id",
+    generateAuditId: () => "rollback-audit-id",
+    getRequestId: () => "rollback-request-id",
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+  });
+
+  const listFlights = createListFlights({
+    flightRepository,
+  });
+
+  const { logger } = createMemoryLogger();
+
+  const app = createApp({
+    flightRepository,
+    createFlight,
+    listFlights,
+    logger,
+    healthChecks: createHealthChecks(database),
+    adminApiKey: TEST_ADMIN_API_KEY,
+  });
+
+  const response = await request(app)
+    .post("/api/flights")
+    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .send(makeValidFlight());
+
+  assert.equal(response.status, 500);
+  assert.equal(response.body.error.code, "INTERNAL_SERVER_ERROR");
+
+  const flightRow = database
+    .prepare(
+      `
+        SELECT id
+        FROM flights
+        WHERE id = ?
+        `,
+    )
+    .get("rollback-flight-id");
+
+  assert.equal(flightRow, undefined);
+
+  const auditCount = database
+    .prepare(
+      `
+        SELECT COUNT(*) AS count
+        FROM audit_logs
+        `,
+    )
+    .get() as { count: number };
+
+  assert.equal(auditCount.count, 0);
 });

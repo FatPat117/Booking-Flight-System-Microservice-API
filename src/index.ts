@@ -11,6 +11,7 @@ import { createSqliteFlightRepository } from "./flights/sqlite-flight-repository
 import { createHealthChecks } from "./health/health-checks.js";
 import { createConsoleLogger } from "./observability/logger.js";
 import { getRequestContext } from "./observability/request-context.js";
+import { createSqliteTransactionRunner } from "./transactions/sqlite-transaction-runner.js";
 
 const config = parseConfig(process.env);
 const logger = createConsoleLogger();
@@ -21,11 +22,13 @@ mkdirSync(dirname(databasePath), { recursive: true });
 const database = openDatabase(databasePath);
 const flightRepository = createSqliteFlightRepository(database);
 const auditRecorder = createSqliteAuditRecorder(database);
+const transactionRunner = createSqliteTransactionRunner(database);
 const healthChecks = createHealthChecks(database);
 
 const createFlight = createCreateFlight({
   flightRepository,
   auditRecorder,
+  transactionRunner,
   generateId: () => crypto.randomUUID(),
   generateAuditId: () => crypto.randomUUID(),
   getRequestId: () => getRequestContext()?.requestId,

@@ -7,9 +7,18 @@ import type {
 } from "../src/audit/audit-recorder.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
+import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 import type { Flight } from "../src/types.js";
 
 const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
+
+function createPassthroughTransactionRunner(): TransactionRunner {
+  return {
+    run(operation) {
+      return operation();
+    },
+  };
+}
 
 function makeValidRawInput(overrides: Record<string, unknown> = {}) {
   return {
@@ -47,6 +56,7 @@ function createUseCase(
   return createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    transactionRunner: createPassthroughTransactionRunner(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
     getRequestId: () => "fixed-request-id",
@@ -70,6 +80,7 @@ test("valid input creates a normalized flight via repository", () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder: createCapturingAuditRecorder().auditRecorder,
+    transactionRunner: createPassthroughTransactionRunner(),
     generateId: () => {
       generateIdCalls += 1;
       return "flight-fixed-id";
@@ -116,6 +127,7 @@ test("invalid input does not generate ID or call repository", () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    transactionRunner: createPassthroughTransactionRunner(),
     generateId: () => {
       generateIdCalls += 1;
       return "should-not-be-used";
@@ -205,6 +217,7 @@ test("records audit log when flight is created", () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    transactionRunner: createPassthroughTransactionRunner(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
     getRequestId: () => "fixed-request-id",
@@ -255,6 +268,7 @@ test("does not record audit when validation fails", () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    transactionRunner: createPassthroughTransactionRunner(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
     getRequestId: () => "fixed-request-id",
@@ -282,6 +296,7 @@ test("does not record audit when flight is duplicate", () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    transactionRunner: createPassthroughTransactionRunner(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
     getRequestId: () => "fixed-request-id",
@@ -312,6 +327,7 @@ test("propagates audit recorder failures", () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder: failingAuditRecorder,
+    transactionRunner: createPassthroughTransactionRunner(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
     getRequestId: () => "fixed-request-id",
@@ -322,4 +338,76 @@ test("propagates audit recorder failures", () => {
     () => createFlight(makeValidRawInput()),
     /audit database failure/,
   );
+});
+
+test("does not open transaction when validation fails", () => {
+  let transactionCalls = 0;
+
+  const transactionRunner: TransactionRunner = {
+    run(operation) {
+      transactionCalls += 1;
+      return operation();
+    },
+  };
+
+  const repository: FlightRepository = {
+    findPage: () => ({ items: [], totalItems: 0 }),
+    findById: () => undefined,
+    create() {
+      return { outcome: "created" };
+    },
+  };
+
+  const { auditRecorder } = createCapturingAuditRecorder();
+
+  const createFlight = createCreateFlight({
+    flightRepository: repository,
+    auditRecorder,
+    transactionRunner,
+    generateId: () => "fixed-flight-id",
+    generateAuditId: () => "fixed-audit-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const result = createFlight({});
+
+  assert.equal(result.outcome, "validation_failed");
+  assert.equal(transactionCalls, 0);
+});
+
+test("runs successful create inside a transaction", () => {
+  let transactionCalls = 0;
+
+  const transactionRunner: TransactionRunner = {
+    run(operation) {
+      transactionCalls += 1;
+      return operation();
+    },
+  };
+
+  const repository: FlightRepository = {
+    findPage: () => ({ items: [], totalItems: 0 }),
+    findById: () => undefined,
+    create() {
+      return { outcome: "created" };
+    },
+  };
+
+  const { auditRecorder } = createCapturingAuditRecorder();
+
+  const createFlight = createCreateFlight({
+    flightRepository: repository,
+    auditRecorder,
+    transactionRunner,
+    generateId: () => "fixed-flight-id",
+    generateAuditId: () => "fixed-audit-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const result = createFlight(makeValidRawInput());
+
+  assert.equal(result.outcome, "created");
+  assert.equal(transactionCalls, 1);
 });

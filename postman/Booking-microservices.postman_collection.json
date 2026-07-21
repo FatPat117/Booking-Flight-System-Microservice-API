@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Booking Microservices (Day 13)",
-    "description": "Local API collection for the Booking-microservices-pitachiti learning project.\n\nProgress covered:\n- Day 9: paginated GET /api/flights\n- Day 10: x-request-id + structured logs\n- Day 11: /live, /health, /ready\n- Day 12: Bearer ADMIN_API_KEY for POST /api/flights\n- Day 13: FLIGHT_CREATED audit on successful create\n\nImport together with Booking-microservices.local.postman_environment.json.\nSet adminApiKey to match your local .env ADMIN_API_KEY.",
+    "name": "Booking Microservices (Day 14)",
+    "description": "Local API collection for the Booking-microservices-pitachiti learning project.\n\nProgress covered:\n- Day 9: paginated GET /api/flights\n- Day 10: x-request-id + structured logs\n- Day 11: /live, /health, /ready\n- Day 12: Bearer ADMIN_API_KEY for POST /api/flights\n- Day 13: FLIGHT_CREATED audit on successful create\n- Day 14: flight + audit in SQLite transaction\n\nImport together with Booking-microservices.local.postman_environment.json.\nSet adminApiKey to match your local .env ADMIN_API_KEY.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
