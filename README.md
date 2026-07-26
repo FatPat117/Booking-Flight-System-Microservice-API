@@ -2,12 +2,12 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 15)
+## Architecture (Day 16)
 
 ```text
 Environment / .env
   → parseConfig() → AppConfig
-  → Composition root (index.ts)
+  → createApplication()   ← Composition Root (src/bootstrap/application.ts)
       ├── openDatabase() → runMigrations()
       ├── Console Logger
       ├── HealthChecks
@@ -15,10 +15,12 @@ Environment / .env
       ├── SQLite AuditRecorder
       ├── SQLite TransactionRunner
       ├── CreateFlight / ListFlights
-      └── API key auth (POST only)
+      └── close() lifecycle
             ↓
-          Express
+          createApp() → Express (receives wired dependencies)
 ```
+
+Object creation happens only in the Composition Root. Routes and use cases receive dependencies; they do not `new` infrastructure themselves.
 
 ## Configuration
 
@@ -103,6 +105,22 @@ Because the system currently uses one shared admin API key, audit logs do not id
 Flight creation and its `FLIGHT_CREATED` audit record are written inside a single SQLite transaction.
 
 If audit recording fails after the flight insert, the transaction is rolled back and the flight is not persisted.
+
+## Composition Root (Manual DI)
+
+`createApplication()` is the single place that constructs and wires the object graph:
+
+```text
+Config + Logger
+  → Database
+  → Repository / AuditRecorder / TransactionRunner / HealthChecks
+  → CreateFlight / ListFlights
+  → Application { ... , close() }
+```
+
+`index.ts` only parses config, builds the application, hands dependencies to Express, and manages process shutdown via `application.close()`.
+
+This is constructor-style Dependency Injection without a DI framework. Frameworks such as NestJS / Inversify automate the same wiring later — they do not replace the idea.
 
 ## Database migrations
 
@@ -213,6 +231,9 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 
 ## Current limitations
 
+- Manual DI only (no DI container / NestJS / Inversify / tsyringe)
+- No background jobs yet
+- No Docker / container packaging yet
 - Transaction support is local to one SQLite database connection
 - No nested transaction or savepoint support yet
 - No cross-service or distributed transaction

@@ -19,7 +19,10 @@
 | 13 | Audit trail (FLIGHT_CREATED) | Who/when/requestId not persisted after write |
 | 14 | Transaction boundary | Flight + audit not atomic (Day 13 limitation) |
 | 15 | Database migrations | CREATE TABLE IF NOT EXISTS not enough for durable schema |
-| 16+ | Container / runtime packaging | App still runs as bare Node process |
+| 16 | Composition Root / Manual DI | Object graph will explode before jobs / broker / Docker |
+| 17 | Background Jobs | Work that must not block HTTP request path |
+| 18 | Docker | Package a composed app for repeatable runtime |
+| 19+ | RabbitMQ / events | Async boundaries after jobs exist |
 
 Final destination (architecture level only):
 
