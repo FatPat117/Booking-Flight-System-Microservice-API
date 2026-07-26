@@ -17,7 +17,9 @@
 | 11 | Liveness + readiness (SQLite) | /health only proved process was alive |
 | 12 | API key auth for POST /api/flights | Unprotected write endpoint |
 | 13 | Audit trail (FLIGHT_CREATED) | Who/when/requestId not persisted after write |
-| 14+ | Transaction boundary | Flight + audit not atomic (Day 13 limitation) |
+| 14 | Transaction boundary | Flight + audit not atomic (Day 13 limitation) |
+| 15 | Database migrations | CREATE TABLE IF NOT EXISTS not enough for durable schema |
+| 16+ | Container / runtime packaging | App still runs as bare Node process |
 
 Final destination (architecture level only):
 

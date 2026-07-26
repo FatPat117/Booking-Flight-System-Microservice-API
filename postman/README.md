@@ -24,7 +24,7 @@ npm run dev
 npm run build && npm start
 ```
 
-## Current coverage (Day 14)
+## Current coverage (Day 15)
 
 - Health: `GET /live`, `GET /health`, `GET /ready`
 - Flights read (public): `GET /api/flights`, `GET /api/flights/:id`

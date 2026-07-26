@@ -1,24 +1,26 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 14
-**Current day:** Day 14 — Transaction Boundary for Flight + Audit Writes
+**Last completed day:** Day 15
+**Current day:** Day 15 — Database Migrations
 **Status:** Completed — awaiting mentor review / commit
 
-## Day 14 delivered
+## Day 15 delivered
 
 ```text
-TransactionRunner.run() wraps flight insert + audit insert
-Audit failure → rollback flight → 500
-Validation stays outside transaction
+openDatabase() → runMigrations()
+schema_migrations tracks applied ids
+001_create_flights + 002_create_audit_logs
+Failed migration rolls back and fails startup
+Day 14 DBs adopted via CREATE TABLE IF NOT EXISTS
 ```
 
-- `src/transactions/transaction-runner.ts`
-- `src/transactions/sqlite-transaction-runner.ts`
-- `CreateFlight` injects `transactionRunner`
-- Tests: transaction-runner + rollback API test
-- README transaction boundary + local limitations
-- Quality gate: **116 tests pass**
+- `src/migrations/migration.ts`
+- `src/migrations/migrations.ts`
+- `src/migrations/migration-runner.ts`
+- `tests/migration-runner.test.ts`
+- README migrations section + limitations
+- Quality gate: **121 tests pass**
 
 ## Next
 
-Day 15 when assigned (schema evolution / migrations pressure).
+Day 16 when assigned (container / deployment runtime boundary).

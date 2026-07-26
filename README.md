@@ -2,12 +2,13 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 14)
+## Architecture (Day 15)
 
 ```text
 Environment / .env
   → parseConfig() → AppConfig
   → Composition root (index.ts)
+      ├── openDatabase() → runMigrations()
       ├── Console Logger
       ├── HealthChecks
       ├── SQLite FlightRepository
@@ -103,6 +104,26 @@ Flight creation and its `FLIGHT_CREATED` audit record are written inside a singl
 
 If audit recording fails after the flight insert, the transaction is rolled back and the flight is not persisted.
 
+## Database migrations
+
+The application runs SQLite migrations on startup.
+
+Applied migrations are tracked in the `schema_migrations` table.
+
+Current migrations:
+
+| ID | Purpose |
+|---|---|
+| `001_create_flights` | Creates the `flights` table |
+| `002_create_audit_logs` | Creates the `audit_logs` table and indexes |
+
+Migration behavior:
+
+- Pending migrations run in order.
+- Each migration is recorded after successful execution.
+- Failed migrations roll back and fail startup.
+- Existing Day 14 databases are adopted through `CREATE TABLE IF NOT EXISTS`.
+
 ## Health endpoints
 
 ### GET /live
@@ -196,11 +217,15 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No nested transaction or savepoint support yet
 - No cross-service or distributed transaction
 - No outbox pattern yet
+- No migration CLI yet
+- No down/rollback migrations
+- No schema diff tooling
+- No zero-downtime migration strategy
+- Migrations run in-process at application startup
 - API key is a single shared secret (no per-user identity, rotation, or expiry)
 - Current health checks only verify SQLite with a lightweight `SELECT 1`
 - Logs go to console only (no transports / log level config)
 - Offset pagination only (no cursor)
 - Configuration only covers port, database path, and admin API key
 - Use case / repository still synchronous
-- Schema via `CREATE TABLE IF NOT EXISTS` — not migrations
 - No JWT, OAuth, RBAC, metrics, distributed tracing, or events
