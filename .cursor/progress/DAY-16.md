@@ -24,8 +24,9 @@ Day 16+: scheduler, jobs, broker, publishers would make index hundreds of lines
 ```text
 src/bootstrap/application.ts
   createApplication() / Application / close()
+  database kept private (not on Application type)
 src/index.ts
-  parseConfig → createApplication → createApp → listen / shutdown
+  parseConfig → runtime → expressApp → httpServer / shutdown
 tests/application.test.ts
 README Composition Root section
 ROADMAP: Day 16 DI → Day 17 Jobs → Day 18 Docker → Day 19+ RabbitMQ
@@ -38,11 +39,11 @@ createApplication(config)
   → openDatabase → migrations
   → Repository / Audit / Transaction / Health / Logger
   → CreateFlight / ListFlights
-  → Application { ..., close() }
+  → Application { ..., close() }  // no public database
         ↓
-index.ts → createApp(deps from Application)
+index.ts → runtime / expressApp / httpServer
         ↓
-SIGINT/SIGTERM → application.close()
+SIGINT/SIGTERM → runtime.close()
 ```
 
 ## Quality gate
@@ -58,4 +59,5 @@ Manual DI only — no container framework
 createApp() still takes AppDependencies (tests keep fine-grained wiring)
 No GetFlight use case yet (route still uses repository.findById)
 No background jobs / Docker / message broker
+Bootstrap failure still surfaces as raw uncaught stack (ops log polish later)
 ```

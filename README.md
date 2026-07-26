@@ -2,7 +2,7 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 16)
+## Architecture (Day 17)
 
 ```text
 Environment / .env
@@ -11,11 +11,11 @@ Environment / .env
       ├── openDatabase() → runMigrations()
       ├── Console Logger
       ├── HealthChecks
-      ├── SQLite FlightRepository
-      ├── SQLite AuditRecorder
-      ├── SQLite TransactionRunner
+      ├── SQLite FlightRepository / AuditRecorder / TransactionRunner
       ├── CreateFlight / ListFlights
-      └── close() lifecycle
+      ├── JobScheduler (in-memory)
+      │     └── flights-summary-job
+      └── close() → stop jobs → close database
             ↓
           createApp() → Express (receives wired dependencies)
 ```
@@ -112,15 +112,36 @@ If audit recording fails after the flight insert, the transaction is rolled back
 
 ```text
 Config + Logger
-  → Database
+  → Database (private to Composition Root)
   → Repository / AuditRecorder / TransactionRunner / HealthChecks
   → CreateFlight / ListFlights
+  → JobScheduler + flights-summary-job (private; started on boot)
   → Application { ... , close() }
 ```
 
-`index.ts` only parses config, builds the application, hands dependencies to Express, and manages process shutdown via `application.close()`.
+The SQLite connection and job scheduler are not part of the public `Application` type. Consumers use repositories / health checks; shutdown goes through `close()` (stop jobs, then close database).
+
+`index.ts` only parses config, builds the runtime, hands dependencies to Express, and manages process shutdown via `runtime.close()`.
 
 This is constructor-style Dependency Injection without a DI framework. Frameworks such as NestJS / Inversify automate the same wiring later — they do not replace the idea.
+
+## Background jobs
+
+The process runs an in-memory `JobScheduler` alongside HTTP.
+
+Current job:
+
+| Job | Interval | Behavior |
+|-----|----------|----------|
+| `flights-summary-job` | 60s (default) | Logs `flights_summary` with total flight count via `Logger` |
+
+Design notes:
+
+- Jobs are independent of any HTTP request.
+- Failures are logged; they do not crash the process or other jobs.
+- Recursive `setTimeout` avoids overlapping runs of the same job.
+- Multi-instance deployments would duplicate job execution (accepted for Day 17 — no broker / distributed lock yet).
+- Flight count reuses `FlightRepository.findPage({ limit: 1 }).totalItems` (SQLite `COUNT(*)`), avoiding a new repository method for one consumer.
 
 ## Database migrations
 
@@ -232,7 +253,10 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 ## Current limitations
 
 - Manual DI only (no DI container / NestJS / Inversify / tsyringe)
-- No background jobs yet
+- In-process jobs only — duplicate execution if multiple instances run
+- No job persistence / retry after process crash
+- Job interval hardcoded in Composition Root (not env config yet)
+- No handler timeout if a job hangs forever
 - No Docker / container packaging yet
 - Transaction support is local to one SQLite database connection
 - No nested transaction or savepoint support yet

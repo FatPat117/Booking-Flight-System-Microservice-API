@@ -1,6 +1,5 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
 
 import { createSqliteAuditRecorder } from "../audit/sqlite-audit-recorder.js";
 import type { AppConfig } from "../config.js";
@@ -19,6 +18,8 @@ import {
   createHealthChecks,
   type HealthChecks,
 } from "../health/health-checks.js";
+import { createFlightsSummaryJob } from "../jobs/flights-summary-job.js";
+import { createInMemoryJobScheduler } from "../jobs/in-memory-job-scheduler.js";
 import {
   createConsoleLogger,
   type Logger,
@@ -26,14 +27,16 @@ import {
 import { getRequestContext } from "../observability/request-context.js";
 import { createSqliteTransactionRunner } from "../transactions/sqlite-transaction-runner.js";
 
+const DEFAULT_FLIGHTS_SUMMARY_INTERVAL_MS = 60_000;
+
 /**
  * Fully wired application graph.
  * Built once at the Composition Root; HTTP and future workers consume this object.
+ * SQLite + JobScheduler stay private — consumers use repositories / close().
  */
 export type Application = Readonly<{
   config: AppConfig;
   logger: Logger;
-  database: DatabaseSync;
   flightRepository: FlightRepository;
   createFlight: CreateFlight;
   listFlights: ListFlights;
@@ -44,6 +47,8 @@ export type Application = Readonly<{
 export type CreateApplicationOptions = {
   config: AppConfig;
   logger?: Logger;
+  /** Override for tests; production default is 60s */
+  flightsSummaryIntervalMs?: number;
 };
 
 /**
@@ -54,6 +59,8 @@ export function createApplication(
 ): Application {
   const { config } = options;
   const logger = options.logger ?? createConsoleLogger();
+  const flightsSummaryIntervalMs =
+    options.flightsSummaryIntervalMs ?? DEFAULT_FLIGHTS_SUMMARY_INTERVAL_MS;
 
   const databasePath = resolveDatabasePath(config.databasePath);
   ensureDatabaseDirectory(databasePath);
@@ -78,15 +85,26 @@ export function createApplication(
     flightRepository,
   });
 
+  const jobScheduler = createInMemoryJobScheduler(logger);
+  jobScheduler.register(
+    createFlightsSummaryJob({
+      flightRepository,
+      logger,
+      intervalMs: flightsSummaryIntervalMs,
+    }),
+  );
+  jobScheduler.start();
+
   return {
     config,
     logger,
-    database,
     flightRepository,
     createFlight,
     listFlights,
     healthChecks,
     close() {
+      // Stop jobs before closing DB so an in-flight handler cannot hit a closed connection.
+      jobScheduler.stop();
       database.close();
     },
   };

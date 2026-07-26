@@ -12,26 +12,33 @@ test("createApplication wires use cases and closes cleanly", () => {
   const directory = mkdtempSync(join(tmpdir(), "booking-application-"));
   const databasePath = join(directory, "booking.db");
 
-  const application = createApplication({
+  const runtime = createApplication({
     config: {
       port: 3000,
       databasePath,
       adminApiKey: TEST_ADMIN_API_KEY,
     },
+    // Keep background jobs quiet during composition smoke tests.
+    flightsSummaryIntervalMs: 60 * 60 * 1000,
   });
 
   try {
-    assert.equal(typeof application.createFlight, "function");
-    assert.equal(typeof application.listFlights, "function");
-    assert.equal(typeof application.flightRepository.findById, "function");
-    assert.equal(typeof application.healthChecks.checkReadiness, "function");
-    assert.equal(application.config.adminApiKey, TEST_ADMIN_API_KEY);
+    assert.equal(typeof runtime.createFlight, "function");
+    assert.equal(typeof runtime.listFlights, "function");
+    assert.equal(typeof runtime.flightRepository.findById, "function");
+    assert.equal(typeof runtime.healthChecks.checkReadiness, "function");
+    assert.equal(runtime.config.adminApiKey, TEST_ADMIN_API_KEY);
+    assert.equal(
+      "database" in runtime,
+      false,
+      "SQLite connection must stay private to the Composition Root",
+    );
 
-    const readiness = application.healthChecks.checkReadiness();
+    const readiness = runtime.healthChecks.checkReadiness();
     assert.equal(readiness.status, "ok");
 
     assert.doesNotThrow(() => {
-      application.close();
+      runtime.close();
     });
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -39,16 +46,17 @@ test("createApplication wires use cases and closes cleanly", () => {
 });
 
 test("createApplication supports in-memory database", () => {
-  const application = createApplication({
+  const runtime = createApplication({
     config: {
       port: 3000,
       databasePath: ":memory:",
       adminApiKey: TEST_ADMIN_API_KEY,
     },
+    flightsSummaryIntervalMs: 60 * 60 * 1000,
   });
 
-  assert.equal(application.healthChecks.checkReadiness().status, "ok");
+  assert.equal(runtime.healthChecks.checkReadiness().status, "ok");
   assert.doesNotThrow(() => {
-    application.close();
+    runtime.close();
   });
 });

@@ -3,30 +3,30 @@ import { createApplication } from "./bootstrap/application.js";
 import { parseConfig } from "./config.js";
 
 const config = parseConfig(process.env);
-const application = createApplication({ config });
+const runtime = createApplication({ config });
 
-const app = createApp({
-  flightRepository: application.flightRepository,
-  createFlight: application.createFlight,
-  listFlights: application.listFlights,
-  logger: application.logger,
-  healthChecks: application.healthChecks,
-  adminApiKey: application.config.adminApiKey,
+const expressApp = createApp({
+  flightRepository: runtime.flightRepository,
+  createFlight: runtime.createFlight,
+  listFlights: runtime.listFlights,
+  logger: runtime.logger,
+  healthChecks: runtime.healthChecks,
+  adminApiKey: runtime.config.adminApiKey,
 });
 
-const server = app.listen(application.config.port, () => {
-  application.logger.info("server_started", {
-    port: application.config.port,
-    databasePath: application.config.databasePath,
+const httpServer = expressApp.listen(runtime.config.port, () => {
+  runtime.logger.info("server_started", {
+    port: runtime.config.port,
+    databasePath: runtime.config.databasePath,
   });
 });
 
 function shutdown() {
-  application.logger.info("server_shutdown_started");
+  runtime.logger.info("server_shutdown_started");
 
-  server.close(() => {
-    application.close();
-    application.logger.info("server_shutdown_completed");
+  httpServer.close(() => {
+    runtime.close();
+    runtime.logger.info("server_shutdown_completed");
     process.exit(0);
   });
 }
