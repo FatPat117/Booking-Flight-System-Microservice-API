@@ -2,13 +2,14 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 17)
+## Architecture (Day 18)
 
 ```text
-Environment / .env
+Docker Image (multi-stage: build → runtime, non-root user)
+  ├── Environment injected via docker run -e (not baked .env)
   → parseConfig() → AppConfig
   → createApplication()   ← Composition Root (src/bootstrap/application.ts)
-      ├── openDatabase() → runMigrations()
+      ├── openDatabase() → runMigrations()  (SQLite file on Docker volume)
       ├── Console Logger
       ├── HealthChecks
       ├── SQLite FlightRepository / AuditRecorder / TransactionRunner
@@ -17,7 +18,9 @@ Environment / .env
       │     └── flights-summary-job
       └── close() → stop jobs → close database
             ↓
-          createApp() → Express (receives wired dependencies)
+          createApp() → Express
+            ↓
+      HEALTHCHECK → GET /live
 ```
 
 Object creation happens only in the Composition Root. Routes and use cases receive dependencies; they do not `new` infrastructure themselves.
@@ -143,6 +146,33 @@ Design notes:
 - Multi-instance deployments would duplicate job execution (accepted for Day 17 — no broker / distributed lock yet).
 - Flight count reuses `FlightRepository.findPage({ limit: 1 }).totalItems` (SQLite `COUNT(*)`), avoiding a new repository method for one consumer.
 
+## Docker (Day 18)
+
+The API ships as a multi-stage image: TypeScript builds in a `build` stage; the `runtime` stage keeps only compiled JS + production dependencies, runs as non-root `appuser`, and probes `GET /live`.
+
+Requires **Node 22+** (`engines` + `FROM node:22-slim`) because the app uses built-in `node:sqlite`.
+
+```bash
+docker build -t booking-api:day18 .
+
+# Git Bash on Windows: prefix with MSYS_NO_PATHCONV=1 so /app/... is not rewritten.
+docker run --rm -p 3000:3000 \
+  -e ADMIN_API_KEY="local-dev-secret-1234567890" \
+  -e DATABASE_PATH=/app/data/booking.db \
+  -v booking_data:/app/data \
+  booking-api:day18
+```
+
+| Concern | How Day 18 handles it |
+|---------|------------------------|
+| Reproducible runtime | Pinned `node:22-slim`, `npm ci`, lockfile |
+| Secrets | `.env` is in `.dockerignore` — pass `-e` / compose `env_file` at run time |
+| SQLite persistence | Named volume on `/app/data` matching `DATABASE_PATH` |
+| Graceful stop | `CMD ["node", "dist/index.js"]` as PID 1; `SIGTERM` → `runtime.close()` |
+| Health | Docker `HEALTHCHECK` uses `/live` (process up), not `/ready` (DB ready) |
+
+Docker packages the **runtime environment**. It does not fix Day 17 multi-instance job duplication — scaling replicas still runs `flights-summary-job` once per process.
+
 ## Database migrations
 
 The application runs SQLite migrations on startup.
@@ -253,11 +283,11 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 ## Current limitations
 
 - Manual DI only (no DI container / NestJS / Inversify / tsyringe)
-- In-process jobs only — duplicate execution if multiple instances run
+- In-process jobs only — duplicate execution if multiple instances / containers run
 - No job persistence / retry after process crash
 - Job interval hardcoded in Composition Root (not env config yet)
 - No handler timeout if a job hangs forever
-- No Docker / container packaging yet
+- No docker-compose yet (single-service image only)
 - Transaction support is local to one SQLite database connection
 - No nested transaction or savepoint support yet
 - No cross-service or distributed transaction

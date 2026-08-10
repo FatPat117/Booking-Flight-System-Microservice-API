@@ -121,7 +121,7 @@ test("scheduler does not overlap while a long handler is running", async (t) => 
   scheduler.stop();
 });
 
-test("scheduler logs job failure and keeps scheduling", async (t) => {
+test("scheduler logs job failure and keeps scheduling the same job", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
 
   const { logger, entries } = createMemoryLogger();
@@ -159,7 +159,61 @@ test("scheduler logs job failure and keeps scheduling", async (t) => {
   scheduler.stop();
 });
 
-test("stop prevents further runs and is idempotent", async (t) => {
+test("job A failure does not stop job B from running on its next tick", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+
+  const { logger, entries } = createMemoryLogger();
+  const scheduler = createInMemoryJobScheduler(logger);
+  let jobARuns = 0;
+  let jobBRuns = 0;
+
+  scheduler.register({
+    name: "job-a",
+    intervalMs: 50,
+    handler: async () => {
+      jobARuns += 1;
+      throw new Error("job A exploded");
+    },
+  });
+
+  scheduler.register({
+    name: "job-b",
+    intervalMs: 50,
+    handler: async () => {
+      jobBRuns += 1;
+    },
+  });
+
+  scheduler.start();
+
+  t.mock.timers.tick(50);
+  await flushAsyncWork();
+  assert.equal(jobARuns, 1);
+  assert.equal(jobBRuns, 1);
+  assert.ok(
+    entries.some(
+      (entry) =>
+        entry.level === "error" &&
+        entry.message === "job_failed" &&
+        entry.fields?.job === "job-a",
+    ),
+  );
+  assert.ok(
+    entries.some(
+      (entry) =>
+        entry.message === "job_completed" && entry.fields?.job === "job-b",
+    ),
+  );
+
+  t.mock.timers.tick(50);
+  await flushAsyncWork();
+  assert.equal(jobARuns, 2);
+  assert.equal(jobBRuns, 2);
+
+  scheduler.stop();
+});
+
+test("stop prevents further runs and is idempotent when called twice", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
 
   const { logger } = createMemoryLogger();
@@ -179,7 +233,9 @@ test("stop prevents further runs and is idempotent", async (t) => {
   await flushAsyncWork();
   assert.equal(runs, 1);
 
-  scheduler.stop();
+  assert.doesNotThrow(() => {
+    scheduler.stop();
+  });
   assert.doesNotThrow(() => {
     scheduler.stop();
   });
