@@ -1,19 +1,19 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 18
-**Current day:** Day 18 — Docker
+**Last completed day:** Day 19
+**Current day:** Day 19 — docker-compose
 **Status:** Completed — awaiting mentor review / commit
 
-## Day 18 delivered
+## Day 19 delivered
 
 ```text
-Multi-stage Dockerfile (node:22-slim, non-root, HEALTHCHECK /live)
-.dockerignore (excludes .env + data/)
-engines: node >=22
-README Docker build/run + volume notes
-SIGTERM/SIGINT already wired in index.ts
+docker-compose.yml: app + rabbitmq:3-management
+depends_on service_healthy
+named volumes booking_data + rabbitmq_data
+README compose / UI / internal DNS notes
+No RabbitMQ client code in the app yet
 ```
 
 ## Next
 
-Day 19+ — when assigned (message broker / compose).
+Day 20 — first real RabbitMQ producer/consumer from app code (when assigned).

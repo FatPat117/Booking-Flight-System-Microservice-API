@@ -1,0 +1,64 @@
+#!/bin/sh
+# Auto-runs Claude Code headlessly, before each commit, to check whether
+# .cursor/progress/ needs updating for the changes about to be committed.
+#
+# Guarantees:
+# - Never blocks the commit (always exits 0), even if Claude errors, times
+#   out, or hits its budget cap.
+# - Never stages or commits anything itself (no git add / git commit /
+#   git reset) — any edit is left unstaged for you to review afterwards.
+# - Only allowed to touch progress docs, not application code (see the
+#   --allowedTools scope below).
+#
+# Disable for one commit:   SKIP_PROGRESS_HOOK=1 git commit ...
+# Disable permanently:      git config --unset core.hooksPath
+
+if [ -n "$SKIP_PROGRESS_HOOK" ]; then
+  exit 0
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "pre-commit: claude CLI not found on PATH, skipping progress auto-update" >&2
+  exit 0
+fi
+
+staged_diff_stat=$(git diff --cached --stat 2>/dev/null)
+
+if [ -z "$staged_diff_stat" ]; then
+  exit 0
+fi
+
+recent_log=$(git log --pretty='format:%h %s' -n 10 2>/dev/null)
+
+echo "pre-commit: checking whether .cursor/progress/ needs updating..."
+
+prompt=$(cat <<EOF
+You are about to commit the staged changes below. Do NOT touch them, and do
+not run git add, git commit, or git reset. Your only job is deciding whether
+.cursor/progress/CURRENT.md and/or a .cursor/progress/DAY-XX.md file are now
+out of date, per the rules in CLAUDE.md and .cursor/rules/bootcamp-mentor.mdc.
+
+Staged diff stat (about to become a commit):
+$staged_diff_stat
+
+Recent commit history for context:
+$recent_log
+
+Use \`git diff --cached\` to inspect the full staged diff if the stat alone
+isn't enough to judge what actually changed. Only edit files under
+.cursor/progress/ — never application code. Only create or extend a
+DAY-XX.md if the diff clearly shows that day's work landed and isn't
+reflected yet; do not invent content that isn't evidenced by the diff. If
+nothing needs updating, do nothing and say so in one line. Do not run
+git add, git commit, or git reset — leave any edits unstaged.
+EOF
+)
+
+timeout 180 claude -p "$prompt" \
+  --permission-mode acceptEdits \
+  --allowedTools "Read Edit Grep Glob Bash(git diff:*) Bash(git log:*) Bash(git show:*)" \
+  --max-budget-usd 1.00 \
+  --model sonnet \
+  || echo "pre-commit: progress auto-update skipped (claude failed or timed out)" >&2
+
+exit 0

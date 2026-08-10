@@ -1,0 +1,48 @@
+# Dev topology: app + RabbitMQ.
+# Day 19 — infrastructure only; the app does not connect to RabbitMQ yet.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      DATABASE_PATH: /app/data/booking.db
+    volumes:
+      - booking_data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/live').then((r) => process.exit(r.status === 200 ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672" # AMQP — unused until Day 20+
+      - "15672:15672" # Management UI — http://localhost:15672 (guest/guest, local only)
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  booking_data:
+  rabbitmq_data:

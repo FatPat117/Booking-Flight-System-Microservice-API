@@ -2,25 +2,21 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 18)
+## Architecture (Day 19)
 
 ```text
-Docker Image (multi-stage: build → runtime, non-root user)
-  ├── Environment injected via docker run -e (not baked .env)
-  → parseConfig() → AppConfig
-  → createApplication()   ← Composition Root (src/bootstrap/application.ts)
-      ├── openDatabase() → runMigrations()  (SQLite file on Docker volume)
-      ├── Console Logger
-      ├── HealthChecks
-      ├── SQLite FlightRepository / AuditRecorder / TransactionRunner
-      ├── CreateFlight / ListFlights
-      ├── JobScheduler (in-memory)
-      │     └── flights-summary-job
-      └── close() → stop jobs → close database
-            ↓
-          createApp() → Express
-            ↓
-      HEALTHCHECK → GET /live
+docker-compose.yml
+  ├── service: app
+  │     ├── build: Dockerfile (Day 18)
+  │     ├── depends_on: rabbitmq (condition: service_healthy)
+  │     ├── volume: booking_data → SQLite
+  │     └── createApplication() → Express → HEALTHCHECK /live
+  │           (no RabbitMQ client code yet)
+  │
+  └── service: rabbitmq (rabbitmq:3-management)
+        ├── port 5672 (AMQP — unused until Day 20+)
+        ├── port 15672 (Management UI)
+        └── volume: rabbitmq_data
 ```
 
 Object creation happens only in the Composition Root. Routes and use cases receive dependencies; they do not `new` infrastructure themselves.
@@ -173,6 +169,36 @@ docker run --rm -p 3000:3000 \
 
 Docker packages the **runtime environment**. It does not fix Day 17 multi-instance job duplication — scaling replicas still runs `flights-summary-job` once per process.
 
+## docker-compose (Day 19)
+
+`docker-compose.yml` runs the API and RabbitMQ together for local multi-container development. Compose reads `.env` next to the compose file for `${ADMIN_API_KEY}` (do not commit `.env`).
+
+```bash
+# Ensure .env has ADMIN_API_KEY (16+ chars). Compose loads it automatically.
+docker compose up --build
+
+curl http://localhost:3000/live
+# RabbitMQ Management UI: http://localhost:15672  (guest / guest — local only)
+
+docker compose down
+```
+
+| Concern | How Day 19 handles it |
+|---------|------------------------|
+| Multi-container topology | One YAML: `app` + `rabbitmq` |
+| Startup order | `app` waits until `rabbitmq` is **healthy** (`depends_on` + healthcheck) |
+| DNS inside the compose network | Service name `rabbitmq` resolves from `app` (not `localhost`) |
+| Persistence | Named volumes `booking_data` and `rabbitmq_data` |
+| App ↔ broker code | **None yet** — infrastructure verified before Day 20 client code |
+
+From the host use `localhost:15672`. From inside the `app` container, Day 20 will use hostname `rabbitmq` (e.g. `amqp://guest:guest@rabbitmq:5672`).
+
+Verify internal DNS:
+
+```bash
+docker compose exec app sh -c "getent hosts rabbitmq"
+```
+
 ## Database migrations
 
 The application runs SQLite migrations on startup.
@@ -287,7 +313,8 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No job persistence / retry after process crash
 - Job interval hardcoded in Composition Root (not env config yet)
 - No handler timeout if a job hangs forever
-- No docker-compose yet (single-service image only)
+- RabbitMQ runs in compose but the app does not connect yet (no amqplib / publisher)
+- `guest`/`guest` RabbitMQ credentials are for local compose only
 - Transaction support is local to one SQLite database connection
 - No nested transaction or savepoint support yet
 - No cross-service or distributed transaction
