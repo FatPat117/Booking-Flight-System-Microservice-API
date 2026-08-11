@@ -1,19 +1,19 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 20
-**Current day:** Day 20 — RabbitMQ Producer
+**Last completed day:** Day 21
+**Current day:** Day 21 — RabbitMQ Consumer
 **Status:** Completed — awaiting mentor review / commit
 
-## Day 20 delivered
+## Day 21 delivered
 
 ```text
-MessagePublisher + RabbitMQ implementation + connectWithRetry
-CreateFlight publishes flight-created after successful DB commit
-Publish failure logged only (201 still returned)
-async createApplication / close(); RABBITMQ_URL config
-compose sets RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+MessageConsumer + RabbitMQ implementation (manual ack, prefetch 1)
+flightCreatedConsumer validates payload and logs
+Separate publisher/consumer AMQP connections with retry
+Composition Root subscribes on boot; async close includes consumer
+requeue:false documented (no DLQ / poison-loop avoidance)
 ```
 
 ## Next
 
-Day 21 — consumer (when assigned).
+When assigned — likely multi-service split or DLQ / outbox (mentor directs).

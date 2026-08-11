@@ -61,31 +61,31 @@ fix the code directly.
 - Update `.cursor/progress/CURRENT.md` (last completed day, status, next day).
 - Update `.cursor/progress/ROADMAP.md` only if the plan genuinely changed — explain why.
 
-### Automation: progress check on `git commit`
+### Automation: progress check on `git push`
 
-A `pre-commit` git hook (`scripts/git-hooks/pre-commit`, wired up via
+A `pre-push` git hook (`scripts/git-hooks/pre-push`, wired up via
 `core.hooksPath` — set automatically by `npm install` through the `prepare`
-script) runs headless Claude Code before every commit. It looks at the
-currently staged diff (plus recent commit history for context) and decides
-whether `.cursor/progress/CURRENT.md` or a `DAY-XX.md` is now out of date,
-editing them if so.
+script) runs headless Claude Code once per push. It looks at the commits
+being pushed and decides whether `.cursor/progress/CURRENT.md` or a
+`DAY-XX.md` is now out of date, editing them if so.
 
 Guarantees baked into the hook:
 
-- It **never blocks or fails the commit** — always exits `0`, even if Claude
+- It **never blocks or fails the push** — always exits `0`, even if Claude
   errors, times out (180s), or hits its `$1.00` budget cap.
-- It **never runs `git add`/`git commit`/`git reset`** — any edit it makes is
-  left unstaged; review it with `git status`/`git diff` after the commit
-  like any other change, then commit it yourself (in a follow-up commit).
-- It's restricted to `Read/Edit/Grep/Glob` plus read-only `git diff/log/show`
+- It **never runs `git add`/`git commit`** — any edit it makes is left
+  unstaged; review it with `git status`/`git diff` after the push like any
+  other change, then commit it yourself.
+- It's restricted to `Read/Edit/Grep/Glob` plus read-only `git show/log/diff`
   — it cannot touch application code or run arbitrary commands.
 
-Because it runs on every commit (not just on push), expect it to add a few
-seconds to most commits and up to ~180s on a slow one — use the skip escape
-hatch for quick WIP commits where you don't want the wait.
+Chosen over a per-commit hook deliberately: most commits are small
+checkpoints with nothing day-level to log, so checking once per push (rather
+than on every commit) avoids paying the latency/cost of a mostly-no-op
+Claude call on every single commit.
 
-Skip it for one commit with `SKIP_PROGRESS_HOOK=1 git commit ...`; remove it
-entirely with `git config --unset core.hooksPath`.
+Skip it for one push with `SKIP_PROGRESS_HOOK=1 git push`; remove it entirely
+with `git config --unset core.hooksPath`.
 
 ## Code organization
 

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createApplication } from "../src/bootstrap/application.js";
+import { createNoopMessageConsumer } from "../src/messaging/noop-message-consumer.js";
 import { createNoopMessagePublisher } from "../src/messaging/noop-message-publisher.js";
 
 const TEST_ADMIN_API_KEY = "test-admin-key-123456";
@@ -27,6 +28,7 @@ test("createApplication wires use cases and closes cleanly", async () => {
     // Keep background jobs quiet during composition smoke tests.
     flightsSummaryIntervalMs: 60 * 60 * 1000,
     messagePublisher: createNoopMessagePublisher(),
+    messageConsumer: createNoopMessageConsumer(),
   });
 
   try {
@@ -60,6 +62,7 @@ test("createApplication supports in-memory database", async () => {
     },
     flightsSummaryIntervalMs: 60 * 60 * 1000,
     messagePublisher: createNoopMessagePublisher(),
+    messageConsumer: createNoopMessageConsumer(),
   });
 
   assert.equal(runtime.healthChecks.checkReadiness().status, "ok");

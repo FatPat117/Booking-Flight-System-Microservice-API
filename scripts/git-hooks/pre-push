@@ -1,0 +1,80 @@
+#!/bin/sh
+# Auto-runs Claude Code headlessly, once per `git push`, to check whether
+# .cursor/progress/ needs updating for the commits being pushed.
+#
+# Guarantees:
+# - Never blocks or fails the push (always exits 0), even if Claude errors.
+# - Never runs `git add` / `git commit` itself — any edit is left unstaged
+#   for you to review with `git status` / `git diff` after the push.
+# - Only allowed to touch progress docs, not application code (see the
+#   --allowedTools scope below).
+#
+# Disable for one push:   SKIP_PROGRESS_HOOK=1 git push
+# Disable permanently:    git config --unset core.hooksPath
+
+if [ -n "$SKIP_PROGRESS_HOOK" ]; then
+  exit 0
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "pre-push: claude CLI not found on PATH, skipping progress auto-update" >&2
+  exit 0
+fi
+
+zero="0000000000000000000000000000000000000000"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$local_sha" = "$zero" ]; then
+    continue # branch deletion, nothing to summarize
+  fi
+
+  if [ "$remote_sha" = "$zero" ]; then
+    log_range="$local_sha"
+    diff_range="$local_sha"
+  else
+    log_range="$remote_sha..$local_sha"
+    diff_range="$remote_sha..$local_sha"
+  fi
+
+  commit_log=$(git log --pretty='format:%h %s' "$log_range" 2>/dev/null)
+
+  if [ -z "$commit_log" ]; then
+    continue
+  fi
+
+  diff_stat=$(git diff --stat "$diff_range" 2>/dev/null)
+
+  echo "pre-push: checking whether .cursor/progress/ needs updating for $local_ref..."
+
+  prompt=$(cat <<EOF
+You are about to push these already-made commits to GitHub. Do NOT amend or
+touch them. Your only job is deciding whether .cursor/progress/CURRENT.md
+and/or a .cursor/progress/DAY-XX.md file are now out of date, per the rules
+in CLAUDE.md and .cursor/rules/bootcamp-mentor.mdc.
+
+Commits being pushed ($log_range):
+$commit_log
+
+Diff stat:
+$diff_stat
+
+Use \`git show <hash>\` to inspect a commit's full diff if the stat alone
+isn't enough to judge what actually changed. Only edit files under
+.cursor/progress/ — never application code. Only create or extend a
+DAY-XX.md if the diff clearly shows that day's work landed and isn't
+reflected yet; do not invent content that isn't evidenced by the diff. If
+nothing needs updating, do nothing and say so in one line. Do not run
+git add or git commit — leave any edits unstaged.
+EOF
+)
+
+  timeout 180 claude -p "$prompt" \
+    --permission-mode acceptEdits \
+    --allowedTools "Read Edit Grep Glob Bash(git show:*) Bash(git log:*) Bash(git diff:*)" \
+    --max-budget-usd 1.00 \
+    --model sonnet \
+    || echo "pre-push: progress auto-update skipped (claude failed or timed out)" >&2
+
+done
+
+exit 0

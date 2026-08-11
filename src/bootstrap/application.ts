@@ -6,6 +6,7 @@ import type { AppConfig } from "../config.js";
 import { openDatabase } from "../database.js";
 import {
   createCreateFlight,
+  FLIGHT_CREATED_QUEUE,
   type CreateFlight,
 } from "../flights/create-flight.js";
 import type { FlightRepository } from "../flights/flight-repository.js";
@@ -20,7 +21,12 @@ import {
 } from "../health/health-checks.js";
 import { createFlightsSummaryJob } from "../jobs/flights-summary-job.js";
 import { createInMemoryJobScheduler } from "../jobs/in-memory-job-scheduler.js";
-import { connectWithRetry } from "../messaging/connect-with-retry.js";
+import {
+  connectConsumerWithRetry,
+  connectPublisherWithRetry,
+} from "../messaging/connect-with-retry.js";
+import { createFlightCreatedConsumer } from "../messaging/flight-created-consumer.js";
+import type { MessageConsumer } from "../messaging/message-consumer.js";
 import type { MessagePublisher } from "../messaging/message-publisher.js";
 import {
   createConsoleLogger,
@@ -52,10 +58,11 @@ export type CreateApplicationOptions = {
   /** Override for tests; production default is 60s */
   flightsSummaryIntervalMs?: number;
   /**
-   * Tests inject a noop publisher so the suite does not need RabbitMQ.
-   * Production omits this and connects via config.rabbitmqUrl.
+   * Tests inject noops so the suite does not need RabbitMQ.
+   * Production omits these and connects via config.rabbitmqUrl.
    */
   messagePublisher?: MessagePublisher;
+  messageConsumer?: MessageConsumer;
 };
 
 /**
@@ -78,12 +85,25 @@ export async function createApplication(
   const transactionRunner = createSqliteTransactionRunner(database);
   const healthChecks = createHealthChecks(database);
 
+  // Separate AMQP connections: publisher and consumer fail independently.
   const messagePublisher =
     options.messagePublisher ??
-    (await connectWithRetry({
+    (await connectPublisherWithRetry({
       connectionUrl: config.rabbitmqUrl,
       logger,
     }));
+
+  const messageConsumer =
+    options.messageConsumer ??
+    (await connectConsumerWithRetry({
+      connectionUrl: config.rabbitmqUrl,
+      logger,
+    }));
+
+  await messageConsumer.subscribe(
+    FLIGHT_CREATED_QUEUE,
+    createFlightCreatedConsumer({ logger }),
+  );
 
   const createFlight = createCreateFlight({
     flightRepository,
@@ -119,9 +139,10 @@ export async function createApplication(
     listFlights,
     healthChecks,
     async close() {
-      // Stop jobs first (they use DB), then broker, then SQLite.
+      // Jobs use DB; AMQP clients are independent of each other and of SQLite.
       jobScheduler.stop();
       await messagePublisher.close();
+      await messageConsumer.close();
       database.close();
     },
   };

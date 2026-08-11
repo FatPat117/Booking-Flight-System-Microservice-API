@@ -2,7 +2,7 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 20)
+## Architecture (Day 21)
 
 ```text
 docker-compose.yml
@@ -10,13 +10,13 @@ docker-compose.yml
   │     └── createApplication()
   │           ├── Database → Repositories → CreateFlight / ListFlights
   │           ├── JobScheduler → flights-summary-job
-  │           ├── MessagePublisher (RabbitMQ, retry-connect on boot)
-  │           │     └── CreateFlight: on "created" → publish("flight-created", fat payload)
-  │           └── close() → jobs.stop → publisher.close → db.close
+  │           ├── MessagePublisher → publish flight-created (own AMQP connection)
+  │           ├── MessageConsumer → subscribe flight-created (own AMQP connection)
+  │           │     └── manual ack/nack, prefetch(1), log handler
+  │           └── close() → jobs.stop → publisher.close → consumer.close → db.close
   │
   └── service: rabbitmq
-        ├── queue: flight-created (durable; no consumer yet)
-        └── Management UI: observe Ready messages
+        └── queue: flight-created (Ready drops to 0 after consume)
 ```
 
 Object creation happens only in the Composition Root. Routes and use cases receive dependencies; they do not `new` infrastructure themselves.
@@ -213,7 +213,19 @@ After a successful `POST /api/flights` (outcome `created`), the app publishes to
 | Order | After SQLite transaction commits | Avoid announcing a flight that rolled back |
 | Dual-write | Accepted limitation | Outbox pattern is a later day |
 
-Startup connects with bounded retry (`connectWithRetry`, 10 × 2s) then fail-fast. `close()` is async: stop jobs → close publisher → close DB.
+Startup connects with bounded retry (`connectPublisherWithRetry` / `connectConsumerWithRetry`, 10 × 2s) then fail-fast. Publisher and consumer use **separate** AMQP connections. `close()` is async: stop jobs → close publisher → close consumer → close DB.
+
+### Consumer (Day 21)
+
+The same process also **subscribes** to `flight-created` and logs each valid event (`flight_created_consumed`). This closes the publish → queue → consume → ack loop for learning; splitting into a second microservice comes later.
+
+| Concern | Day 21 choice |
+|---------|----------------|
+| Ack mode | Manual (`noAck: false`) |
+| Prefetch | `1` — one in-flight message at a time |
+| Invalid / rejected | `nack(..., requeue: false)` — drop poison messages (no DLQ yet) |
+| Handler | Discriminated `processed` / `rejected` — no throw for bad payloads |
+| Delivery | At-least-once — log-only handler is intentionally idempotent-friendly |
 
 ## Database migrations
 
@@ -329,8 +341,11 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No job persistence / retry after process crash
 - Job interval hardcoded in Composition Root (not env config yet)
 - No handler timeout if a job hangs forever
-- RabbitMQ publisher only — no consumer / exchange routing yet
+- RabbitMQ publisher + in-process consumer — not yet a separate microservice
 - Dual-write: SQLite commit + AMQP publish are not atomic (no outbox yet)
+- No dead-letter queue; rejected/poison messages are dropped (`requeue: false`)
+- No retry for transient consume failures
+- Consumer handler is log-only (no side-effect idempotency challenge yet)
 - `guest`/`guest` RabbitMQ credentials are for local compose only
 - Transaction support is local to one SQLite database connection
 - No nested transaction or savepoint support yet
