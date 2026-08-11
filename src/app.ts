@@ -93,8 +93,8 @@ export function createApp(dependencies: AppDependencies) {
     return res.status(200).json(flight);
   });
 
-  app.post("/api/flights", requireAdminApiKey, (req, res) => {
-    const result = createFlight(req.body);
+  app.post("/api/flights", requireAdminApiKey, async (req, res) => {
+    const result = await createFlight(req.body);
 
     if (result.outcome === "validation_failed") {
       return sendApiError(res, 422, {

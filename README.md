@@ -2,21 +2,21 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 19)
+## Architecture (Day 20)
 
 ```text
 docker-compose.yml
   ├── service: app
-  │     ├── build: Dockerfile (Day 18)
-  │     ├── depends_on: rabbitmq (condition: service_healthy)
-  │     ├── volume: booking_data → SQLite
-  │     └── createApplication() → Express → HEALTHCHECK /live
-  │           (no RabbitMQ client code yet)
+  │     └── createApplication()
+  │           ├── Database → Repositories → CreateFlight / ListFlights
+  │           ├── JobScheduler → flights-summary-job
+  │           ├── MessagePublisher (RabbitMQ, retry-connect on boot)
+  │           │     └── CreateFlight: on "created" → publish("flight-created", fat payload)
+  │           └── close() → jobs.stop → publisher.close → db.close
   │
-  └── service: rabbitmq (rabbitmq:3-management)
-        ├── port 5672 (AMQP — unused until Day 20+)
-        ├── port 15672 (Management UI)
-        └── volume: rabbitmq_data
+  └── service: rabbitmq
+        ├── queue: flight-created (durable; no consumer yet)
+        └── Management UI: observe Ready messages
 ```
 
 Object creation happens only in the Composition Root. Routes and use cases receive dependencies; they do not `new` infrastructure themselves.
@@ -28,15 +28,18 @@ Object creation happens only in the Composition Root. Routes and use cases recei
 | `PORT` | No | `3000` | HTTP listening port (`1–65535`) |
 | `DATABASE_PATH` | No | `data/booking.db` | SQLite database file (relative or absolute) |
 | `ADMIN_API_KEY` | Yes | none | Bearer token required for `POST /api/flights` |
+| `RABBITMQ_URL` | No | `amqp://guest:guest@localhost:5672` | AMQP URL (`rabbitmq` host inside compose) |
 
 `ADMIN_API_KEY` is required at startup. The application fails fast if it is missing, blank, or shorter than 16 characters.
+
+`RABBITMQ_URL` defaults for local `npm run dev` against compose-mapped port `5672`. Compose sets `amqp://guest:guest@rabbitmq:5672` for the `app` service.
 
 Precedence:
 
 ```text
 Operating-system environment
   → .env (if loaded)
-  → Application defaults (PORT, DATABASE_PATH only)
+  → Application defaults (PORT, DATABASE_PATH, RABBITMQ_URL)
 ```
 
 Local setup:
@@ -189,15 +192,28 @@ docker compose down
 | Startup order | `app` waits until `rabbitmq` is **healthy** (`depends_on` + healthcheck) |
 | DNS inside the compose network | Service name `rabbitmq` resolves from `app` (not `localhost`) |
 | Persistence | Named volumes `booking_data` and `rabbitmq_data` |
-| App ↔ broker code | **None yet** — infrastructure verified before Day 20 client code |
+| App ↔ broker code | **Publisher only** — `CreateFlight` publishes `flight-created` after DB commit; no consumer yet |
 
-From the host use `localhost:15672`. From inside the `app` container, Day 20 will use hostname `rabbitmq` (e.g. `amqp://guest:guest@rabbitmq:5672`).
+From the host use `localhost:15672`. From inside the `app` container, connection uses hostname `rabbitmq` via `RABBITMQ_URL`.
 
 Verify internal DNS:
 
 ```bash
 docker compose exec app sh -c "getent hosts rabbitmq"
 ```
+
+## Messaging (Day 20)
+
+After a successful `POST /api/flights` (outcome `created`), the app publishes to durable queue `flight-created`.
+
+| Decision | Choice | Why |
+|----------|--------|-----|
+| Payload | Fat event (`type`, `occurredAt`, full `flight`) | No consumer API callback yet; UI can inspect the body |
+| Publish failure | Log `flight_created_publish_failed`; still return `201` | DB is source of truth; message is a side notification |
+| Order | After SQLite transaction commits | Avoid announcing a flight that rolled back |
+| Dual-write | Accepted limitation | Outbox pattern is a later day |
+
+Startup connects with bounded retry (`connectWithRetry`, 10 × 2s) then fail-fast. `close()` is async: stop jobs → close publisher → close DB.
 
 ## Database migrations
 
@@ -313,7 +329,8 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No job persistence / retry after process crash
 - Job interval hardcoded in Composition Root (not env config yet)
 - No handler timeout if a job hangs forever
-- RabbitMQ runs in compose but the app does not connect yet (no amqplib / publisher)
+- RabbitMQ publisher only — no consumer / exchange routing yet
+- Dual-write: SQLite commit + AMQP publish are not atomic (no outbox yet)
 - `guest`/`guest` RabbitMQ credentials are for local compose only
 - Transaction support is local to one SQLite database connection
 - No nested transaction or savepoint support yet
@@ -328,6 +345,6 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - Current health checks only verify SQLite with a lightweight `SELECT 1`
 - Logs go to console only (no transports / log level config)
 - Offset pagination only (no cursor)
-- Configuration only covers port, database path, and admin API key
+- Configuration only covers port, database path, admin API key, and RabbitMQ URL
 - Use case / repository still synchronous
 - No JWT, OAuth, RBAC, metrics, distributed tracing, or events

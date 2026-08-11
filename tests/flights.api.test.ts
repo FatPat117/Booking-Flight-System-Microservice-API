@@ -13,6 +13,8 @@ import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { createSqliteAuditRecorder } from "../src/audit/sqlite-audit-recorder.js";
 import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
+import { createNoopMessagePublisher } from "../src/messaging/noop-message-publisher.js";
+import { createConsoleLogger } from "../src/observability/logger.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
@@ -111,6 +113,8 @@ function createAppWithRepository(
     flightRepository,
     auditRecorder,
     transactionRunner,
+    messagePublisher: createNoopMessagePublisher(),
+    logger: createConsoleLogger(),
     generateId: () => crypto.randomUUID(),
     generateAuditId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
@@ -1003,6 +1007,8 @@ test("rolls back flight creation when audit recording fails", async (t) => {
     flightRepository,
     auditRecorder: failingAuditRecorder,
     transactionRunner,
+    messagePublisher: createNoopMessagePublisher(),
+    logger: createConsoleLogger(),
     generateId: () => "rollback-flight-id",
     generateAuditId: () => "rollback-audit-id",
     getRequestId: () => "rollback-request-id",

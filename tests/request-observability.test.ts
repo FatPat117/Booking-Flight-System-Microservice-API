@@ -7,6 +7,8 @@ import { createApp } from "../src/app.js";
 import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
+import { createNoopMessagePublisher } from "../src/messaging/noop-message-publisher.js";
+import { createConsoleLogger } from "../src/observability/logger.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
@@ -77,6 +79,8 @@ function createTestContext(t: TestContext) {
     flightRepository,
     auditRecorder: createNoopAuditRecorder(),
     transactionRunner: createPassthroughTransactionRunner(),
+    messagePublisher: createNoopMessagePublisher(),
+    logger: createConsoleLogger(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
     getRequestId: () => "fixed-request-id",
@@ -183,6 +187,8 @@ test("logs unexpected errors with request id without leaking them to client", as
     flightRepository: failingRepository,
     auditRecorder: createNoopAuditRecorder(),
     transactionRunner: createPassthroughTransactionRunner(),
+    messagePublisher: createNoopMessagePublisher(),
+    logger: createConsoleLogger(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
     getRequestId: () => "fixed-request-id",

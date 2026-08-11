@@ -7,6 +7,8 @@ import { createApp } from "../src/app.js";
 import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
+import { createNoopMessagePublisher } from "../src/messaging/noop-message-publisher.js";
+import { createConsoleLogger } from "../src/observability/logger.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 import { createHealthChecks } from "../src/health/health-checks.js";
@@ -72,6 +74,8 @@ function createTestContext(t: TestContext) {
     flightRepository,
     auditRecorder: createNoopAuditRecorder(),
     transactionRunner: createPassthroughTransactionRunner(),
+    messagePublisher: createNoopMessagePublisher(),
+    logger: createConsoleLogger(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
     getRequestId: () => "fixed-request-id",

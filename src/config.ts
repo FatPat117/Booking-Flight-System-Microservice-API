@@ -2,12 +2,16 @@ export type AppConfig = Readonly<{
   port: number;
   databasePath: string;
   adminApiKey: string;
+  /** AMQP URL — host is `localhost` on the machine, `rabbitmq` inside compose */
+  rabbitmqUrl: string;
 }>;
 
 type Environment = Record<string, string | undefined>;
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_DATABASE_PATH = "data/booking.db";
+/** Local default: broker published on host port 5672 (Day 19 compose). */
+const DEFAULT_RABBITMQ_URL = "amqp://guest:guest@localhost:5672";
 
 /**
  * Convert untrusted environment strings into a typed AppConfig.
@@ -17,11 +21,13 @@ export function parseConfig(environment: Environment): AppConfig {
   const port = parsePort(environment.PORT);
   const databasePath = parseDatabasePath(environment.DATABASE_PATH);
   const adminApiKey = parseAdminApiKey(environment.ADMIN_API_KEY);
+  const rabbitmqUrl = parseRabbitmqUrl(environment.RABBITMQ_URL);
 
   return {
     port,
     databasePath,
     adminApiKey,
+    rabbitmqUrl,
   };
 }
 
@@ -85,6 +91,22 @@ function parseDatabasePath(raw: string | undefined): string {
   if (trimmed === "") {
     throw new Error(
       "Invalid DATABASE_PATH: value is blank; omit DATABASE_PATH to use the default data/booking.db",
+    );
+  }
+
+  return trimmed;
+}
+
+function parseRabbitmqUrl(raw: string | undefined): string {
+  if (raw === undefined) {
+    return DEFAULT_RABBITMQ_URL;
+  }
+
+  const trimmed = raw.trim();
+
+  if (trimmed === "") {
+    throw new Error(
+      "Invalid RABBITMQ_URL: value is blank; omit RABBITMQ_URL to use the default amqp://guest:guest@localhost:5672",
     );
   }
 

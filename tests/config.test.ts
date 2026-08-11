@@ -14,6 +14,7 @@ test("uses defaults for optional configuration", () => {
       port: 3000,
       databasePath: "data/booking.db",
       adminApiKey: TEST_ADMIN_API_KEY,
+      rabbitmqUrl: "amqp://guest:guest@localhost:5672",
     },
   );
 });
@@ -29,6 +30,7 @@ test("parses valid configuration overrides", () => {
       port: 4100,
       databasePath: "data/local.db",
       adminApiKey: "local-admin-key-123456",
+      rabbitmqUrl: "amqp://guest:guest@localhost:5672",
     },
   );
 });
@@ -73,6 +75,32 @@ test("rejects invalid PORT values", async (t) => {
       );
     });
   }
+});
+
+test("parses RABBITMQ_URL override", () => {
+  assert.deepEqual(
+    parseConfig({
+      ADMIN_API_KEY: TEST_ADMIN_API_KEY,
+      RABBITMQ_URL: " amqp://guest:guest@rabbitmq:5672 ",
+    }),
+    {
+      port: 3000,
+      databasePath: "data/booking.db",
+      adminApiKey: TEST_ADMIN_API_KEY,
+      rabbitmqUrl: "amqp://guest:guest@rabbitmq:5672",
+    },
+  );
+});
+
+test("rejects blank RABBITMQ_URL", () => {
+  assert.throws(
+    () =>
+      parseConfig({
+        ADMIN_API_KEY: TEST_ADMIN_API_KEY,
+        RABBITMQ_URL: "   ",
+      }),
+    /RABBITMQ_URL/,
+  );
 });
 
 test("rejects blank DATABASE_PATH", () => {

@@ -20,6 +20,8 @@ import {
 } from "../health/health-checks.js";
 import { createFlightsSummaryJob } from "../jobs/flights-summary-job.js";
 import { createInMemoryJobScheduler } from "../jobs/in-memory-job-scheduler.js";
+import { connectWithRetry } from "../messaging/connect-with-retry.js";
+import type { MessagePublisher } from "../messaging/message-publisher.js";
 import {
   createConsoleLogger,
   type Logger,
@@ -32,7 +34,7 @@ const DEFAULT_FLIGHTS_SUMMARY_INTERVAL_MS = 60_000;
 /**
  * Fully wired application graph.
  * Built once at the Composition Root; HTTP and future workers consume this object.
- * SQLite + JobScheduler stay private — consumers use repositories / close().
+ * SQLite + JobScheduler + MessagePublisher stay private — consumers use close().
  */
 export type Application = Readonly<{
   config: AppConfig;
@@ -41,7 +43,7 @@ export type Application = Readonly<{
   createFlight: CreateFlight;
   listFlights: ListFlights;
   healthChecks: HealthChecks;
-  close(): void;
+  close(): Promise<void>;
 }>;
 
 export type CreateApplicationOptions = {
@@ -49,14 +51,19 @@ export type CreateApplicationOptions = {
   logger?: Logger;
   /** Override for tests; production default is 60s */
   flightsSummaryIntervalMs?: number;
+  /**
+   * Tests inject a noop publisher so the suite does not need RabbitMQ.
+   * Production omits this and connects via config.rabbitmqUrl.
+   */
+  messagePublisher?: MessagePublisher;
 };
 
 /**
  * Composition Root: the only place that constructs and wires infrastructure + use cases.
  */
-export function createApplication(
+export async function createApplication(
   options: CreateApplicationOptions,
-): Application {
+): Promise<Application> {
   const { config } = options;
   const logger = options.logger ?? createConsoleLogger();
   const flightsSummaryIntervalMs =
@@ -71,10 +78,19 @@ export function createApplication(
   const transactionRunner = createSqliteTransactionRunner(database);
   const healthChecks = createHealthChecks(database);
 
+  const messagePublisher =
+    options.messagePublisher ??
+    (await connectWithRetry({
+      connectionUrl: config.rabbitmqUrl,
+      logger,
+    }));
+
   const createFlight = createCreateFlight({
     flightRepository,
     auditRecorder,
     transactionRunner,
+    messagePublisher,
+    logger,
     generateId: () => crypto.randomUUID(),
     generateAuditId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
@@ -102,9 +118,10 @@ export function createApplication(
     createFlight,
     listFlights,
     healthChecks,
-    close() {
-      // Stop jobs before closing DB so an in-flight handler cannot hit a closed connection.
+    async close() {
+      // Stop jobs first (they use DB), then broker, then SQLite.
       jobScheduler.stop();
+      await messagePublisher.close();
       database.close();
     },
   };

@@ -3,7 +3,7 @@ import { createApplication } from "./bootstrap/application.js";
 import { parseConfig } from "./config.js";
 
 const config = parseConfig(process.env);
-const runtime = createApplication({ config });
+const runtime = await createApplication({ config });
 
 const expressApp = createApp({
   flightRepository: runtime.flightRepository,
@@ -25,9 +25,10 @@ function shutdown() {
   runtime.logger.info("server_shutdown_started");
 
   httpServer.close(() => {
-    runtime.close();
-    runtime.logger.info("server_shutdown_completed");
-    process.exit(0);
+    void runtime.close().then(() => {
+      runtime.logger.info("server_shutdown_completed");
+      process.exit(0);
+    });
   });
 }
 

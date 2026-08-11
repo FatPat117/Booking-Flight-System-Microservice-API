@@ -1,5 +1,5 @@
 # Dev topology: app + RabbitMQ.
-# Day 19 — infrastructure only; the app does not connect to RabbitMQ yet.
+# Day 20 — app publishes flight-created; no consumer yet.
 
 services:
   app:
@@ -14,6 +14,8 @@ services:
     environment:
       ADMIN_API_KEY: ${ADMIN_API_KEY}
       DATABASE_PATH: /app/data/booking.db
+      # Inside the compose network the broker hostname is the service name.
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     volumes:
       - booking_data:/app/data
     healthcheck:
@@ -32,7 +34,7 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     ports:
-      - "5672:5672" # AMQP — unused until Day 20+
+      - "5672:5672" # AMQP
       - "15672:15672" # Management UI — http://localhost:15672 (guest/guest, local only)
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq

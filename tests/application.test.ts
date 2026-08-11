@@ -5,21 +5,28 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createApplication } from "../src/bootstrap/application.js";
+import { createNoopMessagePublisher } from "../src/messaging/noop-message-publisher.js";
 
 const TEST_ADMIN_API_KEY = "test-admin-key-123456";
 
-test("createApplication wires use cases and closes cleanly", () => {
+const testConfigBase = {
+  port: 3000,
+  adminApiKey: TEST_ADMIN_API_KEY,
+  rabbitmqUrl: "amqp://guest:guest@localhost:5672",
+} as const;
+
+test("createApplication wires use cases and closes cleanly", async () => {
   const directory = mkdtempSync(join(tmpdir(), "booking-application-"));
   const databasePath = join(directory, "booking.db");
 
-  const runtime = createApplication({
+  const runtime = await createApplication({
     config: {
-      port: 3000,
+      ...testConfigBase,
       databasePath,
-      adminApiKey: TEST_ADMIN_API_KEY,
     },
     // Keep background jobs quiet during composition smoke tests.
     flightsSummaryIntervalMs: 60 * 60 * 1000,
+    messagePublisher: createNoopMessagePublisher(),
   });
 
   try {
@@ -37,26 +44,26 @@ test("createApplication wires use cases and closes cleanly", () => {
     const readiness = runtime.healthChecks.checkReadiness();
     assert.equal(readiness.status, "ok");
 
-    assert.doesNotThrow(() => {
-      runtime.close();
+    await assert.doesNotReject(async () => {
+      await runtime.close();
     });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("createApplication supports in-memory database", () => {
-  const runtime = createApplication({
+test("createApplication supports in-memory database", async () => {
+  const runtime = await createApplication({
     config: {
-      port: 3000,
+      ...testConfigBase,
       databasePath: ":memory:",
-      adminApiKey: TEST_ADMIN_API_KEY,
     },
     flightsSummaryIntervalMs: 60 * 60 * 1000,
+    messagePublisher: createNoopMessagePublisher(),
   });
 
   assert.equal(runtime.healthChecks.checkReadiness().status, "ok");
-  assert.doesNotThrow(() => {
-    runtime.close();
+  await assert.doesNotReject(async () => {
+    await runtime.close();
   });
 });
