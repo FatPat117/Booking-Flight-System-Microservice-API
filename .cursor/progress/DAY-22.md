@@ -57,6 +57,6 @@ Bước 6 independence experiments — PASS (user verified):
 
 ```text
 No shared contract package
-No DLQ
 Duplicate event contract in two repos
+(DLQ added Day 23)
 ```

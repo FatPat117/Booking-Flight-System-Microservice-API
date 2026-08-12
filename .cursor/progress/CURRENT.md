@@ -1,18 +1,19 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 22
-**Current day:** Day 22 — Split flight-notifier microservice
-**Status:** Completed — code + Docker + Bước 6 verified
+**Last completed day:** Day 23
+**Current day:** Day 23 — Dead Letter Queue (DLQ)
+**Status:** Completed — code + Bước 3 DLQ experiment verified
 
-## Day 22 delivered
+## Day 23 delivered
 
 ```text
-services/flight-notifier/ standalone (consumer only)
-api: MessagePublisher only — consumer removed
-docker-compose: app + flight-notifier + rabbitmq
-Controlled code copy; no cross-import between services
+flight-created.dlx + flight-created.dlq declared in flight-notifier consumer
+Main queue: x-dead-letter-exchange → DLX; nack(requeue:false) routes to DLQ
+Publisher asserts compatible DLX/queue args (avoids PRECONDITION_FAILED)
+DLQ = manual investigation only — no auto-retry
+Upgrade: docker compose down -v before first run with DLQ args
 ```
 
 ## Next
 
-When assigned — shared contract package, DLQ, or next domain service.
+When assigned — auto-retry with x-death, shared contract package, or next domain.

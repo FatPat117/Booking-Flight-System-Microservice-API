@@ -2,22 +2,23 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 22)
+## Architecture (Day 23)
 
 ```text
 docker-compose.yml
   ├── service: app (HTTP + Publisher only)
-  │     └── createApplication()
-  │           ├── Database → Repositories → CreateFlight / ListFlights
-  │           ├── JobScheduler → flights-summary-job
-  │           ├── MessagePublisher → publish flight-created
-  │           └── close() → jobs.stop → publisher.close → db.close
+  │     └── MessagePublisher → flight-created (queue with x-dead-letter-exchange)
   │
   ├── service: flight-notifier (Consumer only — separate process)
-  │     └── index.ts → subscribe flight-created → log (ack/nack)
+  │     └── subscribe("flight-created")
+  │           ├── processed → ack
+  │           └── rejected / parse error / handler throw → nack(requeue:false)
+  │                 └── RabbitMQ routes → flight-created.dlx → flight-created.dlq
   │
   └── service: rabbitmq
-        └── queue: flight-created (only broker between app and notifier)
+        ├── queue: flight-created
+        ├── exchange: flight-created.dlx (fanout)
+        └── queue: flight-created.dlq (durable — manual investigation, no auto-consume)
 ```
 
 Object creation happens only in the Composition Root. Routes and use cases receive dependencies; they do not `new` infrastructure themselves.
@@ -349,7 +350,7 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - RabbitMQ publisher in `app`; consumer in separate `flight-notifier` service
 - `FlightCreatedEvent` contract copied — must update both places until shared package
 - Dual-write: SQLite commit + AMQP publish are not atomic (no outbox yet)
-- No dead-letter queue; rejected/poison messages are dropped (`requeue: false`)
+- Dead-letter: rejected/poison messages route to `flight-created.dlq` via `flight-created.dlx` — manual inspection only (no auto-retry or alerting)
 - `guest`/`guest` RabbitMQ credentials are for local compose only
 - Transaction support is local to one SQLite database connection
 - No nested transaction or savepoint support yet

@@ -25,7 +25,17 @@ export async function createRabbitMqConsumer(deps: {
     source: string,
     handler: MessageHandler,
   ): Promise<void> {
-    await channel.assertQueue(source, { durable: true });
+    const dlxName = `${source}.dlx`;
+    const dlqName = `${source}.dlq`;
+
+    await channel.assertExchange(dlxName, "fanout", { durable: true });
+    await channel.assertQueue(dlqName, { durable: true });
+    await channel.bindQueue(dlqName, dlxName, "");
+
+    await channel.assertQueue(source, {
+      durable: true,
+      arguments: { "x-dead-letter-exchange": dlxName },
+    });
 
     await channel.consume(
       source,

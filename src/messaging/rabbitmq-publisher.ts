@@ -17,7 +17,12 @@ export async function createRabbitMqPublisher(deps: {
   });
 
   async function publish(destination: string, message: unknown): Promise<void> {
-    await channel.assertQueue(destination, { durable: true });
+    const dlxName = `${destination}.dlx`;
+    await channel.assertExchange(dlxName, "fanout", { durable: true });
+    await channel.assertQueue(destination, {
+      durable: true,
+      arguments: { "x-dead-letter-exchange": dlxName },
+    });
     channel.sendToQueue(destination, Buffer.from(JSON.stringify(message)), {
       persistent: true,
       contentType: "application/json",
