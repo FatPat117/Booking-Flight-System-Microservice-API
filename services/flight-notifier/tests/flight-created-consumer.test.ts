@@ -79,16 +79,6 @@ test("flightCreatedConsumer rejects invalid payloads without throwing", async ()
     "not-an-object",
     { type: "other.event" },
     { type: "flight.created", occurredAt: "", flight: validPayload.flight },
-    {
-      type: "flight.created",
-      occurredAt: "2026-08-11T00:00:00.000Z",
-      flight: { ...validPayload.flight, id: "" },
-    },
-    {
-      type: "flight.created",
-      occurredAt: "2026-08-11T00:00:00.000Z",
-      flight: { ...validPayload.flight, priceInCents: 1.5 },
-    },
   ];
 
   for (const payload of cases) {

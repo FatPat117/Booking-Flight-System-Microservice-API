@@ -1,6 +1,6 @@
 import type { Logger } from "../observability/logger.js";
-import type { MessagePublisher } from "./message-publisher.js";
-import { createRabbitMqPublisher } from "./rabbitmq-publisher.js";
+import type { MessageConsumer } from "./message-consumer.js";
+import { createRabbitMqConsumer } from "./rabbitmq-consumer.js";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -8,40 +8,34 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-/**
- * Bounded retry for AMQP publisher connect.
- * Fail-fast after maxAttempts so a dead broker does not hang startup forever.
- *
- * Defaults (10 × 2s ≈ 20s) cover compose boot lag without masking a permanent outage.
- */
-export async function connectPublisherWithRetry(deps: {
+export async function connectConsumerWithRetry(deps: {
   connectionUrl: string;
   logger: Logger;
   maxAttempts?: number;
   delayMs?: number;
-}): Promise<MessagePublisher> {
+}): Promise<MessageConsumer> {
   const maxAttempts = deps.maxAttempts ?? 10;
   const delayMs = deps.delayMs ?? 2_000;
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const publisher = await createRabbitMqPublisher({
+      const consumer = await createRabbitMqConsumer({
         connectionUrl: deps.connectionUrl,
         logger: deps.logger,
       });
 
       deps.logger.info("rabbitmq_connected", {
-        role: "publisher",
+        role: "consumer",
         attempt,
         maxAttempts,
       });
 
-      return publisher;
+      return consumer;
     } catch (error) {
       lastError = error;
       deps.logger.warn("rabbitmq_connect_retry", {
-        role: "publisher",
+        role: "consumer",
         attempt,
         maxAttempts,
         error: error instanceof Error ? error.message : String(error),
@@ -57,6 +51,12 @@ export async function connectPublisherWithRetry(deps: {
     lastError instanceof Error ? lastError.message : String(lastError);
 
   throw new Error(
-    `Failed to connect to RabbitMQ (publisher) after ${String(maxAttempts)} attempts: ${detail}`,
+    `Failed to connect to RabbitMQ (consumer) after ${String(maxAttempts)} attempts: ${detail}`,
   );
 }
+
+function redactAmqpUrl(url: string): string {
+  return url.replace(/\/\/.*@/, "//***@");
+}
+
+export { redactAmqpUrl };

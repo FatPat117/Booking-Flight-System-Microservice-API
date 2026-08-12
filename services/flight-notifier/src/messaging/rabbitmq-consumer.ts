@@ -31,7 +31,6 @@ export async function createRabbitMqConsumer(deps: {
       source,
       async (message: ConsumeMessage | null) => {
         if (message === null) {
-          // Broker cancelled the consumer (e.g. channel closing).
           return;
         }
 
@@ -43,7 +42,6 @@ export async function createRabbitMqConsumer(deps: {
             queue: source,
             error: error instanceof Error ? error.message : String(error),
           });
-          // Poison / corrupt payload — drop (no requeue). No DLQ yet.
           channel.nack(message, false, false);
           return;
         }
@@ -60,14 +58,12 @@ export async function createRabbitMqConsumer(deps: {
             queue: source,
             reason: result.reason,
           });
-          // Permanent business rejection — drop to avoid poison-message loops.
           channel.nack(message, false, false);
         } catch (error) {
           deps.logger.error("message_handler_failed", {
             queue: source,
             error: error instanceof Error ? error.message : String(error),
           });
-          // Unexpected throw: drop for Day 21 (no retry/DLQ). Avoid Unacked forever.
           channel.nack(message, false, false);
         }
       },

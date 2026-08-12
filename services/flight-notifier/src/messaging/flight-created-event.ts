@@ -1,12 +1,6 @@
-import type { Logger } from "../observability/logger.js";
-import type {
-  MessageHandler,
-  MessageHandlerResult,
-} from "./message-consumer.js";
-
 /**
- * Event-facing shape for flight.created — validated separately from domain Flight
- * so the wire format can evolve without coupling every consumer to the DB entity.
+ * Wire contract for flight.created — copied from api (Day 22).
+ * Must stay in sync manually until a shared contract package exists.
  */
 export type FlightCreatedEvent = {
   type: "flight.created";
@@ -24,31 +18,7 @@ export type FlightCreatedEvent = {
   };
 };
 
-export function createFlightCreatedConsumer(deps: {
-  logger: Logger;
-}): MessageHandler {
-  return async (payload: unknown): Promise<MessageHandlerResult> => {
-    const parsed = parseFlightCreatedEvent(payload);
-
-    if (!parsed.ok) {
-      return { outcome: "rejected", reason: parsed.reason };
-    }
-
-    const { event } = parsed;
-
-    deps.logger.info("flight_created_consumed", {
-      flightId: event.flight.id,
-      flightNumber: event.flight.flightNumber,
-      origin: event.flight.origin,
-      destination: event.flight.destination,
-      occurredAt: event.occurredAt,
-    });
-
-    return { outcome: "processed" };
-  };
-}
-
-function parseFlightCreatedEvent(
+export function parseFlightCreatedEvent(
   payload: unknown,
 ):
   | { ok: true; event: FlightCreatedEvent }

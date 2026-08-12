@@ -1,19 +1,18 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 21
-**Current day:** Day 21 — RabbitMQ Consumer
-**Status:** Completed — awaiting mentor review / commit
+**Last completed day:** Day 22
+**Current day:** Day 22 — Split flight-notifier microservice
+**Status:** Completed — code + Docker + Bước 6 verified
 
-## Day 21 delivered
+## Day 22 delivered
 
 ```text
-MessageConsumer + RabbitMQ implementation (manual ack, prefetch 1)
-flightCreatedConsumer validates payload and logs
-Separate publisher/consumer AMQP connections with retry
-Composition Root subscribes on boot; async close includes consumer
-requeue:false documented (no DLQ / poison-loop avoidance)
+services/flight-notifier/ standalone (consumer only)
+api: MessagePublisher only — consumer removed
+docker-compose: app + flight-notifier + rabbitmq
+Controlled code copy; no cross-import between services
 ```
 
 ## Next
 
-When assigned — likely multi-service split or DLQ / outbox (mentor directs).
+When assigned — shared contract package, DLQ, or next domain service.

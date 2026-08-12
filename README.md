@@ -2,21 +2,22 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 21)
+## Architecture (Day 22)
 
 ```text
 docker-compose.yml
-  ├── service: app
+  ├── service: app (HTTP + Publisher only)
   │     └── createApplication()
   │           ├── Database → Repositories → CreateFlight / ListFlights
   │           ├── JobScheduler → flights-summary-job
-  │           ├── MessagePublisher → publish flight-created (own AMQP connection)
-  │           ├── MessageConsumer → subscribe flight-created (own AMQP connection)
-  │           │     └── manual ack/nack, prefetch(1), log handler
-  │           └── close() → jobs.stop → publisher.close → consumer.close → db.close
+  │           ├── MessagePublisher → publish flight-created
+  │           └── close() → jobs.stop → publisher.close → db.close
+  │
+  ├── service: flight-notifier (Consumer only — separate process)
+  │     └── index.ts → subscribe flight-created → log (ack/nack)
   │
   └── service: rabbitmq
-        └── queue: flight-created (Ready drops to 0 after consume)
+        └── queue: flight-created (only broker between app and notifier)
 ```
 
 Object creation happens only in the Composition Root. Routes and use cases receive dependencies; they do not `new` infrastructure themselves.
@@ -213,19 +214,23 @@ After a successful `POST /api/flights` (outcome `created`), the app publishes to
 | Order | After SQLite transaction commits | Avoid announcing a flight that rolled back |
 | Dual-write | Accepted limitation | Outbox pattern is a later day |
 
-Startup connects with bounded retry (`connectPublisherWithRetry` / `connectConsumerWithRetry`, 10 × 2s) then fail-fast. Publisher and consumer use **separate** AMQP connections. `close()` is async: stop jobs → close publisher → close consumer → close DB.
+Startup connects with bounded retry (`connectPublisherWithRetry`, 10 × 2s) then fail-fast. `close()` is async: stop jobs → close publisher → close DB.
 
-### Consumer (Day 21)
+### flight-notifier service (Day 22)
 
-The same process also **subscribes** to `flight-created` and logs each valid event (`flight_created_consumed`). This closes the publish → queue → consume → ack loop for learning; splitting into a second microservice comes later.
+Consumer logic moved to `services/flight-notifier/` — its own `package.json`, build, Dockerfile, and process. It subscribes to `flight-created`, validates the event contract, logs `flight_created_consumed`, and acks/nacks manually.
 
-| Concern | Day 21 choice |
+| Concern | Day 22 choice |
 |---------|----------------|
-| Ack mode | Manual (`noAck: false`) |
-| Prefetch | `1` — one in-flight message at a time |
-| Invalid / rejected | `nack(..., requeue: false)` — drop poison messages (no DLQ yet) |
-| Handler | Discriminated `processed` / `rejected` — no throw for bad payloads |
-| Delivery | At-least-once — log-only handler is intentionally idempotent-friendly |
+| Code sharing | Controlled copy into `flight-notifier` (no monorepo yet) |
+| Communication | RabbitMQ only — no HTTP/import between services |
+| Health | `restart: unless-stopped`; no fake HTTP healthcheck |
+| api role | Publish only; no in-process consumer |
+
+```bash
+docker compose up --build
+# POST /api/flights → app publishes → flight-notifier logs consume
+```
 
 ## Database migrations
 
@@ -341,11 +346,10 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No job persistence / retry after process crash
 - Job interval hardcoded in Composition Root (not env config yet)
 - No handler timeout if a job hangs forever
-- RabbitMQ publisher + in-process consumer — not yet a separate microservice
+- RabbitMQ publisher in `app`; consumer in separate `flight-notifier` service
+- `FlightCreatedEvent` contract copied — must update both places until shared package
 - Dual-write: SQLite commit + AMQP publish are not atomic (no outbox yet)
 - No dead-letter queue; rejected/poison messages are dropped (`requeue: false`)
-- No retry for transient consume failures
-- Consumer handler is log-only (no side-effect idempotency challenge yet)
 - `guest`/`guest` RabbitMQ credentials are for local compose only
 - Transaction support is local to one SQLite database connection
 - No nested transaction or savepoint support yet

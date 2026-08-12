@@ -1,5 +1,4 @@
-# Dev topology: app + RabbitMQ.
-# Day 20 — app publishes flight-created; no consumer yet.
+# Dev topology: app (HTTP + publisher) + flight-notifier (consumer) + RabbitMQ.
 
 services:
   app:
@@ -14,7 +13,6 @@ services:
     environment:
       ADMIN_API_KEY: ${ADMIN_API_KEY}
       DATABASE_PATH: /app/data/booking.db
-      # Inside the compose network the broker hostname is the service name.
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
     volumes:
       - booking_data:/app/data
@@ -31,11 +29,22 @@ services:
       retries: 5
       start_period: 10s
 
+  flight-notifier:
+    build:
+      context: ./services/flight-notifier
+      dockerfile: Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    restart: unless-stopped
+
   rabbitmq:
     image: rabbitmq:3-management
     ports:
-      - "5672:5672" # AMQP
-      - "15672:15672" # Management UI — http://localhost:15672 (guest/guest, local only)
+      - "5672:5672"
+      - "15672:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
