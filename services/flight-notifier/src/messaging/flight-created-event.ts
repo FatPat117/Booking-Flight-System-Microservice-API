@@ -3,6 +3,7 @@
  * Must stay in sync manually until a shared contract package exists.
  */
 export type FlightCreatedEvent = {
+  eventId: string;
   type: "flight.created";
   occurredAt: string;
   flight: {
@@ -31,6 +32,10 @@ export function parseFlightCreatedEvent(
 
   if (record.type !== "flight.created") {
     return { ok: false, reason: 'type must be "flight.created"' };
+  }
+
+  if (typeof record.eventId !== "string" || record.eventId.length === 0) {
+    return { ok: false, reason: "eventId must be a non-empty string" };
   }
 
   if (typeof record.occurredAt !== "string" || record.occurredAt.length === 0) {
@@ -78,6 +83,7 @@ export function parseFlightCreatedEvent(
   return {
     ok: true,
     event: {
+      eventId: record.eventId,
       type: "flight.created",
       occurredAt: record.occurredAt,
       flight: {

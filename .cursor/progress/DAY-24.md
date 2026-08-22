@@ -2,7 +2,7 @@
 
 **Date completed:** 2026-08-22
 **Theme:** Outbox Pattern — close dual-write limitation from Day 20
-**Status:** Completed (code) — Bước 6 manual verify pending
+**Status:** Completed — Bước 6 part 1 verified; part 2 (self-heal) pending user confirm
 
 ## Problem DLQ did not solve
 
@@ -26,7 +26,7 @@ Publisher still uses RabbitMQ; only the caller changed from use case to relay.
 Eventual delivery — publish happens on next relay tick, not in the HTTP request path.
 Duplicate delivery if markPublished fails after successful publish — consumer must tolerate retries.
 Relay break on first publish failure — preserves order; head-of-line blocking if first row is poison.
-No idempotency key in event payload yet.
+No idempotency key → eventId added Day 25 (dedupe store still future)
 No CDC/Debezium — SQLite polling is sufficient for learning scale.
 ```
 
@@ -43,10 +43,9 @@ Tests: sqlite-outbox-repository, outbox-relay-job, create-flight updated
 ## Bước 6 experiment (manual)
 
 ```text
-1. docker compose stop rabbitmq
-2. POST /api/flights → expect 201; outbox row with published_at NULL
-3. docker compose start rabbitmq; wait ~5s
-4. outbox row marked published; flight-notifier logs flight_created_consumed
+Part 1 PASS: stop rabbitmq → POST 201 → outbox published_at NULL (after app rebuild with Day 24 code)
+Part 2 pending: start rabbitmq → ~5s → published_at set + flight-notifier log
+(eventId added Day 25 — same outbox.id in payload for future dedupe)
 ```
 
 ## Quality gate

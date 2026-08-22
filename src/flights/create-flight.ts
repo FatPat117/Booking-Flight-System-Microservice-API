@@ -102,10 +102,13 @@ export function createCreateFlight(
         },
       });
 
+      const eventId = generateOutboxId();
+
       outboxRepository.enqueue({
-        id: generateOutboxId(),
+        id: eventId,
         eventType: FLIGHT_CREATED_QUEUE,
         payload: {
+          eventId,
           type: "flight.created",
           occurredAt,
           flight,

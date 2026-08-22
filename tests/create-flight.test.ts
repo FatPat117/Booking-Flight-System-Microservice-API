@@ -480,6 +480,7 @@ test("enqueues flight-created outbox row after successful create", async () => {
   assert.equal(entries[0]?.eventType, "flight-created");
   assert.equal(entries[0]?.createdAt, "2026-07-20T00:00:00.000Z");
   assert.deepEqual(entries[0]?.payload, {
+    eventId: "fixed-outbox-id",
     type: "flight.created",
     occurredAt: "2026-07-20T00:00:00.000Z",
     flight: {

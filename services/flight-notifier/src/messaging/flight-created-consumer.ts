@@ -18,6 +18,7 @@ export function createFlightCreatedConsumer(deps: {
     const { event } = parsed;
 
     deps.logger.info("flight_created_consumed", {
+      eventId: event.eventId,
       flightId: event.flight.id,
       flightNumber: event.flight.flightNumber,
       origin: event.flight.origin,

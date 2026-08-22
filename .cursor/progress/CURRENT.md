@@ -1,18 +1,17 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 24
-**Current day:** Day 24 — Outbox Pattern
-**Status:** Code complete — Bước 6 RabbitMQ-down experiment pending user verify
+**Last completed day:** Day 25
+**Current day:** Day 25 — eventId in event payload
+**Status:** Code complete — Day 24 Bước 6 part 2 (self-heal after RabbitMQ up) pending user verify
 
-## Day 24 delivered
+## Day 25 delivered
 
 ```text
-outbox table + OutboxRepository + SqliteOutboxRepository
-CreateFlight enqueues outbox in transaction (no direct publish)
-OutboxRelay job (5s) reuses JobScheduler + MessagePublisher
-Dual-write limitation closed — eventual delivery
+eventId (= outbox.id) in flight-created payload at enqueue time
+flight-notifier validates + logs eventId
+Dedupe store intentionally NOT built — design notes in DAY-25.md
 ```
 
 ## Next
 
-When assigned — idempotency keys, auto-retry, shared contract package, or next domain.
+When assigned — consumer dedupe store, shared contract package, or next domain with real side-effects.

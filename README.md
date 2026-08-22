@@ -358,7 +358,7 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No nested transaction or savepoint support yet
 - No cross-service or distributed transaction
 - No outbox monitoring or DLQ alerting
-- No idempotency key in events (consumer must stay tolerant of duplicates)
+- `eventId` in flight-created payload (Day 25) — consumer dedupe store not built yet; duplicate delivery still possible
 - No migration CLI yet
 - No down/rollback migrations
 - No schema diff tooling
