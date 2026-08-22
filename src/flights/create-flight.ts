@@ -1,6 +1,5 @@
 import type { AuditRecorder } from "../audit/audit-recorder.js";
-import type { MessagePublisher } from "../messaging/message-publisher.js";
-import type { Logger } from "../observability/logger.js";
+import type { OutboxRepository } from "../outbox/outbox-repository.js";
 import type { TransactionRunner } from "../transactions/transaction-runner.js";
 import type { Flight, ValidationIssue } from "../types.js";
 import type { FlightRepository } from "./flight-repository.js";
@@ -18,11 +17,11 @@ export type CreateFlight = (input: unknown) => Promise<CreateFlightResult>;
 type CreateFlightDependencies = {
   flightRepository: FlightRepository;
   auditRecorder: AuditRecorder;
+  outboxRepository: OutboxRepository;
   transactionRunner: TransactionRunner;
-  messagePublisher: MessagePublisher;
-  logger: Logger;
   generateId: () => string;
   generateAuditId: () => string;
+  generateOutboxId: () => string;
   getRequestId: () => string | undefined;
   getCurrentTime: () => Date;
 };
@@ -31,8 +30,8 @@ type CreateFlightDependencies = {
  * Application use case: create a flight from untrusted input.
  * No Express, HTTP status, or SQLite knowledge.
  *
- * After a successful DB commit, publishes a fat `flight-created` event.
- * Publish failure is logged only — dual-write is accepted for Day 20 (no outbox yet).
+ * Enqueues a `flight-created` outbox row inside the same SQLite transaction
+ * as flight + audit — OutboxRelay publishes to RabbitMQ asynchronously.
  */
 export function createCreateFlight(
   dependencies: CreateFlightDependencies,
@@ -40,11 +39,11 @@ export function createCreateFlight(
   const {
     flightRepository,
     auditRecorder,
+    outboxRepository,
     transactionRunner,
-    messagePublisher,
-    logger,
     generateId,
     generateAuditId,
+    generateOutboxId,
     getRequestId,
     getCurrentTime,
   } = dependencies;
@@ -73,7 +72,7 @@ export function createCreateFlight(
       availableSeats: validated.availableSeats,
     };
 
-    const result = transactionRunner.run(() => {
+    return transactionRunner.run(() => {
       const persistResult = flightRepository.create(flight);
 
       if (persistResult.outcome === "duplicate") {
@@ -81,6 +80,7 @@ export function createCreateFlight(
       }
 
       const requestId = getRequestId();
+      const occurredAt = getCurrentTime().toISOString();
 
       auditRecorder.record({
         id: generateAuditId(),
@@ -94,7 +94,7 @@ export function createCreateFlight(
           id: flight.id,
         },
         ...(requestId === undefined ? {} : { requestId }),
-        occurredAt: getCurrentTime().toISOString(),
+        occurredAt,
         metadata: {
           flightNumber: flight.flightNumber,
           origin: flight.origin,
@@ -102,27 +102,18 @@ export function createCreateFlight(
         },
       });
 
+      outboxRepository.enqueue({
+        id: generateOutboxId(),
+        eventType: FLIGHT_CREATED_QUEUE,
+        payload: {
+          type: "flight.created",
+          occurredAt,
+          flight,
+        },
+        createdAt: occurredAt,
+      });
+
       return { outcome: "created", flight } as const;
     });
-
-    // Publish only after the SQLite transaction has committed successfully.
-    if (result.outcome === "created") {
-      try {
-        await messagePublisher.publish(FLIGHT_CREATED_QUEUE, {
-          type: "flight.created",
-          occurredAt: getCurrentTime().toISOString(),
-          // Fat event: consumer can act without calling back into this API.
-          flight: result.flight,
-        });
-      } catch (error) {
-        // Dual-write: flight is already durable; message may be lost.
-        logger.error("flight_created_publish_failed", {
-          flightId: result.flight.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    return result;
   };
 }

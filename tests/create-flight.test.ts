@@ -7,12 +7,10 @@ import type {
 } from "../src/audit/audit-recorder.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
-import type { MessagePublisher } from "../src/messaging/message-publisher.js";
-import { createNoopMessagePublisher } from "../src/messaging/noop-message-publisher.js";
+import type { OutboxEntry, OutboxRepository } from "../src/outbox/outbox-repository.js";
 import {
   createConsoleLogger,
   type Logger,
-  type LogFields,
 } from "../src/observability/logger.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 import type { Flight } from "../src/types.js";
@@ -56,67 +54,36 @@ function createCapturingAuditRecorder() {
   };
 }
 
-function createCapturingPublisher() {
-  const published: Array<{ destination: string; message: unknown }> = [];
+function createCapturingOutboxRepository() {
+  const entries: OutboxEntry[] = [];
 
-  const messagePublisher: MessagePublisher = {
-    async publish(destination, message) {
-      published.push({ destination, message });
+  const outboxRepository: OutboxRepository = {
+    enqueue(entry) {
+      entries.push(entry);
     },
-    async close() {},
+    findUnpublished() {
+      return [];
+    },
+    markPublished() {},
   };
 
-  return { messagePublisher, published };
-}
-
-function createMemoryLogger() {
-  const entries: Array<{
-    level: string;
-    message: string;
-    fields?: LogFields;
-  }> = [];
-
-  const logger: Logger = {
-    info(message, fields) {
-      entries.push(
-        fields === undefined
-          ? { level: "info", message }
-          : { level: "info", message, fields },
-      );
-    },
-    warn(message, fields) {
-      entries.push(
-        fields === undefined
-          ? { level: "warn", message }
-          : { level: "warn", message, fields },
-      );
-    },
-    error(message, fields) {
-      entries.push(
-        fields === undefined
-          ? { level: "error", message }
-          : { level: "error", message, fields },
-      );
-    },
-  };
-
-  return { logger, entries };
+  return { outboxRepository, entries };
 }
 
 function createUseCase(
   repository: FlightRepository,
   auditRecorder: AuditRecorder = createCapturingAuditRecorder().auditRecorder,
-  messagePublisher: MessagePublisher = createNoopMessagePublisher(),
-  logger: Logger = createConsoleLogger(),
+  outboxRepository: OutboxRepository = createCapturingOutboxRepository()
+    .outboxRepository,
 ) {
   return createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    outboxRepository,
     transactionRunner: createPassthroughTransactionRunner(),
-    messagePublisher,
-    logger,
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => FIXED_TIME,
   });
@@ -138,14 +105,14 @@ test("valid input creates a normalized flight via repository", async () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder: createCapturingAuditRecorder().auditRecorder,
+    outboxRepository: createCapturingOutboxRepository().outboxRepository,
     transactionRunner: createPassthroughTransactionRunner(),
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => {
       generateIdCalls += 1;
       return "flight-fixed-id";
     },
     generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => FIXED_TIME,
   });
@@ -183,18 +150,19 @@ test("invalid input does not generate ID or call repository", async () => {
   };
 
   const { auditRecorder, records } = createCapturingAuditRecorder();
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
 
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    outboxRepository,
     transactionRunner: createPassthroughTransactionRunner(),
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => {
       generateIdCalls += 1;
       return "should-not-be-used";
     },
     generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => FIXED_TIME,
   });
@@ -210,6 +178,7 @@ test("invalid input does not generate ID or call repository", async () => {
   assert.equal(createCalls, 0);
   assert.equal(generateIdCalls, 0);
   assert.deepEqual(records, []);
+  assert.deepEqual(entries, []);
 });
 
 test("repository duplicate becomes application duplicate", async () => {
@@ -222,11 +191,13 @@ test("repository duplicate becomes application duplicate", async () => {
   };
 
   const { auditRecorder, records } = createCapturingAuditRecorder();
-  const createFlight = createUseCase(repository, auditRecorder);
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
+  const createFlight = createUseCase(repository, auditRecorder, outboxRepository);
 
   const result = await createFlight(makeValidRawInput());
   assert.equal(result.outcome, "duplicate");
   assert.deepEqual(records, []);
+  assert.deepEqual(entries, []);
 });
 
 test("ID generator value is passed to repository", async () => {
@@ -279,11 +250,11 @@ test("records audit log when flight is created", async () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    outboxRepository: createCapturingOutboxRepository().outboxRepository,
     transactionRunner: createPassthroughTransactionRunner(),
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => FIXED_TIME,
   });
@@ -332,11 +303,11 @@ test("does not record audit when validation fails", async () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    outboxRepository: createCapturingOutboxRepository().outboxRepository,
     transactionRunner: createPassthroughTransactionRunner(),
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => FIXED_TIME,
   });
@@ -362,11 +333,11 @@ test("does not record audit when flight is duplicate", async () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    outboxRepository: createCapturingOutboxRepository().outboxRepository,
     transactionRunner: createPassthroughTransactionRunner(),
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => FIXED_TIME,
   });
@@ -395,11 +366,11 @@ test("propagates audit recorder failures", async () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder: failingAuditRecorder,
+    outboxRepository: createCapturingOutboxRepository().outboxRepository,
     transactionRunner: createPassthroughTransactionRunner(),
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => FIXED_TIME,
   });
@@ -433,11 +404,11 @@ test("does not open transaction when validation fails", async () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    outboxRepository: createCapturingOutboxRepository().outboxRepository,
     transactionRunner,
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => FIXED_TIME,
   });
@@ -471,11 +442,11 @@ test("runs successful create inside a transaction", async () => {
   const createFlight = createCreateFlight({
     flightRepository: repository,
     auditRecorder,
+    outboxRepository: createCapturingOutboxRepository().outboxRepository,
     transactionRunner,
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => FIXED_TIME,
   });
@@ -486,7 +457,7 @@ test("runs successful create inside a transaction", async () => {
   assert.equal(transactionCalls, 1);
 });
 
-test("publishes flight-created after successful create", async () => {
+test("enqueues flight-created outbox row after successful create", async () => {
   const repository: FlightRepository = {
     findPage: () => ({ items: [], totalItems: 0 }),
     findById: () => undefined,
@@ -495,18 +466,20 @@ test("publishes flight-created after successful create", async () => {
     },
   };
 
-  const { messagePublisher, published } = createCapturingPublisher();
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
   const createFlight = createUseCase(
     repository,
     createCapturingAuditRecorder().auditRecorder,
-    messagePublisher,
+    outboxRepository,
   );
 
   const result = await createFlight(makeValidRawInput());
   assert.equal(result.outcome, "created");
-  assert.equal(published.length, 1);
-  assert.equal(published[0]?.destination, "flight-created");
-  assert.deepEqual(published[0]?.message, {
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0]?.id, "fixed-outbox-id");
+  assert.equal(entries[0]?.eventType, "flight-created");
+  assert.equal(entries[0]?.createdAt, "2026-07-20T00:00:00.000Z");
+  assert.deepEqual(entries[0]?.payload, {
     type: "flight.created",
     occurredAt: "2026-07-20T00:00:00.000Z",
     flight: {
@@ -523,7 +496,7 @@ test("publishes flight-created after successful create", async () => {
   });
 });
 
-test("does not publish when create is duplicate", async () => {
+test("does not enqueue outbox row when create is duplicate", async () => {
   const repository: FlightRepository = {
     findPage: () => ({ items: [], totalItems: 0 }),
     findById: () => undefined,
@@ -532,19 +505,19 @@ test("does not publish when create is duplicate", async () => {
     },
   };
 
-  const { messagePublisher, published } = createCapturingPublisher();
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
   const createFlight = createUseCase(
     repository,
     createCapturingAuditRecorder().auditRecorder,
-    messagePublisher,
+    outboxRepository,
   );
 
   const result = await createFlight(makeValidRawInput());
   assert.equal(result.outcome, "duplicate");
-  assert.equal(published.length, 0);
+  assert.equal(entries.length, 0);
 });
 
-test("publish failure is logged and does not fail create", async () => {
+test("does not enqueue outbox row when validation fails", async () => {
   const repository: FlightRepository = {
     findPage: () => ({ items: [], totalItems: 0 }),
     findById: () => undefined,
@@ -553,29 +526,45 @@ test("publish failure is logged and does not fail create", async () => {
     },
   };
 
-  const { logger, entries } = createMemoryLogger();
-  const failingPublisher: MessagePublisher = {
-    async publish() {
-      throw new Error("broker down");
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
+  const createFlight = createUseCase(
+    repository,
+    createCapturingAuditRecorder().auditRecorder,
+    outboxRepository,
+  );
+
+  const result = await createFlight({});
+  assert.equal(result.outcome, "validation_failed");
+  assert.equal(entries.length, 0);
+});
+
+test("outbox enqueue failure rolls back with the transaction", async () => {
+  const repository: FlightRepository = {
+    findPage: () => ({ items: [], totalItems: 0 }),
+    findById: () => undefined,
+    create() {
+      return { outcome: "created" };
     },
-    async close() {},
+  };
+
+  const failingOutboxRepository: OutboxRepository = {
+    enqueue() {
+      throw new Error("outbox write failed");
+    },
+    findUnpublished() {
+      return [];
+    },
+    markPublished() {},
   };
 
   const createFlight = createUseCase(
     repository,
     createCapturingAuditRecorder().auditRecorder,
-    failingPublisher,
-    logger,
+    failingOutboxRepository,
   );
 
-  const result = await createFlight(makeValidRawInput());
-  assert.equal(result.outcome, "created");
-  assert.ok(
-    entries.some(
-      (entry) =>
-        entry.level === "error" &&
-        entry.message === "flight_created_publish_failed" &&
-        entry.fields?.flightId === "fixed-flight-id",
-    ),
+  await assert.rejects(
+    () => createFlight(makeValidRawInput()),
+    /outbox write failed/,
   );
 });

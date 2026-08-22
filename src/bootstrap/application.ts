@@ -22,6 +22,8 @@ import { createFlightsSummaryJob } from "../jobs/flights-summary-job.js";
 import { createInMemoryJobScheduler } from "../jobs/in-memory-job-scheduler.js";
 import { connectPublisherWithRetry } from "../messaging/connect-with-retry.js";
 import type { MessagePublisher } from "../messaging/message-publisher.js";
+import { createOutboxRelayJob } from "../outbox/outbox-relay-job.js";
+import { createSqliteOutboxRepository } from "../outbox/sqlite-outbox-repository.js";
 import {
   createConsoleLogger,
   type Logger,
@@ -30,6 +32,7 @@ import { getRequestContext } from "../observability/request-context.js";
 import { createSqliteTransactionRunner } from "../transactions/sqlite-transaction-runner.js";
 
 const DEFAULT_FLIGHTS_SUMMARY_INTERVAL_MS = 60_000;
+const DEFAULT_OUTBOX_RELAY_INTERVAL_MS = 5_000;
 
 /**
  * Fully wired application graph.
@@ -52,6 +55,8 @@ export type CreateApplicationOptions = {
   logger?: Logger;
   /** Override for tests; production default is 60s */
   flightsSummaryIntervalMs?: number;
+  /** Override for tests; production default is 5s */
+  outboxRelayIntervalMs?: number;
   /**
    * Tests inject a noop publisher so the suite does not need RabbitMQ.
    * Production omits this and connects via config.rabbitmqUrl.
@@ -69,6 +74,8 @@ export async function createApplication(
   const logger = options.logger ?? createConsoleLogger();
   const flightsSummaryIntervalMs =
     options.flightsSummaryIntervalMs ?? DEFAULT_FLIGHTS_SUMMARY_INTERVAL_MS;
+  const outboxRelayIntervalMs =
+    options.outboxRelayIntervalMs ?? DEFAULT_OUTBOX_RELAY_INTERVAL_MS;
 
   const databasePath = resolveDatabasePath(config.databasePath);
   ensureDatabaseDirectory(databasePath);
@@ -76,6 +83,7 @@ export async function createApplication(
   const database = openDatabase(databasePath);
   const flightRepository = createSqliteFlightRepository(database);
   const auditRecorder = createSqliteAuditRecorder(database);
+  const outboxRepository = createSqliteOutboxRepository(database);
   const transactionRunner = createSqliteTransactionRunner(database);
   const healthChecks = createHealthChecks(database);
 
@@ -89,11 +97,11 @@ export async function createApplication(
   const createFlight = createCreateFlight({
     flightRepository,
     auditRecorder,
+    outboxRepository,
     transactionRunner,
-    messagePublisher,
-    logger,
     generateId: () => crypto.randomUUID(),
     generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
     getCurrentTime: () => new Date(),
   });
@@ -108,6 +116,14 @@ export async function createApplication(
       flightRepository,
       logger,
       intervalMs: flightsSummaryIntervalMs,
+    }),
+  );
+  jobScheduler.register(
+    createOutboxRelayJob({
+      outboxRepository,
+      messagePublisher,
+      logger,
+      intervalMs: outboxRelayIntervalMs,
     }),
   );
   jobScheduler.start();

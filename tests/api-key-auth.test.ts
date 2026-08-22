@@ -7,8 +7,7 @@ import { createApp } from "../src/app.js";
 import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
-import { createNoopMessagePublisher } from "../src/messaging/noop-message-publisher.js";
-import { createConsoleLogger } from "../src/observability/logger.js";
+import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 import { createHealthChecks } from "../src/health/health-checks.js";
@@ -73,11 +72,11 @@ function createTestContext(t: TestContext) {
   const createFlight = createCreateFlight({
     flightRepository,
     auditRecorder: createNoopAuditRecorder(),
+    outboxRepository: createNoopOutboxRepository(),
     transactionRunner: createPassthroughTransactionRunner(),
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => "fixed-flight-id",
     generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
   });

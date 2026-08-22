@@ -2,23 +2,23 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 23)
+## Architecture (Day 24)
 
 ```text
 docker-compose.yml
-  ├── service: app (HTTP + Publisher only)
-  │     └── MessagePublisher → flight-created (queue with x-dead-letter-exchange)
+  ├── service: app (HTTP + Outbox relay)
+  │     └── createApplication()
+  │           ├── CreateFlight → flight + audit + outbox (one SQLite transaction)
+  │           ├── JobScheduler
+  │           │     ├── flights-summary-job
+  │           │     └── outbox-relay-job → MessagePublisher → flight-created
+  │           └── close() → jobs.stop → publisher.close → db.close
   │
-  ├── service: flight-notifier (Consumer only — separate process)
-  │     └── subscribe("flight-created")
-  │           ├── processed → ack
-  │           └── rejected / parse error / handler throw → nack(requeue:false)
-  │                 └── RabbitMQ routes → flight-created.dlx → flight-created.dlq
+  ├── service: flight-notifier (Consumer + DLQ)
   │
   └── service: rabbitmq
-        ├── queue: flight-created
-        ├── exchange: flight-created.dlx (fanout)
-        └── queue: flight-created.dlq (durable — manual investigation, no auto-consume)
+        ├── queue: flight-created (+ DLX/DLQ)
+        └── outbox in SQLite bridges app ↔ broker (eventual delivery)
 ```
 
 Object creation happens only in the Composition Root. Routes and use cases receive dependencies; they do not `new` infrastructure themselves.
@@ -204,18 +204,20 @@ Verify internal DNS:
 docker compose exec app sh -c "getent hosts rabbitmq"
 ```
 
-## Messaging (Day 20)
+## Messaging (Day 20–24)
 
-After a successful `POST /api/flights` (outcome `created`), the app publishes to durable queue `flight-created`.
+After a successful `POST /api/flights` (outcome `created`), the app enqueues a row in SQLite `outbox` inside the same transaction as flight + audit. `outbox-relay-job` (default every 5s) reads unpublished rows and publishes to durable queue `flight-created`.
 
 | Decision | Choice | Why |
 |----------|--------|-----|
 | Payload | Fat event (`type`, `occurredAt`, full `flight`) | No consumer API callback yet; UI can inspect the body |
-| Publish failure | Log `flight_created_publish_failed`; still return `201` | DB is source of truth; message is a side notification |
-| Order | After SQLite transaction commits | Avoid announcing a flight that rolled back |
-| Dual-write | Accepted limitation | Outbox pattern is a later day |
+| Publish path | Outbox relay (not direct from `CreateFlight`) | Flight + event intent are atomic in SQLite; RabbitMQ can be down |
+| Delivery | Eventual (relay interval, default 5s) | Trade latency for reliability — no lost events when broker is unavailable |
+| Publish failure in relay | Log `outbox_publish_failed`; retry next tick | Row stays unpublished until publish succeeds |
+| Order | Relay stops batch on first failure (`break`) | Preserve publish order by `created_at` |
+| DLQ | `flight-created.dlq` via dead-letter exchange | Poison messages after delivery — manual investigation only |
 
-Startup connects with bounded retry (`connectPublisherWithRetry`, 10 × 2s) then fail-fast. `close()` is async: stop jobs → close publisher → close DB.
+Startup connects publisher with bounded retry (`connectPublisherWithRetry`, 10 × 2s) then fail-fast. `close()` is async: stop jobs → close publisher → close DB.
 
 ### flight-notifier service (Day 22)
 
@@ -349,13 +351,14 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No handler timeout if a job hangs forever
 - RabbitMQ publisher in `app`; consumer in separate `flight-notifier` service
 - `FlightCreatedEvent` contract copied — must update both places until shared package
-- Dual-write: SQLite commit + AMQP publish are not atomic (no outbox yet)
+- Outbox relay polls every 5s (not immediate publish); duplicate delivery possible if `markPublished` fails after successful publish
 - Dead-letter: rejected/poison messages route to `flight-created.dlq` via `flight-created.dlx` — manual inspection only (no auto-retry or alerting)
 - `guest`/`guest` RabbitMQ credentials are for local compose only
 - Transaction support is local to one SQLite database connection
 - No nested transaction or savepoint support yet
 - No cross-service or distributed transaction
-- No outbox pattern yet
+- No outbox monitoring or DLQ alerting
+- No idempotency key in events (consumer must stay tolerant of duplicates)
 - No migration CLI yet
 - No down/rollback migrations
 - No schema diff tooling

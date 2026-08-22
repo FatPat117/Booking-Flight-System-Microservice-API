@@ -71,7 +71,31 @@ const createAuditLogsMigration: Migration = {
   },
 };
 
+const createOutboxMigration: Migration = {
+  id: "003_create_outbox",
+
+  up(database) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS outbox (
+        id TEXT PRIMARY KEY NOT NULL,
+        event_type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        published_at TEXT,
+        CHECK (length(event_type) > 0),
+        CHECK (length(payload) > 0),
+        CHECK (length(created_at) > 0)
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_outbox_unpublished
+      ON outbox (published_at)
+      WHERE published_at IS NULL;
+    `);
+  },
+};
+
 export const migrations: readonly Migration[] = [
   createFlightsMigration,
   createAuditLogsMigration,
+  createOutboxMigration,
 ];

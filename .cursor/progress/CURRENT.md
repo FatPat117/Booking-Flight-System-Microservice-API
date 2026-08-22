@@ -1,19 +1,18 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 23
-**Current day:** Day 23 — Dead Letter Queue (DLQ)
-**Status:** Completed — code + Bước 3 DLQ experiment verified
+**Last completed day:** Day 24
+**Current day:** Day 24 — Outbox Pattern
+**Status:** Code complete — Bước 6 RabbitMQ-down experiment pending user verify
 
-## Day 23 delivered
+## Day 24 delivered
 
 ```text
-flight-created.dlx + flight-created.dlq declared in flight-notifier consumer
-Main queue: x-dead-letter-exchange → DLX; nack(requeue:false) routes to DLQ
-Publisher asserts compatible DLX/queue args (avoids PRECONDITION_FAILED)
-DLQ = manual investigation only — no auto-retry
-Upgrade: docker compose down -v before first run with DLQ args
+outbox table + OutboxRepository + SqliteOutboxRepository
+CreateFlight enqueues outbox in transaction (no direct publish)
+OutboxRelay job (5s) reuses JobScheduler + MessagePublisher
+Dual-write limitation closed — eventual delivery
 ```
 
 ## Next
 
-When assigned — auto-retry with x-death, shared contract package, or next domain.
+When assigned — idempotency keys, auto-retry, shared contract package, or next domain.

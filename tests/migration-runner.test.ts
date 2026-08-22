@@ -179,6 +179,7 @@ test("openDatabase applies application migrations on empty database", (t) => {
 
   assert.ok(tableNames.includes("flights"));
   assert.ok(tableNames.includes("audit_logs"));
+  assert.ok(tableNames.includes("outbox"));
   assert.ok(tableNames.includes("schema_migrations"));
 
   const applied = database
@@ -193,7 +194,7 @@ test("openDatabase applies application migrations on empty database", (t) => {
 
   assert.deepEqual(
     applied.map((row) => row.id),
-    ["001_create_flights", "002_create_audit_logs"],
+    ["001_create_flights", "002_create_audit_logs", "003_create_outbox"],
   );
 });
 
@@ -250,7 +251,7 @@ test("migrations adopt an existing pre-migration schema", (t) => {
 
   assert.deepEqual(
     applied.map((row) => row.id),
-    ["001_create_flights", "002_create_audit_logs"],
+    ["001_create_flights", "002_create_audit_logs", "003_create_outbox"],
   );
 
   const flightsTable = database

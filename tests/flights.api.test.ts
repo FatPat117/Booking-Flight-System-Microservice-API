@@ -13,8 +13,7 @@ import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { createSqliteAuditRecorder } from "../src/audit/sqlite-audit-recorder.js";
 import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
-import { createNoopMessagePublisher } from "../src/messaging/noop-message-publisher.js";
-import { createConsoleLogger } from "../src/observability/logger.js";
+import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
@@ -112,11 +111,11 @@ function createAppWithRepository(
   const createFlight = createCreateFlight({
     flightRepository,
     auditRecorder,
+    outboxRepository: createNoopOutboxRepository(),
     transactionRunner,
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => crypto.randomUUID(),
     generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
     getCurrentTime: () => new Date(),
   });
@@ -1006,11 +1005,11 @@ test("rolls back flight creation when audit recording fails", async (t) => {
   const createFlight = createCreateFlight({
     flightRepository,
     auditRecorder: failingAuditRecorder,
+    outboxRepository: createNoopOutboxRepository(),
     transactionRunner,
-    messagePublisher: createNoopMessagePublisher(),
-    logger: createConsoleLogger(),
     generateId: () => "rollback-flight-id",
     generateAuditId: () => "rollback-audit-id",
+    generateOutboxId: () => "rollback-outbox-id",
     getRequestId: () => "rollback-request-id",
     getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
   });
