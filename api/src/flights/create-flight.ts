@@ -1,3 +1,4 @@
+import type { FlightCreatedEvent } from "@booking-flight-system/contracts";
 import type { AuditRecorder } from "../audit/audit-recorder.js";
 import type { OutboxRepository } from "../outbox/outbox-repository.js";
 import type { TransactionRunner } from "../transactions/transaction-runner.js";
@@ -104,15 +105,17 @@ export function createCreateFlight(
 
       const eventId = generateOutboxId();
 
+      const payload: FlightCreatedEvent = {
+        eventId,
+        type: "flight.created",
+        occurredAt,
+        flight,
+      };
+
       outboxRepository.enqueue({
         id: eventId,
         eventType: FLIGHT_CREATED_QUEUE,
-        payload: {
-          eventId,
-          type: "flight.created",
-          occurredAt,
-          flight,
-        },
+        payload,
         createdAt: occurredAt,
       });
 

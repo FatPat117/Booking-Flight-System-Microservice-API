@@ -1,36 +1,20 @@
 {
-        "name": "booking-microservices-pitachiti",
-        "version": "1.0.0",
-        "main": "index.js",
-        "type": "module",
-        "engines": {
-                "node": ">=22"
-        },
-        "scripts": {
-                "prepare": "git config core.hooksPath scripts/git-hooks || true",
-                "dev": "node --env-file-if-exists=.env --import tsx --watch src/index.ts",
-                "build": "tsc",
-                "start": "node --env-file-if-exists=.env dist/index.js",
-                "typecheck": "tsc --noEmit",
-                "test": "node --import tsx --test tests/**/*.test.ts",
-                "test:watch": "node --import tsx --test --watch tests/**/*.test.ts",
-                "typecheck:test": "tsc -p tsconfig.test.json"
-        },
-        "keywords": [],
-        "author": "",
-        "license": "ISC",
-        "description": "",
-        "dependencies": {
-                "amqplib": "^2.0.1",
-                "express": "^5.2.1"
-        },
-        "devDependencies": {
-                "@types/amqplib": "^0.10.8",
-                "@types/express": "^5.0.6",
-                "@types/node": "^24.13.3",
-                "@types/supertest": "^7.2.0",
-                "supertest": "^7.2.2",
-                "tsx": "^4.23.0",
-                "typescript": "^6.0.3"
-        }
+  "name": "booking-flight-system",
+  "private": true,
+  "workspaces": [
+    "api",
+    "services/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "prepare": "git config core.hooksPath scripts/git-hooks || true",
+    "build": "npm run build --workspace=@booking-flight-system/contracts && npm run build --workspace=@booking-flight-system/api && npm run build --workspace=@booking-flight-system/flight-notifier",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck:test": "npm run typecheck:test --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "postinstall": "npm run build --workspace=@booking-flight-system/contracts"
+  }
 }

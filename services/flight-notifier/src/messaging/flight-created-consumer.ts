@@ -1,5 +1,5 @@
 import type { Logger } from "../observability/logger.js";
-import { parseFlightCreatedEvent } from "./flight-created-event.js";
+import { parseFlightCreatedEvent } from "@booking-flight-system/contracts";
 import type {
   MessageHandler,
   MessageHandlerResult,

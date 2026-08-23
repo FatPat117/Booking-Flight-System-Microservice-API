@@ -2,23 +2,18 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 26)
+## Architecture (Day 27)
 
 ```text
+/ (npm workspaces root)
+  packages/contracts/     ← @booking-flight-system/contracts (FlightCreatedEvent)
+  api/                    ← @booking-flight-system/api (HTTP + outbox relay)
+  services/flight-notifier/ ← consumer
+
 docker-compose.yml
-  ├── service: app (HTTP + Outbox relay)
-  │     └── createApplication()
-  │           ├── CreateFlight → flight + audit + outbox (one SQLite transaction)
-  │           ├── CreateBooking → reserveSeat (OCC) + booking + audit + outbox
-  │           ├── JobScheduler
-  │           │     ├── flights-summary-job
-  │           │     └── outbox-relay-job → MessagePublisher → flight-created | booking-created
-  │           └── close() → jobs.stop → publisher.close → db.close
-  │
-  ├── service: flight-notifier (Consumer + DLQ)
-  │
-  └── service: rabbitmq
-        ├── queue: flight-created (+ DLX/DLQ)
+  ├── app          (build context: ., Dockerfile: api/Dockerfile)
+  ├── flight-notifier (build context: ., Dockerfile: services/flight-notifier/Dockerfile)
+  └── rabbitmq
         └── outbox in SQLite bridges app ↔ broker (eventual delivery)
 ```
 
@@ -50,7 +45,8 @@ Local setup:
 ```bash
 cp .env.example .env
 # set ADMIN_API_KEY to a local secret (at least 16 characters)
-npm run dev
+npm install          # root — installs all workspaces, builds contracts
+npm run dev --workspace=@booking-flight-system/api
 ```
 
 Do not commit `.env`. Only commit `.env.example` with placeholder values.
@@ -345,12 +341,16 @@ Invalid pagination → `422`. Empty page beyond the end → `200` with empty `it
 
 ## Scripts
 
+Run from **repo root** (workspace commands):
+
 ```bash
+npm install
 npm run typecheck
 npm run typecheck:test
 npm run build
 npm test
-npm start
+npm run dev --workspace=@booking-flight-system/api
+npm start --workspace=@booking-flight-system/api
 ```
 
 ## Postman
@@ -365,7 +365,7 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - Job interval hardcoded in Composition Root (not env config yet)
 - No handler timeout if a job hangs forever
 - RabbitMQ publisher in `app`; consumer in separate `flight-notifier` service
-- `FlightCreatedEvent` contract copied — must update both places until shared package
+- `FlightCreatedEvent` in `packages/contracts` — `BookingCreatedEvent` not shared yet (no consumer)
 - Outbox relay polls every 5s (not immediate publish); duplicate delivery possible if `markPublished` fails after successful publish
 - Dead-letter: rejected/poison messages route to `flight-created.dlq` via `flight-created.dlx` — manual inspection only (no auto-retry or alerting)
 - `guest`/`guest` RabbitMQ credentials are for local compose only

@@ -4,7 +4,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: api/Dockerfile
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -31,8 +31,8 @@ services:
 
   flight-notifier:
     build:
-      context: ./services/flight-notifier
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/flight-notifier/Dockerfile
     depends_on:
       rabbitmq:
         condition: service_healthy

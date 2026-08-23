@@ -1,7 +1,3 @@
-/**
- * Wire contract for flight.created — copied from api (Day 22).
- * Must stay in sync manually until a shared contract package exists.
- */
 export type FlightCreatedEvent = {
   eventId: string;
   type: "flight.created";
