@@ -1,17 +1,19 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 25
-**Current day:** Day 25 — eventId in event payload
-**Status:** Code complete — Day 24 Bước 6 part 2 (self-heal after RabbitMQ up) pending user verify
+**Last completed day:** Day 26
+**Current day:** Day 26 — Booking domain + OCC
+**Status:** Code complete — all checkpoints verified (including Day 24 Bước 6 part 2)
 
-## Day 25 delivered
+## Day 26 delivered
 
 ```text
-eventId (= outbox.id) in flight-created payload at enqueue time
-flight-notifier validates + logs eventId
-Dedupe store intentionally NOT built — design notes in DAY-25.md
+bookings table + BookingRepository (atomic reserveSeat)
+CreateBooking → audit + outbox booking-created in one transaction
+POST /api/flights/:flightId/bookings (201/409/404/422)
+Concurrent race test (Promise.all, 1 seat)
+155 api tests pass
 ```
 
 ## Next
 
-When assigned — consumer dedupe store, shared contract package, or next domain with real side-effects.
+When assigned — booking consumer, dedupe store, or next curriculum day.

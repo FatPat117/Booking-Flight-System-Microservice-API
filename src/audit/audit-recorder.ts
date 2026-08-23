@@ -1,14 +1,24 @@
-export type AuditActor = {
-  type: "admin_api_key";
-  id: "admin";
-};
+export type AuditActor =
+  | {
+      type: "admin_api_key";
+      id: "admin";
+    }
+  | {
+      type: "passenger";
+      id: "anonymous";
+    };
 
-export type AuditTarget = {
-  type: "flight";
-  id: string;
-};
+export type AuditTarget =
+  | {
+      type: "flight";
+      id: string;
+    }
+  | {
+      type: "booking";
+      id: string;
+    };
 
-export type AuditAction = "FLIGHT_CREATED";
+export type AuditAction = "FLIGHT_CREATED" | "BOOKING_CREATED";
 
 export type AuditMetadata = Record<
   string,

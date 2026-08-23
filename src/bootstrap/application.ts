@@ -5,6 +5,12 @@ import { createSqliteAuditRecorder } from "../audit/sqlite-audit-recorder.js";
 import type { AppConfig } from "../config.js";
 import { openDatabase } from "../database.js";
 import {
+  createCreateBooking,
+  type CreateBooking,
+} from "../bookings/create-booking.js";
+import { createSqliteBookingRepository } from "../bookings/sqlite-booking-repository.js";
+import type { BookingRepository } from "../bookings/booking-repository.js";
+import {
   createCreateFlight,
   type CreateFlight,
 } from "../flights/create-flight.js";
@@ -44,7 +50,9 @@ export type Application = Readonly<{
   config: AppConfig;
   logger: Logger;
   flightRepository: FlightRepository;
+  bookingRepository: BookingRepository;
   createFlight: CreateFlight;
+  createBooking: CreateBooking;
   listFlights: ListFlights;
   healthChecks: HealthChecks;
   close(): Promise<void>;
@@ -82,6 +90,7 @@ export async function createApplication(
 
   const database = openDatabase(databasePath);
   const flightRepository = createSqliteFlightRepository(database);
+  const bookingRepository = createSqliteBookingRepository(database);
   const auditRecorder = createSqliteAuditRecorder(database);
   const outboxRepository = createSqliteOutboxRepository(database);
   const transactionRunner = createSqliteTransactionRunner(database);
@@ -96,6 +105,18 @@ export async function createApplication(
 
   const createFlight = createCreateFlight({
     flightRepository,
+    auditRecorder,
+    outboxRepository,
+    transactionRunner,
+    generateId: () => crypto.randomUUID(),
+    generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
+  });
+
+  const createBooking = createCreateBooking({
+    bookingRepository,
     auditRecorder,
     outboxRepository,
     transactionRunner,
@@ -132,7 +153,9 @@ export async function createApplication(
     config,
     logger,
     flightRepository,
+    bookingRepository,
     createFlight,
+    createBooking,
     listFlights,
     healthChecks,
     async close() {

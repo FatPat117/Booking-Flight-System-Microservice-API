@@ -2,16 +2,17 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
-## Architecture (Day 24)
+## Architecture (Day 26)
 
 ```text
 docker-compose.yml
   ├── service: app (HTTP + Outbox relay)
   │     └── createApplication()
   │           ├── CreateFlight → flight + audit + outbox (one SQLite transaction)
+  │           ├── CreateBooking → reserveSeat (OCC) + booking + audit + outbox
   │           ├── JobScheduler
   │           │     ├── flights-summary-job
-  │           │     └── outbox-relay-job → MessagePublisher → flight-created
+  │           │     └── outbox-relay-job → MessagePublisher → flight-created | booking-created
   │           └── close() → jobs.stop → publisher.close → db.close
   │
   ├── service: flight-notifier (Consumer + DLQ)
@@ -64,6 +65,7 @@ GET /health
 GET /ready
 GET /api/flights
 GET /api/flights/:id
+POST /api/flights/:flightId/bookings
 ```
 
 Protected write endpoint:
@@ -73,7 +75,18 @@ POST /api/flights
 Authorization: Bearer <ADMIN_API_KEY>
 ```
 
-Missing or invalid credentials return `401 Unauthorized` with `WWW-Authenticate: Bearer`.
+Booking endpoint (public — no credential):
+
+```http
+POST /api/flights/:flightId/bookings
+Content-Type: application/json
+
+{ "passengerName": "Nguyen Van A" }
+```
+
+Responses: `201` created, `409` sold out, `404` flight not found, `422` validation error.
+
+Missing or invalid credentials on protected routes return `401 Unauthorized` with `WWW-Authenticate: Bearer`.
 
 This is minimal API key authentication — not JWT, OAuth, or role-based access control.
 
@@ -86,6 +99,7 @@ Current audited action:
 | Action | Trigger |
 |---|---|
 | `FLIGHT_CREATED` | Successful `POST /api/flights` |
+| `BOOKING_CREATED` | Successful `POST /api/flights/:flightId/bookings` |
 
 Stored audit fields include:
 
@@ -297,10 +311,11 @@ Request
   → observability middleware (requestId + logs)
   → express.json / routes
   → optional API key auth (POST /api/flights only)
-  → CreateFlight | ListFlights | findById
-  → TransactionRunner (create only)
-      ├── FlightRepository → SQLite flights
-      └── AuditRecorder → SQLite audit_logs
+  → CreateFlight | CreateBooking | ListFlights | findById
+  → TransactionRunner (create flight / create booking)
+      ├── FlightRepository / BookingRepository → SQLite
+      ├── AuditRecorder → SQLite audit_logs
+      └── OutboxRepository → SQLite outbox (booking-created | flight-created)
 ```
 
 Every response includes header `x-request-id` (generated or echoed from the client).

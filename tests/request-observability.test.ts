@@ -6,6 +6,8 @@ import request from "supertest";
 import { createApp } from "../src/app.js";
 import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { openDatabase } from "../src/database.js";
+import { createCreateBooking } from "../src/bookings/create-booking.js";
+import { createSqliteBookingRepository } from "../src/bookings/sqlite-booking-repository.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
@@ -73,6 +75,7 @@ function createMemoryLogger() {
 function createTestContext(t: TestContext) {
   const database = openDatabase(":memory:");
   const flightRepository = createSqliteFlightRepository(database);
+  const bookingRepository = createSqliteBookingRepository(database);
 
   const createFlight = createCreateFlight({
     flightRepository,
@@ -80,6 +83,18 @@ function createTestContext(t: TestContext) {
     outboxRepository: createNoopOutboxRepository(),
     transactionRunner: createPassthroughTransactionRunner(),
     generateId: () => "fixed-flight-id",
+    generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+  });
+
+  const createBooking = createCreateBooking({
+    bookingRepository,
+    auditRecorder: createNoopAuditRecorder(),
+    outboxRepository: createNoopOutboxRepository(),
+    transactionRunner: createPassthroughTransactionRunner(),
+    generateId: () => "fixed-booking-id",
     generateAuditId: () => "fixed-audit-id",
     generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
@@ -95,6 +110,7 @@ function createTestContext(t: TestContext) {
   const app = createApp({
     flightRepository,
     createFlight,
+    createBooking,
     listFlights,
     logger,
     healthChecks: createHealthChecks(database),
@@ -182,6 +198,9 @@ test("logs unexpected errors with request id without leaking them to client", as
     },
   };
 
+  const database = openDatabase(":memory:");
+  const bookingRepository = createSqliteBookingRepository(database);
+
   const createFlight = createCreateFlight({
     flightRepository: failingRepository,
     auditRecorder: createNoopAuditRecorder(),
@@ -198,11 +217,24 @@ test("logs unexpected errors with request id without leaking them to client", as
     flightRepository: failingRepository,
   });
 
+  const createBooking = createCreateBooking({
+    bookingRepository,
+    auditRecorder: createNoopAuditRecorder(),
+    outboxRepository: createNoopOutboxRepository(),
+    transactionRunner: createPassthroughTransactionRunner(),
+    generateId: () => "fixed-booking-id",
+    generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+  });
+
   const { logger, entries } = createMemoryLogger();
 
   const app = createApp({
     flightRepository: failingRepository,
     createFlight,
+    createBooking,
     listFlights,
     logger,
     healthChecks: {
@@ -241,4 +273,6 @@ test("logs unexpected errors with request id without leaking them to client", as
     errorLog.fields?.errorMessage,
     "sensitive database failure",
   );
+
+  database.close();
 });

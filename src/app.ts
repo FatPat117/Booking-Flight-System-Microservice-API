@@ -1,6 +1,7 @@
 import express from "express";
 
 import { createApiKeyAuthMiddleware } from "./auth/api-key-auth.js";
+import type { CreateBooking } from "./bookings/create-booking.js";
 import type { CreateFlight } from "./flights/create-flight.js";
 import type { FlightRepository } from "./flights/flight-repository.js";
 import type { ListFlights } from "./flights/list-flights.js";
@@ -16,6 +17,7 @@ import { createRequestObservabilityMiddleware } from "./observability/request-ob
 export type AppDependencies = {
   flightRepository: FlightRepository;
   createFlight: CreateFlight;
+  createBooking: CreateBooking;
   listFlights: ListFlights;
   logger: Logger;
   healthChecks: HealthChecks;
@@ -26,6 +28,7 @@ export function createApp(dependencies: AppDependencies) {
   const {
     flightRepository,
     createFlight,
+    createBooking,
     listFlights,
     logger,
     healthChecks,
@@ -114,6 +117,38 @@ export function createApp(dependencies: AppDependencies) {
 
     res.setHeader("Location", `/api/flights/${result.flight.id}`);
     return res.status(201).json(result.flight);
+  });
+
+  app.post("/api/flights/:flightId/bookings", async (req, res) => {
+    const result = await createBooking(req.params.flightId, req.body);
+
+    if (result.outcome === "validation_failed") {
+      return sendApiError(res, 422, {
+        code: "VALIDATION_FAILED",
+        message: "Request contains invalid booking data",
+        details: result.issues,
+      });
+    }
+
+    if (result.outcome === "flight-not-found") {
+      return sendApiError(res, 404, {
+        code: "FLIGHT_NOT_FOUND",
+        message: "Flight was not found",
+      });
+    }
+
+    if (result.outcome === "sold-out") {
+      return sendApiError(res, 409, {
+        code: "FLIGHT_SOLD_OUT",
+        message: "No seats available for this flight",
+      });
+    }
+
+    res.setHeader(
+      "Location",
+      `/api/flights/${result.booking.flightId}/bookings/${result.booking.id}`,
+    );
+    return res.status(201).json(result.booking);
   });
 
   app.use(notFoundHandler);

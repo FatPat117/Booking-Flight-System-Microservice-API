@@ -2,7 +2,7 @@
 
 **Date completed:** 2026-08-22
 **Theme:** Outbox Pattern — close dual-write limitation from Day 20
-**Status:** Completed — Bước 6 part 1 verified; part 2 (self-heal) pending user confirm
+**Status:** Completed — Bước 6 part 1 + part 2 verified
 
 ## Problem DLQ did not solve
 
@@ -44,7 +44,8 @@ Tests: sqlite-outbox-repository, outbox-relay-job, create-flight updated
 
 ```text
 Part 1 PASS: stop rabbitmq → POST 201 → outbox published_at NULL (after app rebuild with Day 24 code)
-Part 2 pending: start rabbitmq → ~5s → published_at set + flight-notifier log
+Part 2 PASS: start rabbitmq → ~5s → published_at set + flight-notifier flight_created_consumed
+  Verified 2026-08-23: outbox id ba6401c5… published_at 2026-08-22T15:33:44.642Z; notifier log eventId match; unpublished_count 0
 (eventId added Day 25 — same outbox.id in payload for future dedupe)
 ```
 

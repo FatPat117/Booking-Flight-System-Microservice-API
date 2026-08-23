@@ -6,6 +6,8 @@ import request from "supertest";
 import { createApp } from "../src/app.js";
 import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { openDatabase } from "../src/database.js";
+import { createCreateBooking } from "../src/bookings/create-booking.js";
+import { createSqliteBookingRepository } from "../src/bookings/sqlite-booking-repository.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
@@ -39,10 +41,27 @@ function createMemoryLogger(): Logger {
   };
 }
 
+function createTestCreateBooking(
+  bookingRepository: ReturnType<typeof createSqliteBookingRepository>,
+) {
+  return createCreateBooking({
+    bookingRepository,
+    auditRecorder: createNoopAuditRecorder(),
+    outboxRepository: createNoopOutboxRepository(),
+    transactionRunner: createPassthroughTransactionRunner(),
+    generateId: () => "fixed-booking-id",
+    generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
+    getRequestId: () => "fixed-request-id",
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+  });
+}
+
 function createTestContext(t: TestContext) {
   const database = openDatabase(":memory:");
 
   const flightRepository = createSqliteFlightRepository(database);
+  const bookingRepository = createSqliteBookingRepository(database);
 
   const createFlight = createCreateFlight({
     flightRepository,
@@ -65,6 +84,7 @@ function createTestContext(t: TestContext) {
   const app = createApp({
     flightRepository,
     createFlight,
+    createBooking: createTestCreateBooking(bookingRepository),
     listFlights,
     logger: createMemoryLogger(),
     healthChecks,
@@ -124,6 +144,7 @@ test("GET /ready returns 503 when database is unavailable", async (t) => {
   const database = openDatabase(":memory:");
 
   const flightRepository = createSqliteFlightRepository(database);
+  const bookingRepository = createSqliteBookingRepository(database);
 
   const createFlight = createCreateFlight({
     flightRepository,
@@ -157,6 +178,7 @@ test("GET /ready returns 503 when database is unavailable", async (t) => {
   const app = createApp({
     flightRepository,
     createFlight,
+    createBooking: createTestCreateBooking(bookingRepository),
     listFlights,
     logger: createMemoryLogger(),
     healthChecks: unhealthyHealthChecks,

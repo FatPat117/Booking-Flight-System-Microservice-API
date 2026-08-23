@@ -8,6 +8,7 @@ const runtime = await createApplication({ config });
 const expressApp = createApp({
   flightRepository: runtime.flightRepository,
   createFlight: runtime.createFlight,
+  createBooking: runtime.createBooking,
   listFlights: runtime.listFlights,
   logger: runtime.logger,
   healthChecks: runtime.healthChecks,

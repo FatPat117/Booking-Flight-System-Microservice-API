@@ -94,8 +94,29 @@ const createOutboxMigration: Migration = {
   },
 };
 
+const createBookingsMigration: Migration = {
+  id: "004_create_bookings",
+
+  up(database) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS bookings (
+        id TEXT PRIMARY KEY,
+        flight_id TEXT NOT NULL REFERENCES flights(id),
+        passenger_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        CHECK (length(passenger_name) > 0),
+        CHECK (length(created_at) > 0)
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_bookings_flight_id
+      ON bookings (flight_id);
+    `);
+  },
+};
+
 export const migrations: readonly Migration[] = [
   createFlightsMigration,
   createAuditLogsMigration,
   createOutboxMigration,
+  createBookingsMigration,
 ];

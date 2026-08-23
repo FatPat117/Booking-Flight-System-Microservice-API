@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { TestContext } from "node:test";
+
+import { openDatabase } from "../src/database.js";
+import { createSqliteBookingRepository } from "../src/bookings/sqlite-booking-repository.js";
+import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
+import type { Flight } from "../src/types.js";
+
+function makeFlight(overrides: Partial<Flight> = {}): Flight {
+  return {
+    id: crypto.randomUUID(),
+    flightNumber: "VN123",
+    origin: "SGN",
+    destination: "HAN",
+    departureAt: "2026-08-10T01:00:00.000Z",
+    arrivalAt: "2026-08-10T03:00:00.000Z",
+    priceInCents: 15_000_000,
+    currency: "VND",
+    availableSeats: 1,
+    ...overrides,
+  };
+}
+
+function createRepos(t: TestContext) {
+  const database = openDatabase(":memory:");
+  const flightRepository = createSqliteFlightRepository(database);
+  const bookingRepository = createSqliteBookingRepository(database);
+
+  t.after(() => {
+    database.close();
+  });
+
+  return { flightRepository, bookingRepository };
+}
+
+test("reserveSeat succeeds when seats are available", (t) => {
+  const { flightRepository, bookingRepository } = createRepos(t);
+  const flight = makeFlight({ id: "flight-1", availableSeats: 2 });
+
+  assert.equal(flightRepository.create(flight).outcome, "created");
+  assert.deepEqual(bookingRepository.reserveSeat("flight-1"), {
+    outcome: "reserved",
+  });
+  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 1);
+});
+
+test("reserveSeat returns sold-out on second call when only one seat left", (t) => {
+  const { flightRepository, bookingRepository } = createRepos(t);
+  const flight = makeFlight({ id: "flight-1", availableSeats: 1 });
+
+  assert.equal(flightRepository.create(flight).outcome, "created");
+  assert.deepEqual(bookingRepository.reserveSeat("flight-1"), {
+    outcome: "reserved",
+  });
+  assert.deepEqual(bookingRepository.reserveSeat("flight-1"), {
+    outcome: "sold-out",
+  });
+  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 0);
+});
+
+test("reserveSeat returns flight-not-found for unknown flight", (t) => {
+  const { bookingRepository } = createRepos(t);
+
+  assert.deepEqual(bookingRepository.reserveSeat("missing-flight"), {
+    outcome: "flight-not-found",
+  });
+});
+
+test("create persists a booking row", (t) => {
+  const { flightRepository, bookingRepository } = createRepos(t);
+  const flight = makeFlight({ id: "flight-1", availableSeats: 1 });
+
+  flightRepository.create(flight);
+  bookingRepository.reserveSeat("flight-1");
+  bookingRepository.create({
+    id: "booking-1",
+    flightId: "flight-1",
+    passengerName: "Alice",
+    createdAt: "2026-07-20T00:00:00.000Z",
+  });
+
+  const row = flightRepository
+    .findById("flight-1");
+  assert.equal(row?.availableSeats, 0);
+});

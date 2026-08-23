@@ -12,6 +12,8 @@ import { createApp } from "../src/app.js";
 import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { createSqliteAuditRecorder } from "../src/audit/sqlite-audit-recorder.js";
 import { openDatabase } from "../src/database.js";
+import { createCreateBooking } from "../src/bookings/create-booking.js";
+import { createSqliteBookingRepository } from "../src/bookings/sqlite-booking-repository.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
@@ -106,10 +108,23 @@ function createAppWithRepository(
   healthChecks: HealthChecks = healthyHealthChecks,
 ) {
   const auditRecorder = createSqliteAuditRecorder(database);
+  const bookingRepository = createSqliteBookingRepository(database);
   const transactionRunner = createSqliteTransactionRunner(database);
 
   const createFlight = createCreateFlight({
     flightRepository,
+    auditRecorder,
+    outboxRepository: createNoopOutboxRepository(),
+    transactionRunner,
+    generateId: () => crypto.randomUUID(),
+    generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
+  });
+
+  const createBooking = createCreateBooking({
+    bookingRepository,
     auditRecorder,
     outboxRepository: createNoopOutboxRepository(),
     transactionRunner,
@@ -129,6 +144,7 @@ function createAppWithRepository(
   return createApp({
     flightRepository,
     createFlight,
+    createBooking,
     listFlights,
     logger,
     healthChecks,
@@ -1014,6 +1030,20 @@ test("rolls back flight creation when audit recording fails", async (t) => {
     getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
   });
 
+  const bookingRepository = createSqliteBookingRepository(database);
+
+  const createBooking = createCreateBooking({
+    bookingRepository,
+    auditRecorder: failingAuditRecorder,
+    outboxRepository: createNoopOutboxRepository(),
+    transactionRunner,
+    generateId: () => "rollback-booking-id",
+    generateAuditId: () => "rollback-audit-id",
+    generateOutboxId: () => "rollback-outbox-id",
+    getRequestId: () => "rollback-request-id",
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+  });
+
   const listFlights = createListFlights({
     flightRepository,
   });
@@ -1023,6 +1053,7 @@ test("rolls back flight creation when audit recording fails", async (t) => {
   const app = createApp({
     flightRepository,
     createFlight,
+    createBooking,
     listFlights,
     logger,
     healthChecks: createHealthChecks(database),

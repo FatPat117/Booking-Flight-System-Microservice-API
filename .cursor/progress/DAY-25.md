@@ -59,7 +59,7 @@ Fresh start: docker compose down -v before deploy, or purge flight-created queue
 
 ```text
 Part 1 PASS: RabbitMQ stopped → 201 + outbox row published_at NULL (after app rebuild)
-Part 2: start rabbitmq → wait relay → published_at set + notifier log — user to confirm when ready
+Part 2 PASS: verified 2026-08-23 (see DAY-24.md)
 ```
 
 ## Quality gate
