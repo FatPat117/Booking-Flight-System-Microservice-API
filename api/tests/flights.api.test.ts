@@ -925,6 +925,7 @@ test("POST /api/flights records an audit log when created", async (t) => {
     flightNumber: "VN123",
     origin: "SGN",
     destination: "HAN",
+    correlationId: "audit-request-1",
   });
 });
 

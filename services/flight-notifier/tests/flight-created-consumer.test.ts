@@ -40,6 +40,7 @@ function createMemoryLogger() {
 
 const validPayload = {
   eventId: "event-abc-123",
+  correlationId: "corr-abc-123",
   type: "flight.created",
   occurredAt: "2026-08-11T00:00:00.000Z",
   flight: {
@@ -67,6 +68,7 @@ test("flightCreatedConsumer processes a valid fat event", async () => {
       (entry) =>
         entry.message === "flight_created_consumed" &&
         entry.fields?.eventId === "event-abc-123" &&
+        entry.fields?.correlationId === "corr-abc-123" &&
         entry.fields?.flightId === "flight-1",
     ),
   );
@@ -87,6 +89,13 @@ test("flightCreatedConsumer rejects invalid payloads without throwing", async ()
     },
     {
       eventId: "",
+      correlationId: "corr-abc-123",
+      type: "flight.created",
+      occurredAt: "2026-08-11T00:00:00.000Z",
+      flight: validPayload.flight,
+    },
+    {
+      eventId: "event-abc-123",
       type: "flight.created",
       occurredAt: "2026-08-11T00:00:00.000Z",
       flight: validPayload.flight,

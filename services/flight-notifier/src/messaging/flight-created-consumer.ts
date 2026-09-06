@@ -19,6 +19,7 @@ export function createFlightCreatedConsumer(deps: {
 
     deps.logger.info("flight_created_consumed", {
       eventId: event.eventId,
+      correlationId: event.correlationId,
       flightId: event.flight.id,
       flightNumber: event.flight.flightNumber,
       origin: event.flight.origin,

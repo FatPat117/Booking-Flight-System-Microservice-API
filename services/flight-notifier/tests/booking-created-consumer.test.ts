@@ -40,6 +40,7 @@ function createMemoryLogger() {
 
 const validPayload = {
   eventId: "event-booking-123",
+  correlationId: "corr-booking-123",
   type: "booking.created",
   occurredAt: "2026-09-06T00:00:00.000Z",
   booking: {
@@ -62,6 +63,7 @@ test("bookingCreatedConsumer processes a valid event", async () => {
       (entry) =>
         entry.message === "booking_created_consumed" &&
         entry.fields?.eventId === "event-booking-123" &&
+        entry.fields?.correlationId === "corr-booking-123" &&
         entry.fields?.bookingId === "booking-1" &&
         entry.fields?.flightId === "flight-1",
     ),
@@ -83,6 +85,13 @@ test("bookingCreatedConsumer rejects invalid payloads without throwing", async (
     },
     {
       eventId: "",
+      correlationId: "corr-booking-123",
+      type: "booking.created",
+      occurredAt: "2026-09-06T00:00:00.000Z",
+      booking: validPayload.booking,
+    },
+    {
+      eventId: "event-booking-123",
       type: "booking.created",
       occurredAt: "2026-09-06T00:00:00.000Z",
       booking: validPayload.booking,

@@ -1,6 +1,7 @@
 import type { FlightCreatedEvent } from "@booking-flight-system/contracts";
 import type { AuditRecorder } from "../audit/audit-recorder.js";
 import type { OutboxRepository } from "../outbox/outbox-repository.js";
+import { resolveCorrelationId } from "../outbox/resolve-correlation-id.js";
 import type { TransactionRunner } from "../transactions/transaction-runner.js";
 import type { Flight, ValidationIssue } from "../types.js";
 import type { FlightRepository } from "./flight-repository.js";
@@ -82,6 +83,8 @@ export function createCreateFlight(
 
       const requestId = getRequestId();
       const occurredAt = getCurrentTime().toISOString();
+      const eventId = generateOutboxId();
+      const correlationId = resolveCorrelationId(requestId, eventId);
 
       auditRecorder.record({
         id: generateAuditId(),
@@ -100,13 +103,13 @@ export function createCreateFlight(
           flightNumber: flight.flightNumber,
           origin: flight.origin,
           destination: flight.destination,
+          correlationId,
         },
       });
 
-      const eventId = generateOutboxId();
-
       const payload: FlightCreatedEvent = {
         eventId,
+        correlationId,
         type: "flight.created",
         occurredAt,
         flight,

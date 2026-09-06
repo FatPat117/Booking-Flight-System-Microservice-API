@@ -1,6 +1,6 @@
 # Postman
 
-Import these files into Postman:
+Import these files into Postman (or re-import if you already had the Day 15 collection):
 
 1. `Booking-microservices.postman_collection.json`
 2. `Booking-microservices.local.postman_environment.json`
@@ -12,23 +12,34 @@ Select the **Booking Microservices — Local** environment before sending reques
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `baseUrl` | `http://localhost:3000` | Match `PORT` in `.env` |
-| `adminApiKey` | `local-admin-key-123456789` | Must match `ADMIN_API_KEY` in `.env` (min 16 chars) |
+| `adminApiKey` | `local-dev-admin-key-2026` | Must match `.env` `ADMIN_API_KEY` |
 | `flightId` | empty | Auto-set after successful `POST /api/flights` |
-| `requestId` | `postman-manual-001` | Sent as `x-request-id`; used in logs and audit |
+| `bookingId` | empty | Auto-set after successful `POST .../bookings` |
+| `requestId` | `investigate-001` | Sent as `x-request-id` → becomes Day 29 `correlationId` |
 
-## Start server
+## Auth reminder
+
+`POST /api/flights` uses **Authorization: Bearer {{adminApiKey}}** — not `x-api-key`.
+
+## Start servers (dev)
 
 ```bash
-npm run dev
-# or
-npm run build && npm start
+docker compose up rabbitmq          # terminal 1
+npm run dev --workspace=@booking-flight-system/api
+npm run dev --workspace=@booking-flight-system/flight-notifier
 ```
 
-## Current coverage (Day 15)
+## Suggested flow
 
-- Health: `GET /live`, `GET /health`, `GET /ready`
-- Flights read (public): `GET /api/flights`, `GET /api/flights/:id`
-- Flights write (Bearer auth): `POST /api/flights`
-- Error examples: 401, 422, 409 duplicate
+1. **Flights (Write)** → `POST /api/flights` (saves `flightId`)
+2. **Bookings** → `POST /api/flights/:flightId/bookings` (saves `bookingId`)
+3. Wait ~5s → check flight-notifier for `booking_created_consumed` + same `correlationId` as `x-request-id`
+4. **Bookings** → `DELETE /api/bookings/:id` twice → `204` then `409`
+5. Folder **Day 29 — Correlation investigate** → auto-generates a fresh `requestId` for log grep
 
-Audit trail is persisted in SQLite (`audit_logs`) on successful create — no HTTP endpoint yet. Inspect with SQLite CLI if needed.
+## Coverage (through Day 29)
+
+- Health: `/live`, `/health`, `/ready`
+- Flights read/write + auth errors
+- Bookings create + cancel (OCC / double-cancel)
+- Correlation probe requests for cross-service log investigation

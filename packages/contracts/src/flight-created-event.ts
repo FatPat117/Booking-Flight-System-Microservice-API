@@ -1,5 +1,6 @@
 export type FlightCreatedEvent = {
   eventId: string;
+  correlationId: string;
   type: "flight.created";
   occurredAt: string;
   flight: {
@@ -32,6 +33,13 @@ export function parseFlightCreatedEvent(
 
   if (typeof record.eventId !== "string" || record.eventId.length === 0) {
     return { ok: false, reason: "eventId must be a non-empty string" };
+  }
+
+  if (
+    typeof record.correlationId !== "string" ||
+    record.correlationId.length === 0
+  ) {
+    return { ok: false, reason: "correlationId must be a non-empty string" };
   }
 
   if (typeof record.occurredAt !== "string" || record.occurredAt.length === 0) {
@@ -80,6 +88,7 @@ export function parseFlightCreatedEvent(
     ok: true,
     event: {
       eventId: record.eventId,
+      correlationId: record.correlationId,
       type: "flight.created",
       occurredAt: record.occurredAt,
       flight: {

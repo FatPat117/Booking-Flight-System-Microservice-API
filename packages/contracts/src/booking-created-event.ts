@@ -1,5 +1,6 @@
 export type BookingCreatedEvent = {
   eventId: string;
+  correlationId: string;
   type: "booking.created";
   occurredAt: string;
   booking: {
@@ -27,6 +28,13 @@ export function parseBookingCreatedEvent(
 
   if (typeof record.eventId !== "string" || record.eventId.length === 0) {
     return { ok: false, reason: "eventId must be a non-empty string" };
+  }
+
+  if (
+    typeof record.correlationId !== "string" ||
+    record.correlationId.length === 0
+  ) {
+    return { ok: false, reason: "correlationId must be a non-empty string" };
   }
 
   if (typeof record.occurredAt !== "string" || record.occurredAt.length === 0) {
@@ -58,6 +66,7 @@ export function parseBookingCreatedEvent(
     ok: true,
     event: {
       eventId: record.eventId,
+      correlationId: record.correlationId,
       type: "booking.created",
       occurredAt: record.occurredAt,
       booking: {

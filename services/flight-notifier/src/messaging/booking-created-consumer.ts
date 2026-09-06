@@ -19,6 +19,7 @@ export function createBookingCreatedConsumer(deps: {
 
     deps.logger.info("booking_created_consumed", {
       eventId: event.eventId,
+      correlationId: event.correlationId,
       bookingId: event.booking.id,
       flightId: event.booking.flightId,
       passengerName: event.booking.passengerName,

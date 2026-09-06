@@ -1,5 +1,6 @@
 import type { AuditRecorder } from "../audit/audit-recorder.js";
 import type { OutboxRepository } from "../outbox/outbox-repository.js";
+import { resolveCorrelationId } from "../outbox/resolve-correlation-id.js";
 import type { TransactionRunner } from "../transactions/transaction-runner.js";
 import type { ValidationIssue } from "../types.js";
 import { validateBookingIdParam } from "./booking-validation.js";
@@ -77,6 +78,7 @@ export function createCancelBooking(
       const occurredAt = getCurrentTime().toISOString();
       const requestId = getRequestId();
       const eventId = generateOutboxId();
+      const correlationId = resolveCorrelationId(requestId, eventId);
 
       auditRecorder.record({
         id: generateAuditId(),
@@ -93,6 +95,7 @@ export function createCancelBooking(
         occurredAt,
         metadata: {
           flightId,
+          correlationId,
         },
       });
 
@@ -102,6 +105,7 @@ export function createCancelBooking(
         eventType: BOOKING_CANCELLED_QUEUE,
         payload: {
           eventId,
+          correlationId,
           type: "booking.cancelled",
           occurredAt,
           booking: {

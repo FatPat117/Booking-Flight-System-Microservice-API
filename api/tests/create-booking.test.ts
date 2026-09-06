@@ -110,6 +110,7 @@ test("creates booking with audit and outbox when seat is available", async (t) =
   assert.equal(entries[0]?.eventType, "booking-created");
   assert.deepEqual(entries[0]?.payload, {
     eventId: "fixed-outbox-id",
+    correlationId: "fixed-request-id",
     type: "booking.created",
     occurredAt: "2026-07-20T00:00:00.000Z",
     booking: {
@@ -131,9 +132,35 @@ test("creates booking with audit and outbox when seat is available", async (t) =
       metadata: {
         flightId: "flight-1",
         passengerName: "Alice",
+        correlationId: "fixed-request-id",
       },
     },
   ]);
+});
+
+test("booking outbox correlationId falls back to eventId when requestId is missing", async (t) => {
+  const { bookingRepository, transactionRunner } = createTestRuntime(t);
+  const { auditRecorder } = createCapturingAuditRecorder();
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
+
+  const createBooking = createCreateBooking({
+    bookingRepository,
+    auditRecorder,
+    outboxRepository,
+    transactionRunner,
+    generateId: () => "fixed-booking-id",
+    generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
+    getRequestId: () => undefined,
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const result = await createBooking("flight-1", { passengerName: "Alice" });
+  assert.equal(result.outcome, "created");
+  assert.equal(
+    (entries[0]?.payload as { correlationId: string }).correlationId,
+    "fixed-outbox-id",
+  );
 });
 
 test("returns sold-out without outbox when no seats remain", async (t) => {

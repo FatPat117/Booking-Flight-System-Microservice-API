@@ -281,6 +281,7 @@ test("records audit log when flight is created", async () => {
         flightNumber: "VN123",
         origin: "SGN",
         destination: "HAN",
+        correlationId: "fixed-request-id",
       },
     },
   ]);
@@ -481,6 +482,7 @@ test("enqueues flight-created outbox row after successful create", async () => {
   assert.equal(entries[0]?.createdAt, "2026-07-20T00:00:00.000Z");
   assert.deepEqual(entries[0]?.payload, {
     eventId: "fixed-outbox-id",
+    correlationId: "fixed-request-id",
     type: "flight.created",
     occurredAt: "2026-07-20T00:00:00.000Z",
     flight: {
@@ -495,6 +497,36 @@ test("enqueues flight-created outbox row after successful create", async () => {
       availableSeats: 120,
     },
   });
+});
+
+test("outbox correlationId falls back to eventId when requestId is missing", async () => {
+  const repository: FlightRepository = {
+    findPage: () => ({ items: [], totalItems: 0 }),
+    findById: () => undefined,
+    create() {
+      return { outcome: "created" };
+    },
+  };
+
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
+  const createFlight = createCreateFlight({
+    flightRepository: repository,
+    auditRecorder: createCapturingAuditRecorder().auditRecorder,
+    outboxRepository,
+    transactionRunner: createPassthroughTransactionRunner(),
+    generateId: () => "fixed-flight-id",
+    generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
+    getRequestId: () => undefined,
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const result = await createFlight(makeValidRawInput());
+  assert.equal(result.outcome, "created");
+  assert.equal(
+    (entries[0]?.payload as { correlationId: string }).correlationId,
+    "fixed-outbox-id",
+  );
 });
 
 test("does not enqueue outbox row when create is duplicate", async () => {

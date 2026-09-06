@@ -1,6 +1,7 @@
 import type { BookingCreatedEvent } from "@booking-flight-system/contracts";
 import type { AuditRecorder } from "../audit/audit-recorder.js";
 import type { OutboxRepository } from "../outbox/outbox-repository.js";
+import { resolveCorrelationId } from "../outbox/resolve-correlation-id.js";
 import type { TransactionRunner } from "../transactions/transaction-runner.js";
 import type { ValidationIssue } from "../types.js";
 import {
@@ -97,6 +98,8 @@ export function createCreateBooking(
       bookingRepository.create(booking);
 
       const requestId = getRequestId();
+      const eventId = generateOutboxId();
+      const correlationId = resolveCorrelationId(requestId, eventId);
 
       auditRecorder.record({
         id: generateAuditId(),
@@ -114,13 +117,13 @@ export function createCreateBooking(
         metadata: {
           flightId: booking.flightId,
           passengerName: booking.passengerName,
+          correlationId,
         },
       });
 
-      const eventId = generateOutboxId();
-
       const payload: BookingCreatedEvent = {
         eventId,
+        correlationId,
         type: "booking.created",
         occurredAt,
         booking: {
