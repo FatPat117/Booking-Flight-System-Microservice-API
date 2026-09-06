@@ -104,6 +104,7 @@ function createTestContext(t: TestContext) {
     flightRepository,
     createFlight,
     createBooking,
+    cancelBooking: async () => ({ outcome: "not-found" as const }),
     listFlights,
     logger: createMemoryLogger(),
     healthChecks: createHealthChecks(database),

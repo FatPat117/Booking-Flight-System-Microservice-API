@@ -1,6 +1,7 @@
 import express from "express";
 
 import { createApiKeyAuthMiddleware } from "./auth/api-key-auth.js";
+import type { CancelBooking } from "./bookings/cancel-booking.js";
 import type { CreateBooking } from "./bookings/create-booking.js";
 import type { CreateFlight } from "./flights/create-flight.js";
 import type { FlightRepository } from "./flights/flight-repository.js";
@@ -18,6 +19,7 @@ export type AppDependencies = {
   flightRepository: FlightRepository;
   createFlight: CreateFlight;
   createBooking: CreateBooking;
+  cancelBooking: CancelBooking;
   listFlights: ListFlights;
   logger: Logger;
   healthChecks: HealthChecks;
@@ -29,6 +31,7 @@ export function createApp(dependencies: AppDependencies) {
     flightRepository,
     createFlight,
     createBooking,
+    cancelBooking,
     listFlights,
     logger,
     healthChecks,
@@ -149,6 +152,36 @@ export function createApp(dependencies: AppDependencies) {
       `/api/flights/${result.booking.flightId}/bookings/${result.booking.id}`,
     );
     return res.status(201).json(result.booking);
+  });
+
+  // 409 for already-cancelled: resource state conflicts with a second cancel.
+  // Chosen over idempotent 204 so clients can tell "first cancel" from "repeat".
+  app.delete("/api/bookings/:id", async (req, res) => {
+    const result = await cancelBooking(req.params.id);
+
+    if (result.outcome === "validation_failed") {
+      return sendApiError(res, 422, {
+        code: "VALIDATION_FAILED",
+        message: "Request contains invalid booking id",
+        details: result.issues,
+      });
+    }
+
+    if (result.outcome === "not-found") {
+      return sendApiError(res, 404, {
+        code: "BOOKING_NOT_FOUND",
+        message: "Booking was not found",
+      });
+    }
+
+    if (result.outcome === "already-cancelled") {
+      return sendApiError(res, 409, {
+        code: "BOOKING_ALREADY_CANCELLED",
+        message: "Booking was already cancelled",
+      });
+    }
+
+    return res.status(204).send();
   });
 
   app.use(notFoundHandler);

@@ -114,9 +114,23 @@ const createBookingsMigration: Migration = {
   },
 };
 
+const addBookingStatusMigration: Migration = {
+  id: "005_add_booking_status",
+
+  up(database) {
+    // DEFAULT 'active' backfills existing Day 26 rows — no NULL / ambiguous state.
+    database.exec(`
+      ALTER TABLE bookings
+      ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'cancelled'));
+    `);
+  },
+};
+
 export const migrations: readonly Migration[] = [
   createFlightsMigration,
   createAuditLogsMigration,
   createOutboxMigration,
   createBookingsMigration,
+  addBookingStatusMigration,
 ];

@@ -71,3 +71,25 @@ export function validateFlightIdParam(
     value: flightId.trim(),
   };
 }
+
+export function validateBookingIdParam(
+  bookingId: unknown,
+): ValidationResult<string> {
+  if (typeof bookingId !== "string" || bookingId.trim() === "") {
+    return {
+      success: false,
+      issues: [
+        {
+          field: "bookingId",
+          code: "REQUIRED",
+          message: "bookingId must be a non-empty string",
+        },
+      ],
+    };
+  }
+
+  return {
+    success: true,
+    value: bookingId.trim(),
+  };
+}

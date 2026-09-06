@@ -111,6 +111,7 @@ function createTestContext(t: TestContext) {
     flightRepository,
     createFlight,
     createBooking,
+    cancelBooking: async () => ({ outcome: "not-found" as const }),
     listFlights,
     logger,
     healthChecks: createHealthChecks(database),
@@ -235,6 +236,7 @@ test("logs unexpected errors with request id without leaking them to client", as
     flightRepository: failingRepository,
     createFlight,
     createBooking,
+    cancelBooking: async () => ({ outcome: "not-found" as const }),
     listFlights,
     logger,
     healthChecks: {

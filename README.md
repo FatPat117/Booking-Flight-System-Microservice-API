@@ -365,9 +365,9 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - Job interval hardcoded in Composition Root (not env config yet)
 - No handler timeout if a job hangs forever
 - RabbitMQ publisher in `app`; consumer in separate `flight-notifier` service
-- `FlightCreatedEvent` in `packages/contracts` — `BookingCreatedEvent` not shared yet (no consumer)
+- `FlightCreatedEvent` + `BookingCreatedEvent` in `packages/contracts` — `BookingCancelledEvent` not shared yet (no consumer)
 - Outbox relay polls every 5s (not immediate publish); duplicate delivery possible if `markPublished` fails after successful publish
-- Dead-letter: rejected/poison messages route to `flight-created.dlq` via `flight-created.dlx` — manual inspection only (no auto-retry or alerting)
+- Dead-letter: rejected/poison messages route to `*.dlq` via per-queue DLX — manual inspection only (no auto-retry or alerting)
 - `guest`/`guest` RabbitMQ credentials are for local compose only
 - Transaction support is local to one SQLite database connection
 - No nested transaction or savepoint support yet

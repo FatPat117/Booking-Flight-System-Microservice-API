@@ -78,9 +78,41 @@ test("create persists a booking row", (t) => {
     flightId: "flight-1",
     passengerName: "Alice",
     createdAt: "2026-07-20T00:00:00.000Z",
+    status: "active",
   });
 
   const row = flightRepository
     .findById("flight-1");
   assert.equal(row?.availableSeats, 0);
+});
+
+test("cancel active booking once; second cancel is already-cancelled", (t) => {
+  const { flightRepository, bookingRepository } = createRepos(t);
+  const flight = makeFlight({ id: "flight-1", availableSeats: 2 });
+
+  flightRepository.create(flight);
+  bookingRepository.reserveSeat("flight-1");
+  bookingRepository.create({
+    id: "booking-1",
+    flightId: "flight-1",
+    passengerName: "Alice",
+    createdAt: "2026-07-20T00:00:00.000Z",
+    status: "active",
+  });
+
+  assert.deepEqual(bookingRepository.cancel("booking-1"), {
+    outcome: "cancelled",
+    flightId: "flight-1",
+  });
+  assert.deepEqual(bookingRepository.cancel("booking-1"), {
+    outcome: "already-cancelled",
+  });
+});
+
+test("cancel returns not-found for unknown booking", (t) => {
+  const { bookingRepository } = createRepos(t);
+
+  assert.deepEqual(bookingRepository.cancel("missing-booking"), {
+    outcome: "not-found",
+  });
 });

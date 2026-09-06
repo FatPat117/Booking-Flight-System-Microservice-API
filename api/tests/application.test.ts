@@ -32,6 +32,7 @@ test("createApplication wires use cases and closes cleanly", async () => {
   try {
     assert.equal(typeof runtime.createFlight, "function");
     assert.equal(typeof runtime.createBooking, "function");
+    assert.equal(typeof runtime.cancelBooking, "function");
     assert.equal(typeof runtime.listFlights, "function");
     assert.equal(typeof runtime.flightRepository.findById, "function");
     assert.equal(typeof runtime.healthChecks.checkReadiness, "function");

@@ -1,3 +1,4 @@
+import type { BookingCreatedEvent } from "@booking-flight-system/contracts";
 import type { AuditRecorder } from "../audit/audit-recorder.js";
 import type { OutboxRepository } from "../outbox/outbox-repository.js";
 import type { TransactionRunner } from "../transactions/transaction-runner.js";
@@ -90,6 +91,7 @@ export function createCreateBooking(
         flightId,
         passengerName,
         createdAt: occurredAt,
+        status: "active",
       };
 
       bookingRepository.create(booking);
@@ -117,15 +119,22 @@ export function createCreateBooking(
 
       const eventId = generateOutboxId();
 
+      const payload: BookingCreatedEvent = {
+        eventId,
+        type: "booking.created",
+        occurredAt,
+        booking: {
+          id: booking.id,
+          flightId: booking.flightId,
+          passengerName: booking.passengerName,
+          createdAt: booking.createdAt,
+        },
+      };
+
       outboxRepository.enqueue({
         id: eventId,
         eventType: BOOKING_CREATED_QUEUE,
-        payload: {
-          eventId,
-          type: "booking.created",
-          occurredAt,
-          booking,
-        },
+        payload,
         createdAt: occurredAt,
       });
 

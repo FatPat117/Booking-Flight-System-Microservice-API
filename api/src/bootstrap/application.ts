@@ -5,6 +5,10 @@ import { createSqliteAuditRecorder } from "../audit/sqlite-audit-recorder.js";
 import type { AppConfig } from "../config.js";
 import { openDatabase } from "../database.js";
 import {
+  createCancelBooking,
+  type CancelBooking,
+} from "../bookings/cancel-booking.js";
+import {
   createCreateBooking,
   type CreateBooking,
 } from "../bookings/create-booking.js";
@@ -53,6 +57,7 @@ export type Application = Readonly<{
   bookingRepository: BookingRepository;
   createFlight: CreateFlight;
   createBooking: CreateBooking;
+  cancelBooking: CancelBooking;
   listFlights: ListFlights;
   healthChecks: HealthChecks;
   close(): Promise<void>;
@@ -127,6 +132,17 @@ export async function createApplication(
     getCurrentTime: () => new Date(),
   });
 
+  const cancelBooking = createCancelBooking({
+    bookingRepository,
+    auditRecorder,
+    outboxRepository,
+    transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
+  });
+
   const listFlights = createListFlights({
     flightRepository,
   });
@@ -156,6 +172,7 @@ export async function createApplication(
     bookingRepository,
     createFlight,
     createBooking,
+    cancelBooking,
     listFlights,
     healthChecks,
     async close() {

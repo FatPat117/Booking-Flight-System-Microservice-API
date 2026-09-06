@@ -112,8 +112,14 @@ test("creates booking with audit and outbox when seat is available", async (t) =
     eventId: "fixed-outbox-id",
     type: "booking.created",
     occurredAt: "2026-07-20T00:00:00.000Z",
-    booking: result.booking,
+    booking: {
+      id: result.booking.id,
+      flightId: result.booking.flightId,
+      passengerName: result.booking.passengerName,
+      createdAt: result.booking.createdAt,
+    },
   });
+  assert.equal(result.booking.status, "active");
   assert.deepEqual(records, [
     {
       id: "fixed-audit-id",

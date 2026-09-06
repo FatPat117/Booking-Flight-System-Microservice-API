@@ -18,7 +18,10 @@ export type AuditTarget =
       id: string;
     };
 
-export type AuditAction = "FLIGHT_CREATED" | "BOOKING_CREATED";
+export type AuditAction =
+  | "FLIGHT_CREATED"
+  | "BOOKING_CREATED"
+  | "BOOKING_CANCELLED";
 
 export type AuditMetadata = Record<
   string,

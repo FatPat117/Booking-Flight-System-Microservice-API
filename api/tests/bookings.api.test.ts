@@ -5,6 +5,7 @@ import type { DatabaseSync } from "node:sqlite";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
+import { createCancelBooking } from "../src/bookings/cancel-booking.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
 import { createSqliteBookingRepository } from "../src/bookings/sqlite-booking-repository.js";
 import { createSqliteAuditRecorder } from "../src/audit/sqlite-audit-recorder.js";
@@ -58,10 +59,22 @@ function createBookingApp(database: DatabaseSync) {
     getCurrentTime: () => FIXED_TIME,
   });
 
+  const cancelBooking = createCancelBooking({
+    bookingRepository,
+    auditRecorder,
+    outboxRepository: createNoopOutboxRepository(),
+    transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
+    getRequestId: () => undefined,
+    getCurrentTime: () => FIXED_TIME,
+  });
+
   return createApp({
     flightRepository,
     createFlight,
     createBooking,
+    cancelBooking,
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
     healthChecks: createHealthChecks(database),
@@ -178,4 +191,50 @@ test("POST booking returns 422 for invalid passenger name", async (t) => {
 
   assert.equal(response.status, 422);
   assert.equal(response.body.error.code, "VALIDATION_FAILED");
+});
+
+test("DELETE booking returns 204 then 409 on second cancel", async (t) => {
+  const { app } = createContext(t);
+
+  const flightResponse = await request(app)
+    .post("/api/flights")
+    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .send({
+      flightNumber: "VN555",
+      origin: "SGN",
+      destination: "HAN",
+      departureAt: "2026-12-13T08:00:00+07:00",
+      arrivalAt: "2026-12-13T10:00:00+07:00",
+      priceInCents: 1_500_000,
+      currency: "VND",
+      availableSeats: 3,
+    });
+
+  const flightId = flightResponse.body.id as string;
+
+  const bookingResponse = await request(app)
+    .post(`/api/flights/${flightId}/bookings`)
+    .send({ passengerName: "Alice" });
+
+  assert.equal(bookingResponse.status, 201);
+  const bookingId = bookingResponse.body.id as string;
+
+  const first = await request(app).delete(`/api/bookings/${bookingId}`);
+  assert.equal(first.status, 204);
+
+  const second = await request(app).delete(`/api/bookings/${bookingId}`);
+  assert.equal(second.status, 409);
+  assert.equal(second.body.error.code, "BOOKING_ALREADY_CANCELLED");
+
+  const flightAfter = await request(app).get(`/api/flights/${flightId}`);
+  assert.equal(flightAfter.body.availableSeats, 3);
+});
+
+test("DELETE booking returns 404 when booking does not exist", async (t) => {
+  const { app } = createContext(t);
+
+  const response = await request(app).delete("/api/bookings/missing-booking");
+
+  assert.equal(response.status, 404);
+  assert.equal(response.body.error.code, "BOOKING_NOT_FOUND");
 });
