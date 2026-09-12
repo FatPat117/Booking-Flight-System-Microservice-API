@@ -43,6 +43,25 @@ Envelope fields stay top-level — room for causationId later without touching d
 Same key stitches both services without guessing timestamps.
 ```
 
+## Bước 4 — verified evidence (2026-09-12)
+
+```text
+correlationId = investigate-002
+
+api (16:24:17):
+  request_started / request_finished
+  correlationId=investigate-002  statusCode=201
+  POST .../bookings
+
+flight-notifier (~2s later, after outbox relay, 16:24:19):
+  booking_created_consumed
+  correlationId=investigate-002
+  eventId=8885a546-8ce6-44c1-a4e2-0c7f288dea42
+  bookingId=16fd086a-09d4-4319-b844-8631479762eb
+
+Same key across both processes — no timestamp guessing required.
+```
+
 ## Quality gate
 
 ```text

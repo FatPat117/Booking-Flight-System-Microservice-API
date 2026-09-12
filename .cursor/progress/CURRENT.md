@@ -1,18 +1,20 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 29
-**Current day:** Day 29 — Correlation ID
-**Status:** Code complete — correlationId threaded through contracts, outbox, consumers
+**Last completed day:** Day 30
+**Current day:** Day 30 — Architecture Decision Records
+**Status:** Docs complete — ADRs + architecture overview; Day 29 Bước 4 verified
 
-## Day 29 delivered
+## Day 30 delivered
 
 ```text
-correlationId on FlightCreatedEvent + BookingCreatedEvent (envelope, required)
-resolveCorrelationId(requestId ?? eventId) shared helper
-CreateFlight / CreateBooking / CancelBooking enqueue + audit metadata
-flight-notifier consumers log correlationId next to eventId
+docs/adr/ — README + ADR-001..004 (002 superseded by 003)
+docs/architecture-overview.md — topology + Final Architecture gap table
 ```
+
+## Closed hangover
+
+Day 29 Bước 4 PASS (2026-09-12): `investigate-002` in api `request_finished` + flight-notifier `booking_created_consumed`.
 
 ## Next
 
-When assigned — next curriculum day (causationId/Saga, dedupe store, or centralized logging).
+When assigned — next curriculum day.

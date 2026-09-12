@@ -138,6 +138,7 @@ test("adds x-request-id when client does not provide one", async (t) => {
   const requestId = response.headers["x-request-id"];
   assert.equal(typeof requestId, "string");
   assert.ok(typeof requestId === "string" && requestId.length > 0);
+  assert.equal(response.headers["x-correlation-id"], requestId);
 });
 
 test("reuses client-provided x-request-id", async (t) => {
@@ -149,6 +150,7 @@ test("reuses client-provided x-request-id", async (t) => {
 
   assert.equal(response.status, 200);
   assert.equal(response.headers["x-request-id"], "client-req-123");
+  assert.equal(response.headers["x-correlation-id"], "client-req-123");
 });
 
 test("logs request started and finished events", async (t) => {
@@ -180,6 +182,18 @@ test("logs request started and finished events", async (t) => {
   );
   assert.equal(
     finished.fields?.requestId,
+    response.headers["x-request-id"],
+  );
+  assert.equal(
+    started.fields?.correlationId,
+    response.headers["x-correlation-id"],
+  );
+  assert.equal(
+    finished.fields?.correlationId,
+    response.headers["x-correlation-id"],
+  );
+  assert.equal(
+    response.headers["x-correlation-id"],
     response.headers["x-request-id"],
   );
 });

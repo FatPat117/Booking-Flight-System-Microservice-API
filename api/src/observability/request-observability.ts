@@ -6,6 +6,8 @@ import type { Logger } from "./logger.js";
 import { runWithRequestContext } from "./request-context.js";
 
 const REQUEST_ID_HEADER = "x-request-id";
+/** Same value as requestId today — echoed so clients can grep without knowing the mapping. */
+const CORRELATION_ID_HEADER = "x-correlation-id";
 
 function getHeaderValue(
   value: string | string[] | undefined,
@@ -52,10 +54,12 @@ export function createRequestObservabilityMiddleware(logger: Logger) {
     const startedAt = performance.now();
 
     response.setHeader(REQUEST_ID_HEADER, requestId);
+    response.setHeader(CORRELATION_ID_HEADER, requestId);
 
     runWithRequestContext({ requestId }, () => {
       logger.info("request_started", {
         requestId,
+        correlationId: requestId,
         method: request.method,
         path: request.originalUrl,
       });
@@ -66,6 +70,7 @@ export function createRequestObservabilityMiddleware(logger: Logger) {
 
         logger.info("request_finished", {
           requestId,
+          correlationId: requestId,
           method: request.method,
           path: request.originalUrl,
           statusCode: response.statusCode,
