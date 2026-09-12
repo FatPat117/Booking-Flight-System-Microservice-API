@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Booking Microservices (Day 31)",
-    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31: Identity service POST /api/identity/register on :3001\n\nImport together with Booking-microservices.local.postman_environment.json.\nSet adminApiKey to match your local .env ADMIN_API_KEY.\nidentityBaseUrl defaults to http://localhost:3001.",
+    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31–32: Identity register + JWT login on :3001 (api still uses ADMIN_API_KEY)\n\nImport together with Booking-microservices.local.postman_environment.json.\nSet adminApiKey to match your local .env ADMIN_API_KEY.\nidentityBaseUrl defaults to http://localhost:3001."
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -407,8 +407,8 @@
       ]
     },
     {
-      "name": "Identity (Day 31)",
-      "description": "Separate identity service on {{identityBaseUrl}} (default :3001). Register only — no JWT yet.",
+      "name": "Identity (Day 31–32)",
+      "description": "Identity service on {{identityBaseUrl}} (default :3001). Register + JWT login. api does not verify JWT yet (Day 33).",
       "item": [
         {
           "name": "POST /api/identity/register",
@@ -445,6 +445,79 @@
             },
             "url": "{{identityBaseUrl}}/api/identity/register",
             "description": "Run after a successful register with the same email. Expect 409."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/identity/login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.accessToken) {",
+                  "    pm.environment.set('accessToken', body.accessToken);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"secret123\"\n}"
+            },
+            "url": "{{identityBaseUrl}}/api/identity/login",
+            "description": "200 + { accessToken, expiresIn }. Payload is { sub, email } — readable without JWT_SECRET (signed, not encrypted).\nPaste accessToken into jwt.io to verify.\nSaves accessToken to environment on success."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/identity/login (wrong password → 401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"wrong-password\"\n}"
+            },
+            "url": "{{identityBaseUrl}}/api/identity/login",
+            "description": "401 INVALID_CREDENTIALS — same message as unknown email (no user enumeration)."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/identity/login (unknown email → 401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nobody@example.com\",\n  \"password\": \"secret123\"\n}"
+            },
+            "url": "{{identityBaseUrl}}/api/identity/login",
+            "description": "401 INVALID_CREDENTIALS — identical body to wrong-password case."
           },
           "response": []
         }

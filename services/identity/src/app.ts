@@ -1,14 +1,16 @@
 import express from "express";
 
 import { sendApiError } from "./http-errors.js";
+import type { LoginUser } from "./login/login.js";
 import type { RegisterUser } from "./register/register.js";
 
 export type IdentityAppDependencies = {
   registerUser: RegisterUser;
+  loginUser: LoginUser;
 };
 
 export function createIdentityApp(dependencies: IdentityAppDependencies) {
-  const { registerUser } = dependencies;
+  const { registerUser, loginUser } = dependencies;
   const app = express();
 
   app.use(express.json({ strict: false }));
@@ -36,6 +38,27 @@ export function createIdentityApp(dependencies: IdentityAppDependencies) {
     }
 
     return response.status(201).json(result.user);
+  });
+
+  app.post("/api/identity/login", async (request, response) => {
+    const result = await loginUser(request.body);
+
+    if (result.outcome === "validation_failed") {
+      return sendApiError(response, 422, {
+        code: "VALIDATION_FAILED",
+        message: "Request contains invalid login data",
+        details: result.issues,
+      });
+    }
+
+    if (result.outcome === "invalid_credentials") {
+      return sendApiError(response, 401, {
+        code: "INVALID_CREDENTIALS",
+        message: "Email or password is incorrect",
+      });
+    }
+
+    return response.status(200).json(result.token);
   });
 
   app.use((_request, response) => {

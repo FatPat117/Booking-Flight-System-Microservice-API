@@ -98,12 +98,22 @@ test("register returns validation_failed for short password", async () => {
   assert.equal(result.outcome, "validation_failed");
 });
 
+function createStubLoginUser() {
+  return async () =>
+    ({
+      outcome: "invalid_credentials" as const,
+    }) as const;
+}
+
 test("POST /api/identity/register returns 201 without password fields", async () => {
   const registerUser = createRegisterUser({
     userRepository: createMemoryUserRepository(),
     hashPassword: async () => "$2b$12$fakehash",
   });
-  const app = createIdentityApp({ registerUser });
+  const app = createIdentityApp({
+    registerUser,
+    loginUser: createStubLoginUser(),
+  });
 
   const response = await request(app)
     .post("/api/identity/register")
@@ -120,7 +130,10 @@ test("POST /api/identity/register returns 409 for duplicate email", async () => 
     userRepository: createMemoryUserRepository(),
     hashPassword: async () => "$2b$12$fakehash",
   });
-  const app = createIdentityApp({ registerUser });
+  const app = createIdentityApp({
+    registerUser,
+    loginUser: createStubLoginUser(),
+  });
 
   await request(app)
     .post("/api/identity/register")

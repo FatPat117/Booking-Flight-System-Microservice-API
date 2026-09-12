@@ -3,8 +3,10 @@ import "reflect-metadata";
 import { createIdentityApp } from "./app.js";
 import { parseIdentityConfig } from "./config.js";
 import { createIdentityDataSource } from "./data-source.js";
+import { createLoginUser } from "./login/login.js";
 import { createRegisterUser } from "./register/register.js";
-import { hashPasswordWithBcrypt } from "./security/password-hasher.js";
+import { createJwtTokenIssuer } from "./security/jwt-token-issuer.js";
+import { createBcryptPasswordHasher } from "./security/password-hasher.js";
 import { createTypeOrmUserRepository } from "./users/typeorm-user-repository.js";
 
 const config = parseIdentityConfig(process.env);
@@ -14,12 +16,24 @@ await dataSource.initialize();
 await dataSource.runMigrations();
 
 const userRepository = createTypeOrmUserRepository(dataSource);
-const registerUser = createRegisterUser({
-  userRepository,
-  hashPassword: hashPasswordWithBcrypt,
+const passwordHasher = createBcryptPasswordHasher();
+const tokenIssuer = createJwtTokenIssuer({
+  secret: config.jwt.secret,
+  expiresIn: config.jwt.expiresIn,
 });
 
-const app = createIdentityApp({ registerUser });
+const registerUser = createRegisterUser({
+  userRepository,
+  hashPassword: (password) => passwordHasher.hash(password),
+});
+
+const loginUser = createLoginUser({
+  userRepository,
+  passwordHasher,
+  tokenIssuer,
+});
+
+const app = createIdentityApp({ registerUser, loginUser });
 
 const httpServer = app.listen(config.port, () => {
   console.log(

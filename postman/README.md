@@ -24,21 +24,23 @@ Select the **Booking Microservices — Local** environment before sending reques
 ## Start servers (dev)
 
 ```bash
-docker compose up rabbitmq          # terminal 1
+docker compose up rabbitmq postgres   # terminal 1
 npm run dev --workspace=@booking-flight-system/api
 npm run dev --workspace=@booking-flight-system/flight-notifier
+npm run dev --workspace=@booking-flight-system/identity
 ```
 
 ## Suggested flow
 
-1. **Flights (Write)** → `POST /api/flights` (saves `flightId`)
-2. **Bookings** → `POST /api/flights/:flightId/bookings` (saves `bookingId`)
-3. Wait ~5s → check flight-notifier for `booking_created_consumed` + same `correlationId` as `x-request-id`
-4. **Bookings** → `DELETE /api/bookings/:id` twice → `204` then `409`
-5. Folder **Day 29 — Correlation investigate** → auto-generates a fresh `requestId` for log grep
+1. **Identity** → `POST /api/identity/register` then `POST /api/identity/login` (saves `accessToken`; paste into jwt.io)
+2. **Flights (Write)** → `POST /api/flights` (saves `flightId`) — still uses `ADMIN_API_KEY` until Day 33
+3. **Bookings** → `POST /api/flights/:flightId/bookings` (saves `bookingId`)
+4. Wait ~5s → check flight-notifier for `booking_created_consumed` + same `correlationId` as `x-request-id`
+5. **Bookings** → `DELETE /api/bookings/:id` twice → `204` then `409`
+6. Folder **Day 29 — Correlation investigate** → auto-generates a fresh `requestId` for log grep
 
-## Coverage (through Day 31)
+## Coverage (through Day 32)
 
 - Health: `/live`, `/health`, `/ready` (booking api `:3000`)
 - Flights / bookings / cancel / correlation probes
-- **Identity** (`identityBaseUrl` `:3001`): `POST /api/identity/register`
+- **Identity** (`identityBaseUrl` `:3001`): register + JWT login (`accessToken` / `expiresIn`)
