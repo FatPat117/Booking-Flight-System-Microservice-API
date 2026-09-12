@@ -37,9 +37,8 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 4. **Bookings** → `DELETE /api/bookings/:id` twice → `204` then `409`
 5. Folder **Day 29 — Correlation investigate** → auto-generates a fresh `requestId` for log grep
 
-## Coverage (through Day 29)
+## Coverage (through Day 31)
 
-- Health: `/live`, `/health`, `/ready`
-- Flights read/write + auth errors
-- Bookings create + cancel (OCC / double-cancel)
-- Correlation probe requests for cross-service log investigation
+- Health: `/live`, `/health`, `/ready` (booking api `:3000`)
+- Flights / bookings / cancel / correlation probes
+- **Identity** (`identityBaseUrl` `:3001`): `POST /api/identity/register`

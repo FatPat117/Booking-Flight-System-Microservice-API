@@ -11,7 +11,7 @@
   },
   "scripts": {
     "prepare": "git config core.hooksPath scripts/git-hooks || true",
-    "build": "npm run build --workspace=@booking-flight-system/contracts && npm run build --workspace=@booking-flight-system/api && npm run build --workspace=@booking-flight-system/flight-notifier",
+    "build": "npm run build --workspace=@booking-flight-system/contracts && npm run build --workspace=@booking-flight-system/api && npm run build --workspace=@booking-flight-system/flight-notifier && npm run build --workspace=@booking-flight-system/identity",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "typecheck:test": "npm run typecheck:test --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",

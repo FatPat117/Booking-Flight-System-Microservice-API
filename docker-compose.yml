@@ -1,4 +1,4 @@
-# Dev topology: app (HTTP + publisher) + flight-notifier (consumer) + RabbitMQ.
+# Dev topology: app + flight-notifier + RabbitMQ + Postgres (Identity).
 
 services:
   app:
@@ -54,6 +54,23 @@ services:
       retries: 5
       start_period: 20s
 
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-identity}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-identity_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-identity_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - identity_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U identity -d identity_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 volumes:
   booking_data:
   rabbitmq_data:
+  identity_postgres_data:

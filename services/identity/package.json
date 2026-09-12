@@ -1,0 +1,35 @@
+{
+  "name": "@booking-flight-system/identity",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx --watch src/index.ts",
+    "build": "tsc",
+    "start": "node --env-file-if-exists=../../.env --env-file-if-exists=.env dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "migration:run": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx ./src/run-migrations.ts",
+    "migration:show": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx ./src/show-migrations.ts"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "express": "^5.2.1",
+    "pg": "^8.16.3",
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "^0.3.26"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.3",
+    "@types/supertest": "^7.2.0",
+    "supertest": "^7.2.2",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3"
+  }
+}

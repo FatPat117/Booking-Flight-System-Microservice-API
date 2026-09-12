@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Booking Microservices (Day 29)",
-    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26: POST /api/flights/:flightId/bookings (OCC seat reserve)\n- Day 28: DELETE /api/bookings/:id (cancel + seat release)\n- Day 29: x-request-id → correlationId through outbox → flight-notifier\n\nImport together with Booking-microservices.local.postman_environment.json.\nSet adminApiKey to match your local .env ADMIN_API_KEY.\n\nDay 29 investigation:\n1. Set environment requestId (e.g. investigate-001)\n2. POST /api/flights or POST booking with that x-request-id\n3. Grep api + flight-notifier logs for the same value (correlationId)",
+    "name": "Booking Microservices (Day 31)",
+    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31: Identity service POST /api/identity/register on :3001\n\nImport together with Booking-microservices.local.postman_environment.json.\nSet adminApiKey to match your local .env ADMIN_API_KEY.\nidentityBaseUrl defaults to http://localhost:3001.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -24,6 +24,10 @@
     {
       "key": "requestId",
       "value": "investigate-001"
+    },
+    {
+      "key": "identityBaseUrl",
+      "value": "http://localhost:3001"
     }
   ],
   "item": [
@@ -397,6 +401,50 @@
             },
             "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
             "description": "Uses flightId from step 1. Grep {{requestId}}-booking in both logs after ~5s."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Identity (Day 31)",
+      "description": "Separate identity service on {{identityBaseUrl}} (default :3001). Register only — no JWT yet.",
+      "item": [
+        {
+          "name": "POST /api/identity/register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"secret123\"\n}"
+            },
+            "url": "{{identityBaseUrl}}/api/identity/register",
+            "description": "201 + { id, email, createdAt } — never passwordHash.\n409 EMAIL_ALREADY_REGISTERED on duplicate.\n422 validation (email format, password >= 8)."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/identity/register (duplicate → 409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"secret123\"\n}"
+            },
+            "url": "{{identityBaseUrl}}/api/identity/register",
+            "description": "Run after a successful register with the same email. Expect 409."
           },
           "response": []
         }

@@ -1,20 +1,18 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 30
-**Current day:** Day 30 — Architecture Decision Records
-**Status:** Docs complete — ADRs + architecture overview; Day 29 Bước 4 verified
+**Last completed day:** Day 31
+**Current day:** Day 31 — Identity service (Postgres/TypeORM + register)
+**Status:** Code complete — register works on :3001; JWT not started
 
-## Day 30 delivered
+## Day 31 delivered
 
 ```text
-docs/adr/ — README + ADR-001..004 (002 superseded by 003)
-docs/architecture-overview.md — topology + Final Architecture gap table
+postgres in docker-compose (healthy + volume)
+services/identity — TypeORM UserEntity, migration, POST /api/identity/register
+bcrypt cost 12; UNIQUE email + 409 on duplicate; no passwordHash in response
+5 identity unit/API tests pass; smoke against Postgres PASS
 ```
-
-## Closed hangover
-
-Day 29 Bước 4 PASS (2026-09-12): `investigate-002` in api `request_finished` + flight-notifier `booking_created_consumed`.
 
 ## Next
 
-When assigned — next curriculum day.
+Day 32 (when assigned) — JWT login on Identity; still no verify middleware on api.
