@@ -14,6 +14,7 @@ const expressApp = createApp({
   logger: runtime.logger,
   healthChecks: runtime.healthChecks,
   adminApiKey: runtime.config.adminApiKey,
+  jwtSecret: runtime.config.jwtSecret,
 });
 
 const httpServer = expressApp.listen(runtime.config.port, () => {

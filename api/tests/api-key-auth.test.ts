@@ -109,6 +109,7 @@ function createTestContext(t: TestContext) {
     logger: createMemoryLogger(),
     healthChecks: createHealthChecks(database),
     adminApiKey: TEST_ADMIN_API_KEY,
+    jwtSecret: "test-jwt-secret-at-least-32-chars!!",
   });
 
   t.after(() => {

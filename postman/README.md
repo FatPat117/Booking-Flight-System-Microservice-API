@@ -39,8 +39,9 @@ npm run dev --workspace=@booking-flight-system/identity
 5. **Bookings** → `DELETE /api/bookings/:id` twice → `204` then `409`
 6. Folder **Day 29 — Correlation investigate** → auto-generates a fresh `requestId` for log grep
 
-## Coverage (through Day 32)
+## Coverage (through Day 33)
 
 - Health: `/live`, `/health`, `/ready` (booking api `:3000`)
 - Flights / bookings / cancel / correlation probes
 - **Identity** (`identityBaseUrl` `:3001`): register + JWT login (`accessToken` / `expiresIn`)
+- **JWT probe** (`baseUrl` `:3000`): `GET /api/whoami` with Bearer `accessToken` (Day 33)

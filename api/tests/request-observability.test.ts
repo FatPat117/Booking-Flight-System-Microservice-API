@@ -116,6 +116,7 @@ function createTestContext(t: TestContext) {
     logger,
     healthChecks: createHealthChecks(database),
     adminApiKey: TEST_ADMIN_API_KEY,
+    jwtSecret: "test-jwt-secret-at-least-32-chars!!",
   });
 
   t.after(() => {
@@ -266,6 +267,7 @@ test("logs unexpected errors with request id without leaking them to client", as
       },
     },
     adminApiKey: TEST_ADMIN_API_KEY,
+    jwtSecret: "test-jwt-secret-at-least-32-chars!!",
   });
 
   const response = await request(app)

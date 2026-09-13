@@ -2,6 +2,8 @@ export type AppConfig = Readonly<{
   port: number;
   databasePath: string;
   adminApiKey: string;
+  /** Shared with identity — same value from root `.env` (Day 33). */
+  jwtSecret: string;
   /** AMQP URL — host is `localhost` on the machine, `rabbitmq` inside compose */
   rabbitmqUrl: string;
 }>;
@@ -21,14 +23,38 @@ export function parseConfig(environment: Environment): AppConfig {
   const port = parsePort(environment.PORT);
   const databasePath = parseDatabasePath(environment.DATABASE_PATH);
   const adminApiKey = parseAdminApiKey(environment.ADMIN_API_KEY);
+  const jwtSecret = parseJwtSecret(environment.JWT_SECRET);
   const rabbitmqUrl = parseRabbitmqUrl(environment.RABBITMQ_URL);
 
   return {
     port,
     databasePath,
     adminApiKey,
+    jwtSecret,
     rabbitmqUrl,
   };
+}
+
+const MIN_JWT_SECRET_LENGTH = 32;
+
+function parseJwtSecret(raw: string | undefined): string {
+  if (raw === undefined) {
+    throw new Error("Missing required configuration: JWT_SECRET");
+  }
+
+  const secret = raw.trim();
+
+  if (secret.length === 0) {
+    throw new Error("Invalid JWT_SECRET: value must not be blank");
+  }
+
+  if (secret.length < MIN_JWT_SECRET_LENGTH) {
+    throw new Error(
+      `Invalid JWT_SECRET: expected at least ${MIN_JWT_SECRET_LENGTH} characters`,
+    );
+  }
+
+  return secret;
 }
 
 function parseAdminApiKey(raw: string | undefined): string {

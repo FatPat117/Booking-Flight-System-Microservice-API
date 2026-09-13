@@ -1,6 +1,7 @@
 import express from "express";
 
 import { createApiKeyAuthMiddleware } from "./auth/api-key-auth.js";
+import { createVerifyJwtMiddleware } from "./auth/verify-jwt.js";
 import type { CancelBooking } from "./bookings/cancel-booking.js";
 import type { CreateBooking } from "./bookings/create-booking.js";
 import type { CreateFlight } from "./flights/create-flight.js";
@@ -13,6 +14,7 @@ import {
   sendApiError,
 } from "./http-errors.js";
 import type { Logger } from "./observability/logger.js";
+import { getAuthenticatedUser } from "./observability/request-context.js";
 import { createRequestObservabilityMiddleware } from "./observability/request-observability.js";
 
 export type AppDependencies = {
@@ -24,6 +26,7 @@ export type AppDependencies = {
   logger: Logger;
   healthChecks: HealthChecks;
   adminApiKey: string;
+  jwtSecret: string;
 };
 
 export function createApp(dependencies: AppDependencies) {
@@ -36,12 +39,14 @@ export function createApp(dependencies: AppDependencies) {
     logger,
     healthChecks,
     adminApiKey,
+    jwtSecret,
   } = dependencies;
   const app = express();
 
   const requireAdminApiKey = createApiKeyAuthMiddleware({
     adminApiKey,
   });
+  const requireJwt = createVerifyJwtMiddleware({ jwtSecret });
 
   app.use(createRequestObservabilityMiddleware(logger));
   app.use(express.json({ strict: false }));
@@ -63,6 +68,16 @@ export function createApp(dependencies: AppDependencies) {
     const statusCode = readiness.status === "ok" ? 200 : 503;
 
     return response.status(statusCode).json(readiness);
+  });
+
+  // Day 33 probe only — flight/booking routes still use ADMIN_API_KEY (Day 34).
+  app.get("/api/whoami", requireJwt, (_request, response) => {
+    const user = getAuthenticatedUser();
+
+    return response.status(200).json({
+      userId: user?.userId,
+      email: user?.email,
+    });
   });
 
   app.get("/api/flights", (req, res) => {

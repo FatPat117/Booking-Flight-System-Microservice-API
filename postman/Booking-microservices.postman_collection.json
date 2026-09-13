@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Booking Microservices (Day 31)",
-    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31–32: Identity register + JWT login on :3001 (api still uses ADMIN_API_KEY)\n\nImport together with Booking-microservices.local.postman_environment.json.\nSet adminApiKey to match your local .env ADMIN_API_KEY.\nidentityBaseUrl defaults to http://localhost:3001."
+    "name": "Booking Microservices (Day 33)",
+    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9\u201315: flights CRUD, auth, audit, migrations\n- Day 26\u201329: bookings, cancel, correlationId\n- Day 31\u201332: Identity register + JWT login on :3001\n- Day 33: GET /api/whoami verifies JWT on api (:3000); flights still use ADMIN_API_KEY\n\nImport together with Booking-microservices.local.postman_environment.json.\nSet adminApiKey to match your local .env ADMIN_API_KEY.\nidentityBaseUrl defaults to http://localhost:3001. Login first to set accessToken.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -81,6 +81,65 @@
       ]
     },
     {
+      "name": "JWT probe (Day 33)",
+      "description": "Only route using verifyJwt today. Login via Identity first to set accessToken. Flights still use ADMIN_API_KEY until Day 34.",
+      "item": [
+        {
+          "name": "GET /api/whoami",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/whoami",
+            "description": "200 + { userId, email } when Bearer JWT is valid.\n401 MISSING_TOKEN / INVALID_TOKEN / TOKEN_EXPIRED otherwise."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/whoami (missing token \u2192 401)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/whoami",
+            "description": "Expect 401 MISSING_TOKEN."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/whoami (invalid token \u2192 401)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "not-a-valid.jwt.token",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/whoami",
+            "description": "Expect 401 INVALID_TOKEN."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Flights (Read)",
       "description": "Public read endpoints. No authentication required.",
       "item": [
@@ -96,8 +155,13 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/api/flights?page=1&pageSize=20",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "flights"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "flights"
+              ],
               "query": [
                 {
                   "key": "page",
@@ -162,7 +226,7 @@
                   "}",
                   "const requestId = pm.request.headers.get('x-request-id');",
                   "if (requestId) {",
-                  "  console.log('Day 29: grep this correlationId in api + flight-notifier logs →', requestId);",
+                  "  console.log('Day 29: grep this correlationId in api + flight-notifier logs \u2192', requestId);",
                   "}"
                 ]
               }
@@ -217,7 +281,7 @@
     },
     {
       "name": "Bookings",
-      "description": "Day 26 create booking (public). Day 28 cancel booking. Day 29: x-request-id → correlationId on booking.created.",
+      "description": "Day 26 create booking (public). Day 28 cancel booking. Day 29: x-request-id \u2192 correlationId on booking.created.",
       "item": [
         {
           "name": "POST /api/flights/:flightId/bookings",
@@ -236,7 +300,7 @@
                   "}",
                   "const requestId = pm.request.headers.get('x-request-id');",
                   "if (requestId) {",
-                  "  console.log('Day 29: grep this correlationId →', requestId);",
+                  "  console.log('Day 29: grep this correlationId \u2192', requestId);",
                   "}"
                 ]
               }
@@ -260,7 +324,7 @@
               "raw": "{\n  \"passengerName\": \"Alice Nguyen\"\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
-            "description": "Public (no admin key).\n201 created | 409 sold-out | 404 flight-not-found | 422 validation.\nSaves {{bookingId}}. Wait ~5s → booking_created_consumed with same correlationId."
+            "description": "Public (no admin key).\n201 created | 409 sold-out | 404 flight-not-found | 422 validation.\nSaves {{bookingId}}. Wait ~5s \u2192 booking_created_consumed with same correlationId."
           },
           "response": []
         },
@@ -280,7 +344,7 @@
           "response": []
         },
         {
-          "name": "DELETE /api/bookings/:id (already cancelled → 409)",
+          "name": "DELETE /api/bookings/:id (already cancelled \u2192 409)",
           "request": {
             "method": "DELETE",
             "header": [
@@ -297,7 +361,7 @@
       ]
     },
     {
-      "name": "Day 29 — Correlation investigate",
+      "name": "Day 29 \u2014 Correlation investigate",
       "description": "Fixed requestId for log grep across api + flight-notifier.",
       "item": [
         {
@@ -407,7 +471,7 @@
       ]
     },
     {
-      "name": "Identity (Day 31–32)",
+      "name": "Identity (Day 31\u201332)",
       "description": "Identity service on {{identityBaseUrl}} (default :3001). Register + JWT login. api does not verify JWT yet (Day 33).",
       "item": [
         {
@@ -425,12 +489,12 @@
               "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"secret123\"\n}"
             },
             "url": "{{identityBaseUrl}}/api/identity/register",
-            "description": "201 + { id, email, createdAt } — never passwordHash.\n409 EMAIL_ALREADY_REGISTERED on duplicate.\n422 validation (email format, password >= 8)."
+            "description": "201 + { id, email, createdAt } \u2014 never passwordHash.\n409 EMAIL_ALREADY_REGISTERED on duplicate.\n422 validation (email format, password >= 8)."
           },
           "response": []
         },
         {
-          "name": "POST /api/identity/register (duplicate → 409)",
+          "name": "POST /api/identity/register (duplicate \u2192 409)",
           "request": {
             "method": "POST",
             "header": [
@@ -479,12 +543,12 @@
               "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"secret123\"\n}"
             },
             "url": "{{identityBaseUrl}}/api/identity/login",
-            "description": "200 + { accessToken, expiresIn }. Payload is { sub, email } — readable without JWT_SECRET (signed, not encrypted).\nPaste accessToken into jwt.io to verify.\nSaves accessToken to environment on success."
+            "description": "200 + { accessToken, expiresIn }. Payload is { sub, email } \u2014 readable without JWT_SECRET (signed, not encrypted).\nPaste accessToken into jwt.io to verify.\nSaves accessToken to environment on success."
           },
           "response": []
         },
         {
-          "name": "POST /api/identity/login (wrong password → 401)",
+          "name": "POST /api/identity/login (wrong password \u2192 401)",
           "request": {
             "method": "POST",
             "header": [
@@ -498,12 +562,12 @@
               "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"wrong-password\"\n}"
             },
             "url": "{{identityBaseUrl}}/api/identity/login",
-            "description": "401 INVALID_CREDENTIALS — same message as unknown email (no user enumeration)."
+            "description": "401 INVALID_CREDENTIALS \u2014 same message as unknown email (no user enumeration)."
           },
           "response": []
         },
         {
-          "name": "POST /api/identity/login (unknown email → 401)",
+          "name": "POST /api/identity/login (unknown email \u2192 401)",
           "request": {
             "method": "POST",
             "header": [
@@ -517,7 +581,7 @@
               "raw": "{\n  \"email\": \"nobody@example.com\",\n  \"password\": \"secret123\"\n}"
             },
             "url": "{{identityBaseUrl}}/api/identity/login",
-            "description": "401 INVALID_CREDENTIALS — identical body to wrong-password case."
+            "description": "401 INVALID_CREDENTIALS \u2014 identical body to wrong-password case."
           },
           "response": []
         }
@@ -528,7 +592,7 @@
       "description": "Quick manual checks for auth and validation behavior.",
       "item": [
         {
-          "name": "POST /api/flights (missing auth → 401)",
+          "name": "POST /api/flights (missing auth \u2192 401)",
           "request": {
             "auth": {
               "type": "noauth"
@@ -553,7 +617,7 @@
           "response": []
         },
         {
-          "name": "POST /api/flights (invalid body → 422)",
+          "name": "POST /api/flights (invalid body \u2192 422)",
           "request": {
             "auth": {
               "type": "bearer",
@@ -585,7 +649,7 @@
           "response": []
         },
         {
-          "name": "GET /api/flights (invalid page → 422)",
+          "name": "GET /api/flights (invalid page \u2192 422)",
           "request": {
             "method": "GET",
             "header": [
@@ -599,7 +663,7 @@
           "response": []
         },
         {
-          "name": "DELETE /api/bookings/missing → 404",
+          "name": "DELETE /api/bookings/missing \u2192 404",
           "request": {
             "method": "DELETE",
             "header": [

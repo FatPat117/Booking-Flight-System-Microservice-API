@@ -1,18 +1,18 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 32
-**Current day:** Day 32 — JWT login (issue token on Identity)
-**Status:** Code complete — `POST /api/identity/login` issues JWT; api still uses `ADMIN_API_KEY`
+**Last completed day:** Day 33
+**Current day:** Day 33 — JWT verify middleware on `api`
+**Status:** Code complete — `/api/whoami` verifies JWT; flight/booking still use `ADMIN_API_KEY`
 
-## Day 32 delivered
+## Day 33 delivered
 
 ```text
-JWT_SECRET / JWT_EXPIRES_IN fail-fast in identity config
-TokenIssuer + JwtTokenIssuer; login use case + bcrypt.compare
-Unified 401 for unknown email / wrong password (no enumeration)
-Tests: issuer, login outcomes, HTTP 200/401 identical bodies
+JWT_SECRET shared via root .env + docker-compose app env
+request-context.authenticatedUser (optional)
+verifyJwt middleware (missing / expired / invalid) + tests
+GET /api/whoami probe only — no flight/booking migration yet
 ```
 
 ## Next
 
-Day 33 — share `JWT_SECRET` correctly + middleware verify token on `api`, replace `ADMIN_API_KEY`.
+Day 34 — migrate `POST /api/flights` (and other admin routes) from `ADMIN_API_KEY` to `verifyJwt`; decide if roles are needed yet.

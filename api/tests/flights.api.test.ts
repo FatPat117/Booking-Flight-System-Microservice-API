@@ -150,6 +150,7 @@ function createAppWithRepository(
     logger,
     healthChecks,
     adminApiKey: TEST_ADMIN_API_KEY,
+    jwtSecret: "test-jwt-secret-at-least-32-chars!!",
   });
 }
 
@@ -1061,6 +1062,7 @@ test("rolls back flight creation when audit recording fails", async (t) => {
     logger,
     healthChecks: createHealthChecks(database),
     adminApiKey: TEST_ADMIN_API_KEY,
+    jwtSecret: "test-jwt-secret-at-least-32-chars!!",
   });
 
   const response = await request(app)

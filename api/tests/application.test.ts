@@ -8,10 +8,12 @@ import { createApplication } from "../src/bootstrap/application.js";
 import { createNoopMessagePublisher } from "../src/messaging/noop-message-publisher.js";
 
 const TEST_ADMIN_API_KEY = "test-admin-key-123456";
+const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
 
 const testConfigBase = {
   port: 3000,
   adminApiKey: TEST_ADMIN_API_KEY,
+  jwtSecret: TEST_JWT_SECRET,
   rabbitmqUrl: "amqp://guest:guest@localhost:5672",
 } as const;
 
