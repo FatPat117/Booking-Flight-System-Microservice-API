@@ -1,3 +1,5 @@
+import type { UserRole } from "../entities/user.entity.js";
+
 export type PublicUser = Readonly<{
   id: string;
   email: string;
@@ -8,6 +10,7 @@ export type UserRecord = Readonly<{
   id: string;
   email: string;
   passwordHash: string;
+  role: UserRole;
   createdAt: Date;
 }>;
 

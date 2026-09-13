@@ -23,7 +23,6 @@ import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 
 const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
-const TEST_ADMIN_API_KEY = "test-admin-key-123456";
 
 type MockResponseState = {
   statusCode: number;
@@ -101,7 +100,7 @@ test("verifyJwt accepts a valid token and sets authenticatedUser", () => {
     jwtSecret: TEST_JWT_SECRET,
   });
   const token = jwt.sign(
-    { sub: "user-1", email: "alice@example.com" },
+    { sub: "user-1", email: "alice@example.com", role: "admin" },
     TEST_JWT_SECRET,
     { expiresIn: "1h" },
   );
@@ -125,7 +124,38 @@ test("verifyJwt accepts a valid token and sets authenticatedUser", () => {
   assert.deepEqual(userAfterNext, {
     userId: "user-1",
     email: "alice@example.com",
+    role: "admin",
   });
+});
+
+test("verifyJwt rejects a token without role claim", () => {
+  const middleware = createVerifyJwtMiddleware({
+    jwtSecret: TEST_JWT_SECRET,
+  });
+  const token = jwt.sign(
+    { sub: "user-1", email: "alice@example.com" },
+    TEST_JWT_SECRET,
+    { expiresIn: "1h" },
+  );
+  const { response, state } = createMockResponse();
+  let nextCalled = false;
+
+  runWithRequestContext({ requestId: "req-1" }, () => {
+    middleware(
+      createMockRequest(`Bearer ${token}`),
+      response,
+      (() => {
+        nextCalled = true;
+      }) as NextFunction,
+    );
+  });
+
+  assert.equal(nextCalled, false);
+  assert.equal(state.statusCode, 401);
+  assert.equal(
+    (state.body as { error: { code: string } }).error.code,
+    "INVALID_TOKEN",
+  );
 });
 
 test("verifyJwt rejects an expired token", () => {
@@ -133,7 +163,7 @@ test("verifyJwt rejects an expired token", () => {
     jwtSecret: TEST_JWT_SECRET,
   });
   const token = jwt.sign(
-    { sub: "user-1", email: "alice@example.com" },
+    { sub: "user-1", email: "alice@example.com", role: "user" },
     TEST_JWT_SECRET,
     { expiresIn: "-1s" },
   );
@@ -163,7 +193,7 @@ test("verifyJwt rejects a tampered token", () => {
     jwtSecret: TEST_JWT_SECRET,
   });
   const token = jwt.sign(
-    { sub: "user-1", email: "alice@example.com" },
+    { sub: "user-1", email: "alice@example.com", role: "user" },
     TEST_JWT_SECRET,
     { expiresIn: "1h" },
   );
@@ -242,12 +272,11 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
     healthChecks: createHealthChecks(database),
-    adminApiKey: TEST_ADMIN_API_KEY,
     jwtSecret: TEST_JWT_SECRET,
   });
 
   const token = jwt.sign(
-    { sub: "user-whoami", email: "whoami@example.com" },
+    { sub: "user-whoami", email: "whoami@example.com", role: "user" },
     TEST_JWT_SECRET,
     { expiresIn: "1h" },
   );
@@ -260,6 +289,7 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
   assert.deepEqual(response.body, {
     userId: "user-whoami",
     email: "whoami@example.com",
+    role: "user",
   });
 
   database.close();
@@ -287,7 +317,6 @@ test("GET /api/whoami returns 401 without a token", async () => {
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
     healthChecks: createHealthChecks(database),
-    adminApiKey: TEST_ADMIN_API_KEY,
     jwtSecret: TEST_JWT_SECRET,
   });
 

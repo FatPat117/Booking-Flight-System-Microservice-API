@@ -2,6 +2,7 @@ export type TokenPayload = Readonly<{
   /** userId — JWT standard name for the subject */
   sub: string;
   email: string;
+  role: "user" | "admin";
 }>;
 
 export type IssuedToken = Readonly<{

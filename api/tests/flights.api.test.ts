@@ -6,6 +6,7 @@ import test from "node:test";
 import type { TestContext } from "node:test";
 import type { Express } from "express";
 import type { DatabaseSync } from "node:sqlite";
+import jwt from "jsonwebtoken";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
@@ -25,7 +26,19 @@ import type { Logger, LogFields } from "../src/observability/logger.js";
 import { getRequestContext } from "../src/observability/request-context.js";
 import { createSqliteTransactionRunner } from "../src/transactions/sqlite-transaction-runner.js";
 
-const TEST_ADMIN_API_KEY = "test-admin-key-123456";
+const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
+
+function signAccessToken(role: "user" | "admin" = "admin"): string {
+  return jwt.sign(
+    {
+      sub: "test-user-id",
+      email: role === "admin" ? "admin@example.com" : "user@example.com",
+      role,
+    },
+    TEST_JWT_SECRET,
+    { expiresIn: "1h" },
+  );
+}
 
 type FlightPayload = {
   flightNumber: string;
@@ -149,16 +162,12 @@ function createAppWithRepository(
     listFlights,
     logger,
     healthChecks,
-    adminApiKey: TEST_ADMIN_API_KEY,
-    jwtSecret: "test-jwt-secret-at-least-32-chars!!",
+    jwtSecret: TEST_JWT_SECRET,
   });
 }
 
 function withAdminAuth(builder: request.Test) {
-  return builder.set(
-    "Authorization",
-    `Bearer ${TEST_ADMIN_API_KEY}`,
-  );
+  return builder.set("Authorization", `Bearer ${signAccessToken("admin")}`);
 }
 
 function postFlight(app: Express) {
@@ -867,7 +876,7 @@ test("POST /api/flights records an audit log when created", async (t) => {
 
   const response = await request(app)
     .post("/api/flights")
-    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .set("Authorization", `Bearer ${signAccessToken("admin")}`)
     .set("x-request-id", "audit-request-1")
     .send(makeValidFlight());
 
@@ -938,6 +947,30 @@ test("unauthenticated create request does not record audit", async (t) => {
     .send(makeValidFlight());
 
   assert.equal(response.status, 401);
+  assert.equal(response.body.error.code, "MISSING_TOKEN");
+
+  const countRow = database
+    .prepare(
+      `
+        SELECT COUNT(*) AS count
+        FROM audit_logs
+        `,
+    )
+    .get() as { count: number };
+
+  assert.equal(countRow.count, 0);
+});
+
+test("non-admin JWT cannot create flight", async (t) => {
+  const { app, database } = createTestContext(t);
+
+  const response = await request(app)
+    .post("/api/flights")
+    .set("Authorization", `Bearer ${signAccessToken("user")}`)
+    .send(makeValidFlight());
+
+  assert.equal(response.status, 403);
+  assert.equal(response.body.error.code, "FORBIDDEN");
 
   const countRow = database
     .prepare(
@@ -956,7 +989,7 @@ test("invalid create request does not record audit", async (t) => {
 
   const response = await request(app)
     .post("/api/flights")
-    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .set("Authorization", `Bearer ${signAccessToken("admin")}`)
     .send({});
 
   assert.equal(response.status, 422);
@@ -980,14 +1013,14 @@ test("duplicate create request does not record an additional audit log", async (
 
   const first = await request(app)
     .post("/api/flights")
-    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .set("Authorization", `Bearer ${signAccessToken("admin")}`)
     .send(payload);
 
   assert.equal(first.status, 201);
 
   const duplicate = await request(app)
     .post("/api/flights")
-    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .set("Authorization", `Bearer ${signAccessToken("admin")}`)
     .send(payload);
 
   assert.equal(duplicate.status, 409);
@@ -1061,13 +1094,12 @@ test("rolls back flight creation when audit recording fails", async (t) => {
     listFlights,
     logger,
     healthChecks: createHealthChecks(database),
-    adminApiKey: TEST_ADMIN_API_KEY,
-    jwtSecret: "test-jwt-secret-at-least-32-chars!!",
+    jwtSecret: TEST_JWT_SECRET,
   });
 
   const response = await request(app)
     .post("/api/flights")
-    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .set("Authorization", `Bearer ${signAccessToken("admin")}`)
     .send(makeValidFlight());
 
   assert.equal(response.status, 500);

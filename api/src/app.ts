@@ -1,6 +1,6 @@
 import express from "express";
 
-import { createApiKeyAuthMiddleware } from "./auth/api-key-auth.js";
+import { requireRole } from "./auth/require-role.js";
 import { createVerifyJwtMiddleware } from "./auth/verify-jwt.js";
 import type { CancelBooking } from "./bookings/cancel-booking.js";
 import type { CreateBooking } from "./bookings/create-booking.js";
@@ -25,7 +25,6 @@ export type AppDependencies = {
   listFlights: ListFlights;
   logger: Logger;
   healthChecks: HealthChecks;
-  adminApiKey: string;
   jwtSecret: string;
 };
 
@@ -38,14 +37,10 @@ export function createApp(dependencies: AppDependencies) {
     listFlights,
     logger,
     healthChecks,
-    adminApiKey,
     jwtSecret,
   } = dependencies;
   const app = express();
 
-  const requireAdminApiKey = createApiKeyAuthMiddleware({
-    adminApiKey,
-  });
   const requireJwt = createVerifyJwtMiddleware({ jwtSecret });
 
   app.use(createRequestObservabilityMiddleware(logger));
@@ -70,13 +65,13 @@ export function createApp(dependencies: AppDependencies) {
     return response.status(statusCode).json(readiness);
   });
 
-  // Day 33 probe only — flight/booking routes still use ADMIN_API_KEY (Day 34).
   app.get("/api/whoami", requireJwt, (_request, response) => {
     const user = getAuthenticatedUser();
 
     return response.status(200).json({
       userId: user?.userId,
       email: user?.email,
+      role: user?.role,
     });
   });
 
@@ -114,28 +109,33 @@ export function createApp(dependencies: AppDependencies) {
     return res.status(200).json(flight);
   });
 
-  app.post("/api/flights", requireAdminApiKey, async (req, res) => {
-    const result = await createFlight(req.body);
+  app.post(
+    "/api/flights",
+    requireJwt,
+    requireRole("admin"),
+    async (req, res) => {
+      const result = await createFlight(req.body);
 
-    if (result.outcome === "validation_failed") {
-      return sendApiError(res, 422, {
-        code: "VALIDATION_FAILED",
-        message: "Request contains invalid flight data",
-        details: result.issues,
-      });
-    }
+      if (result.outcome === "validation_failed") {
+        return sendApiError(res, 422, {
+          code: "VALIDATION_FAILED",
+          message: "Request contains invalid flight data",
+          details: result.issues,
+        });
+      }
 
-    if (result.outcome === "duplicate") {
-      return sendApiError(res, 409, {
-        code: "FLIGHT_ALREADY_EXISTS",
-        message:
-          "A flight with the same flight number and departure time already exists",
-      });
-    }
+      if (result.outcome === "duplicate") {
+        return sendApiError(res, 409, {
+          code: "FLIGHT_ALREADY_EXISTS",
+          message:
+            "A flight with the same flight number and departure time already exists",
+        });
+      }
 
-    res.setHeader("Location", `/api/flights/${result.flight.id}`);
-    return res.status(201).json(result.flight);
-  });
+      res.setHeader("Location", `/api/flights/${result.flight.id}`);
+      return res.status(201).json(result.flight);
+    },
+  );
 
   app.post("/api/flights/:flightId/bookings", async (req, res) => {
     const result = await createBooking(req.params.flightId, req.body);

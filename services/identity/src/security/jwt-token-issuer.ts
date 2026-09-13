@@ -19,7 +19,11 @@ export function createJwtTokenIssuer(deps: {
   return {
     issue(payload: TokenPayload): IssuedToken {
       const accessToken = jwt.sign(
-        { sub: payload.sub, email: payload.email },
+        {
+          sub: payload.sub,
+          email: payload.email,
+          role: payload.role,
+        },
         secret,
         signOptions,
       );

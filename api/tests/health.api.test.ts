@@ -17,7 +17,6 @@ import { createHealthChecks } from "../src/health/health-checks.js";
 import type { Logger } from "../src/observability/logger.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 
-const TEST_ADMIN_API_KEY = "test-admin-key-123456";
 
 function createNoopAuditRecorder(): AuditRecorder {
   return {
@@ -89,7 +88,6 @@ function createTestContext(t: TestContext) {
     listFlights,
     logger: createMemoryLogger(),
     healthChecks,
-    adminApiKey: TEST_ADMIN_API_KEY,
     jwtSecret: "test-jwt-secret-at-least-32-chars!!",
   });
 
@@ -185,7 +183,6 @@ test("GET /ready returns 503 when database is unavailable", async (t) => {
     listFlights,
     logger: createMemoryLogger(),
     healthChecks: unhealthyHealthChecks,
-    adminApiKey: TEST_ADMIN_API_KEY,
     jwtSecret: "test-jwt-secret-at-least-32-chars!!",
   });
 

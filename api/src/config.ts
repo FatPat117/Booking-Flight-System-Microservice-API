@@ -1,7 +1,6 @@
 export type AppConfig = Readonly<{
   port: number;
   databasePath: string;
-  adminApiKey: string;
   /** Shared with identity — same value from root `.env` (Day 33). */
   jwtSecret: string;
   /** AMQP URL — host is `localhost` on the machine, `rabbitmq` inside compose */
@@ -22,14 +21,12 @@ const DEFAULT_RABBITMQ_URL = "amqp://guest:guest@localhost:5672";
 export function parseConfig(environment: Environment): AppConfig {
   const port = parsePort(environment.PORT);
   const databasePath = parseDatabasePath(environment.DATABASE_PATH);
-  const adminApiKey = parseAdminApiKey(environment.ADMIN_API_KEY);
   const jwtSecret = parseJwtSecret(environment.JWT_SECRET);
   const rabbitmqUrl = parseRabbitmqUrl(environment.RABBITMQ_URL);
 
   return {
     port,
     databasePath,
-    adminApiKey,
     jwtSecret,
     rabbitmqUrl,
   };
@@ -55,26 +52,6 @@ function parseJwtSecret(raw: string | undefined): string {
   }
 
   return secret;
-}
-
-function parseAdminApiKey(raw: string | undefined): string {
-  if (raw === undefined) {
-    throw new Error("Missing required configuration: ADMIN_API_KEY");
-  }
-
-  const adminApiKey = raw.trim();
-
-  if (adminApiKey.length === 0) {
-    throw new Error("Invalid ADMIN_API_KEY: value must not be blank");
-  }
-
-  if (adminApiKey.length < 16) {
-    throw new Error(
-      "Invalid ADMIN_API_KEY: expected at least 16 characters",
-    );
-  }
-
-  return adminApiKey;
 }
 
 function parsePort(raw: string | undefined): number {

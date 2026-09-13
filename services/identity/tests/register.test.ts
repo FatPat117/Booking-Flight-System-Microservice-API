@@ -27,6 +27,7 @@ function createMemoryUserRepository(): UserRepository {
         id: crypto.randomUUID(),
         email: input.email,
         passwordHash: input.passwordHash,
+        role: "user",
         createdAt: new Date("2026-09-12T00:00:00.000Z"),
       };
       users.set(input.email, record);

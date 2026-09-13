@@ -53,23 +53,29 @@ function sendUnauthorized(
 
 function isTokenPayload(
   value: unknown,
-): value is { sub: string; email: string } {
+): value is { sub: string; email: string; role: "user" | "admin" } {
   if (typeof value !== "object" || value === null) {
     return false;
   }
 
-  const candidate = value as { sub?: unknown; email?: unknown };
+  const candidate = value as {
+    sub?: unknown;
+    email?: unknown;
+    role?: unknown;
+  };
+
   return (
     typeof candidate.sub === "string" &&
     candidate.sub.length > 0 &&
     typeof candidate.email === "string" &&
-    candidate.email.length > 0
+    candidate.email.length > 0 &&
+    (candidate.role === "user" || candidate.role === "admin")
   );
 }
 
 /**
- * Verifies Authorization: Bearer <JWT> and stores { userId, email } on request context.
- * Does not protect flight/booking routes yet — Day 34 migrates those.
+ * Verifies Authorization: Bearer <JWT> and stores { userId, email, role }
+ * on request context.
  */
 export function createVerifyJwtMiddleware(options: VerifyJwtOptions) {
   const { jwtSecret } = options;
@@ -106,6 +112,7 @@ export function createVerifyJwtMiddleware(options: VerifyJwtOptions) {
       setAuthenticatedUser({
         userId: decoded.sub,
         email: decoded.email,
+        role: decoded.role,
       });
 
       return next();

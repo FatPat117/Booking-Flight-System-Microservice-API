@@ -13,7 +13,6 @@ const expressApp = createApp({
   listFlights: runtime.listFlights,
   logger: runtime.logger,
   healthChecks: runtime.healthChecks,
-  adminApiKey: runtime.config.adminApiKey,
   jwtSecret: runtime.config.jwtSecret,
 });
 

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { TestContext } from "node:test";
 import type { DatabaseSync } from "node:sqlite";
+import jwt from "jsonwebtoken";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
@@ -18,8 +19,16 @@ import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository
 import type { Logger } from "../src/observability/logger.js";
 import { createSqliteTransactionRunner } from "../src/transactions/sqlite-transaction-runner.js";
 
-const TEST_ADMIN_API_KEY = "test-admin-key-123456";
+const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
 const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
+
+function adminToken(): string {
+  return jwt.sign(
+    { sub: "admin-1", email: "admin@example.com", role: "admin" },
+    TEST_JWT_SECRET,
+    { expiresIn: "1h" },
+  );
+}
 
 function createMemoryLogger(): Logger {
   return {
@@ -78,8 +87,7 @@ function createBookingApp(database: DatabaseSync) {
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
     healthChecks: createHealthChecks(database),
-    adminApiKey: TEST_ADMIN_API_KEY,
-    jwtSecret: "test-jwt-secret-at-least-32-chars!!",
+    jwtSecret: TEST_JWT_SECRET,
   });
 }
 
@@ -99,7 +107,7 @@ test("POST booking returns 201 when seat is available", async (t) => {
 
   const flightResponse = await request(app)
     .post("/api/flights")
-    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .set("Authorization", `Bearer ${adminToken()}`)
     .send({
       flightNumber: "VN888",
       origin: "SGN",
@@ -129,7 +137,7 @@ test("POST booking returns 409 when flight is sold out", async (t) => {
 
   const flightResponse = await request(app)
     .post("/api/flights")
-    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .set("Authorization", `Bearer ${adminToken()}`)
     .send({
       flightNumber: "VN777",
       origin: "SGN",
@@ -172,7 +180,7 @@ test("POST booking returns 422 for invalid passenger name", async (t) => {
 
   const flightResponse = await request(app)
     .post("/api/flights")
-    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .set("Authorization", `Bearer ${adminToken()}`)
     .send({
       flightNumber: "VN666",
       origin: "SGN",
@@ -199,7 +207,7 @@ test("DELETE booking returns 204 then 409 on second cancel", async (t) => {
 
   const flightResponse = await request(app)
     .post("/api/flights")
-    .set("Authorization", `Bearer ${TEST_ADMIN_API_KEY}`)
+    .set("Authorization", `Bearer ${adminToken()}`)
     .send({
       flightNumber: "VN555",
       origin: "SGN",

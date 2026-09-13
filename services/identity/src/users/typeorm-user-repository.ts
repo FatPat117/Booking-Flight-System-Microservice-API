@@ -12,6 +12,7 @@ function mapUser(entity: UserEntity): UserRecord {
     id: entity.id,
     email: entity.email,
     passwordHash: entity.passwordHash,
+    role: entity.role,
     createdAt: entity.createdAt,
   };
 }
@@ -40,6 +41,7 @@ export function createTypeOrmUserRepository(
       const entity = repository.create({
         email: input.email,
         passwordHash: input.passwordHash,
+        role: "user",
       });
 
       try {

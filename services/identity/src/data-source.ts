@@ -4,6 +4,7 @@ import { DataSource } from "typeorm";
 
 import { UserEntity } from "./entities/user.entity.js";
 import { CreateUsers1726147200000 } from "./migrations/1726147200000-CreateUsers.js";
+import { AddRoleToUsers1726300000000 } from "./migrations/1726300000000-AddRoleToUsers.js";
 
 export type IdentityDatabaseConfig = {
   host: string;
@@ -26,6 +27,6 @@ export function createIdentityDataSource(
     // Never true outside throwaway local experiments — migrations own schema.
     synchronize: false,
     entities: [UserEntity],
-    migrations: [CreateUsers1726147200000],
+    migrations: [CreateUsers1726147200000, AddRoleToUsers1726300000000],
   });
 }

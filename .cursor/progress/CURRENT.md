@@ -1,18 +1,18 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 33
-**Current day:** Day 33 — JWT verify middleware on `api`
-**Status:** Code complete — `/api/whoami` verifies JWT; flight/booking still use `ADMIN_API_KEY`
+**Last completed day:** Day 34
+**Current day:** Day 34 — Migrate admin routes to JWT + role
+**Status:** Code complete — `POST /api/flights` uses `requireJwt` + `requireRole('admin')`; `ADMIN_API_KEY` removed
 
-## Day 33 delivered
+## Day 34 delivered
 
 ```text
-JWT_SECRET shared via root .env + docker-compose app env
-request-context.authenticatedUser (optional)
-verifyJwt middleware (missing / expired / invalid) + tests
-GET /api/whoami probe only — no flight/booking migration yet
+Identity users.role + migration + promote-to-admin CLI
+JWT payload includes role; verifyJwt validates it
+requireRole middleware (401 missing auth / 403 wrong role)
+POST /api/flights on JWT admin only; ADMIN_API_KEY gone
 ```
 
 ## Next
 
-Day 34 — migrate `POST /api/flights` (and other admin routes) from `ADMIN_API_KEY` to `verifyJwt`; decide if roles are needed yet.
+Day 35 — Group B: evaluate and plan migrating `api` from SQLite to Postgres/TypeORM (reuse Identity experience).

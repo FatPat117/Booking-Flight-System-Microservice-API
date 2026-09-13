@@ -7,12 +7,10 @@ import test from "node:test";
 import { createApplication } from "../src/bootstrap/application.js";
 import { createNoopMessagePublisher } from "../src/messaging/noop-message-publisher.js";
 
-const TEST_ADMIN_API_KEY = "test-admin-key-123456";
 const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
 
 const testConfigBase = {
   port: 3000,
-  adminApiKey: TEST_ADMIN_API_KEY,
   jwtSecret: TEST_JWT_SECRET,
   rabbitmqUrl: "amqp://guest:guest@localhost:5672",
 } as const;
@@ -38,7 +36,7 @@ test("createApplication wires use cases and closes cleanly", async () => {
     assert.equal(typeof runtime.listFlights, "function");
     assert.equal(typeof runtime.flightRepository.findById, "function");
     assert.equal(typeof runtime.healthChecks.checkReadiness, "function");
-    assert.equal(runtime.config.adminApiKey, TEST_ADMIN_API_KEY);
+    assert.equal(runtime.config.jwtSecret, TEST_JWT_SECRET);
     assert.equal(
       "database" in runtime,
       false,

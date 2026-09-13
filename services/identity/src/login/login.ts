@@ -55,6 +55,7 @@ export function createLoginUser(
     const token = tokenIssuer.issue({
       sub: user.id,
       email: user.email,
+      role: user.role,
     });
 
     return { outcome: "authenticated", token };

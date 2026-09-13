@@ -34,6 +34,7 @@ function createMemoryUserRepository(): UserRepository {
         id: "user-fixed-id",
         email: input.email,
         passwordHash: input.passwordHash,
+        role: "user",
         createdAt: new Date("2026-09-12T00:00:00.000Z"),
       };
       users.set(input.email, record);
@@ -53,7 +54,7 @@ function createFakePasswordHasher(): PasswordHasher {
   };
 }
 
-test("JwtTokenIssuer issues a verifiable token with sub and email", () => {
+test("JwtTokenIssuer issues a verifiable token with sub, email, and role", () => {
   const issuer = createJwtTokenIssuer({
     secret: TEST_JWT_SECRET,
     expiresIn: "1h",
@@ -62,6 +63,7 @@ test("JwtTokenIssuer issues a verifiable token with sub and email", () => {
   const issued = issuer.issue({
     sub: "user-1",
     email: "alice@example.com",
+    role: "user",
   });
 
   assert.equal(issued.expiresIn, "1h");
@@ -70,10 +72,12 @@ test("JwtTokenIssuer issues a verifiable token with sub and email", () => {
   const decoded = jwt.verify(issued.accessToken, TEST_JWT_SECRET) as {
     sub: string;
     email: string;
+    role: string;
   };
 
   assert.equal(decoded.sub, "user-1");
   assert.equal(decoded.email, "alice@example.com");
+  assert.equal(decoded.role, "user");
 });
 
 test("JwtTokenIssuer signature fails after token tampering", () => {
@@ -85,6 +89,7 @@ test("JwtTokenIssuer signature fails after token tampering", () => {
   const { accessToken } = issuer.issue({
     sub: "user-1",
     email: "alice@example.com",
+    role: "admin",
   });
 
   const tampered = `${accessToken.slice(0, -4)}xxxx`;
@@ -124,9 +129,11 @@ test("login returns token for valid credentials", async () => {
   const decoded = jwt.verify(result.token.accessToken, TEST_JWT_SECRET) as {
     sub: string;
     email: string;
+    role: string;
   };
   assert.equal(decoded.sub, "user-fixed-id");
   assert.equal(decoded.email, "alice@example.com");
+  assert.equal(decoded.role, "user");
 });
 
 test("login returns same invalid_credentials for unknown email and wrong password", async () => {

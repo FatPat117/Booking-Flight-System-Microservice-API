@@ -1,9 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-export type AuthenticatedUser = {
+export type AuthenticatedUser = Readonly<{
   userId: string;
   email: string;
-};
+  role: "user" | "admin";
+}>;
 
 export type RequestContext = {
   requestId: string;

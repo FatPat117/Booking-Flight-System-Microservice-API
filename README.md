@@ -25,10 +25,10 @@ Object creation happens only in the Composition Root. Routes and use cases recei
 |----------|----------|---------|---------|
 | `PORT` | No | `3000` | HTTP listening port (`1–65535`) |
 | `DATABASE_PATH` | No | `data/booking.db` | SQLite database file (relative or absolute) |
-| `ADMIN_API_KEY` | Yes | none | Bearer token required for `POST /api/flights` |
+| `JWT_SECRET` | Yes | none | Shared with Identity; Bearer JWT for `POST /api/flights` (≥32 chars) |
 | `RABBITMQ_URL` | No | `amqp://guest:guest@localhost:5672` | AMQP URL (`rabbitmq` host inside compose) |
 
-`ADMIN_API_KEY` is required at startup. The application fails fast if it is missing, blank, or shorter than 16 characters.
+`JWT_SECRET` is required at startup. The application fails fast if it is missing, blank, or shorter than 32 characters.
 
 `RABBITMQ_URL` defaults for local `npm run dev` against compose-mapped port `5672`. Compose sets `amqp://guest:guest@rabbitmq:5672` for the `app` service.
 
@@ -37,14 +37,14 @@ Precedence:
 ```text
 Operating-system environment
   → .env (if loaded)
-  → Application defaults (PORT, DATABASE_PATH, RABBITMQ_URL)
+    → Application defaults (PORT, DATABASE_PATH, RABBITMQ_URL)
 ```
 
 Local setup:
 
 ```bash
 cp .env.example .env
-# set ADMIN_API_KEY to a local secret (at least 16 characters)
+# set JWT_SECRET (openssl rand -base64 32)
 npm install          # root — installs all workspaces, builds contracts
 npm run dev --workspace=@booking-flight-system/api
 ```
@@ -64,12 +64,14 @@ GET /api/flights/:id
 POST /api/flights/:flightId/bookings
 ```
 
-Protected write endpoint:
+Protected write endpoint (Day 34 — JWT + role):
 
 ```http
 POST /api/flights
-Authorization: Bearer <ADMIN_API_KEY>
+Authorization: Bearer <accessToken with role=admin>
 ```
+
+Register via Identity, promote once with `npm run promote-to-admin -- <email>` in the identity workspace, then login to obtain the token.
 
 Booking endpoint (public — no credential):
 
@@ -82,9 +84,7 @@ Content-Type: application/json
 
 Responses: `201` created, `409` sold out, `404` flight not found, `422` validation error.
 
-Missing or invalid credentials on protected routes return `401 Unauthorized` with `WWW-Authenticate: Bearer`.
-
-This is minimal API key authentication — not JWT, OAuth, or role-based access control.
+Missing/invalid/expired JWT on protected routes returns `401 Unauthorized` with `WWW-Authenticate: Bearer`. Valid JWT with wrong role returns `403 Forbidden`.
 
 ## Audit trail
 
@@ -168,7 +168,7 @@ docker build -t booking-api:day18 .
 
 # Git Bash on Windows: prefix with MSYS_NO_PATHCONV=1 so /app/... is not rewritten.
 docker run --rm -p 3000:3000 \
-  -e ADMIN_API_KEY="local-dev-secret-1234567890" \
+  -e JWT_SECRET="replace-with-at-least-32-character-secret!!" \
   -e DATABASE_PATH=/app/data/booking.db \
   -v booking_data:/app/data \
   booking-api:day18
@@ -186,10 +186,10 @@ Docker packages the **runtime environment**. It does not fix Day 17 multi-instan
 
 ## docker-compose (Day 19)
 
-`docker-compose.yml` runs the API and RabbitMQ together for local multi-container development. Compose reads `.env` next to the compose file for `${ADMIN_API_KEY}` (do not commit `.env`).
+`docker-compose.yml` runs the API and RabbitMQ together for local multi-container development. Compose reads `.env` next to the compose file for `${JWT_SECRET}` (do not commit `.env`).
 
 ```bash
-# Ensure .env has ADMIN_API_KEY (16+ chars). Compose loads it automatically.
+# Ensure .env has JWT_SECRET (≥32 chars). Compose loads it automatically.
 docker compose up --build
 
 curl http://localhost:3000/live
@@ -379,10 +379,11 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No schema diff tooling
 - No zero-downtime migration strategy
 - Migrations run in-process at application startup
-- API key is a single shared secret (no per-user identity, rotation, or expiry)
+- Audit `actor` for flight create still labeled `admin_api_key` (auth is JWT; actor typing not migrated yet)
+- Roles are a single `user` | `admin` claim — no permission tables
 - Current health checks only verify SQLite with a lightweight `SELECT 1`
 - Logs go to console only (no transports / log level config)
 - Offset pagination only (no cursor)
-- Configuration only covers port, database path, admin API key, and RabbitMQ URL
+- Configuration covers port, database path, JWT secret, and RabbitMQ URL
 - Use case / repository still synchronous
-- No JWT, OAuth, RBAC, metrics, distributed tracing, or events
+- No OAuth, metrics, or distributed tracing
