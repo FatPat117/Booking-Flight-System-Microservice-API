@@ -2,7 +2,8 @@
 
 **Date completed:** 2026-09-13
 **Theme:** Migrate admin write routes to JWT + role
-**Status:** Completed — `POST /api/flights` requires admin JWT; `ADMIN_API_KEY` removed
+**Status:** Closed — `POST /api/flights` requires admin JWT; `ADMIN_API_KEY` removed;
+register mass-assignment closed with a test (see Delivered)
 
 ## Why remove ADMIN_API_KEY entirely
 
@@ -42,6 +43,10 @@ requireRole('admin') middleware
 POST /api/flights → requireJwt + requireRole('admin')
 Removed ADMIN_API_KEY from config, compose, .env.example, api-key-auth
 Tests + Postman use admin JWT
+Test: POST /api/identity/register with role: "admin" in the body still
+  persists role: "user" — register-validation.ts only reads email/password,
+  and UserRepository.create() has no role parameter, so the protection is
+  structural; the test proves it end-to-end instead of leaving it implicit
 ```
 
 ## Intentional leftover

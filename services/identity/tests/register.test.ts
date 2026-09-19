@@ -126,6 +126,29 @@ test("POST /api/identity/register returns 201 without password fields", async ()
   assert.equal(response.body.password, undefined);
 });
 
+test("POST /api/identity/register ignores a role field in the request body (mass assignment)", async () => {
+  const userRepository = createMemoryUserRepository();
+  const registerUser = createRegisterUser({
+    userRepository,
+    hashPassword: async () => "$2b$12$fakehash",
+  });
+  const app = createIdentityApp({
+    registerUser,
+    loginUser: createStubLoginUser(),
+  });
+
+  const response = await request(app).post("/api/identity/register").send({
+    email: "mallory@example.com",
+    password: "secret123",
+    role: "admin",
+  });
+
+  assert.equal(response.status, 201);
+
+  const stored = await userRepository.findByEmail("mallory@example.com");
+  assert.equal(stored?.role, "user");
+});
+
 test("POST /api/identity/register returns 409 for duplicate email", async () => {
   const registerUser = createRegisterUser({
     userRepository: createMemoryUserRepository(),

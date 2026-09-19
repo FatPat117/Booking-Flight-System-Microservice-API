@@ -12,7 +12,12 @@ architecture — mirroring the target architecture in the sibling repo
 - `Github-repo-meysamhadeli/` — the **final architecture reference only**. Never copy
   from it ahead of where the learning path currently is.
 - `.cursor/progress/` — day-by-day learning log. **Source of truth for project status.**
-- `.cursor/rules/` — the mentor persona and learning philosophy this file mirrors.
+  Plain markdown, not Cursor-specific — read identically by Claude Code and Cursor.
+- `.cursor/rules/` — the mentor persona and learning philosophy this file mirrors, in
+  Cursor's own rule format (`.mdc`, `alwaysApply: true`). This file (root `CLAUDE.md`) is
+  the Claude Code equivalent and is the more complete/current version of the two — no
+  separate `.claude/` rules directory is needed; Claude Code loads this file automatically.
+  Keep both in sync by hand if the mentor persona or day structure changes.
 
 ## Start of session
 
