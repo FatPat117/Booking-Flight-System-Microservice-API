@@ -1,45 +1,56 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 36
-**Current day:** Day 36 — Strangler Fig step 1 (dev-complete): `FlightRepository` on Postgres/TypeORM
-**Status:** Closed — `PostgresFlightRepository` built and tested against real `booking_db`; not wired into `bootstrap/application.ts`, SQLite still runs production
+**Last completed day:** Day 37
+**Current day:** Day 37 — Strangler Fig step 2 (dev-complete): `OutboxRepository` on Postgres/TypeORM + transaction context
+**Status:** Closed — `PostgresOutboxRepository` + `PostgresTransactionRunner` built and tested against real `booking_db`; Day 36's `PostgresFlightRepository` transaction-join gap fixed in the same pass; not wired into `bootstrap/application.ts`, SQLite still runs production
 
-## Day 36 delivered
+## Day 37 delivered
 
 ```text
-booking_db (second logical database, same Postgres container as identity_db)
-FlightEntity (TIMESTAMPTZ) + hand-written migration (7 CHECK + UNIQUE)
-PostgresFlightRepository — 23505 unique_violation -> outcome: "duplicate"
-First real-Postgres integration test tier (npm run test:integration)
-FlightRepository + TransactionRunner made async (required — pg has no
-  sync driver); SQLite behavior unchanged; ~10 files + tests updated
+transaction-context.ts (AsyncLocalStorage) + PostgresTransactionRunner
+  (dataSource.transaction(), NestedTransactionError guard, no promise
+  queue — Postgres pools connections, correctness comes from OCC)
+PostgresFlightRepository fixed: resolves its repository per call through
+  transaction-context instead of once at factory time (Day 36 gap)
+OutboxEntity (jsonb, TIMESTAMPTZ, partial index) + PostgresOutboxRepository
+  — enqueue() throws OutboxEnqueueOutsideTransactionError outside a
+  transaction (deliberate asymmetry with SQLite)
+OutboxRepository port made async; ~9 production/test files updated,
+  SQLite behavior unchanged
+3 new integration tests (Outbox, and cross-repository TransactionRunner:
+  commit/rollback/nested-throw/permanent counter-proof)
 ```
 
 ## Biggest catches
 
 ```text
-1. Making TransactionRunner.run async inserted a microtask yield point
-   that let two concurrent bookings interleave BEGIN on the single
-   SQLite connection ("cannot start a transaction within a transaction").
-   Fixed with an explicit promise-queue serializing transactions on the
-   connection, instead of relying on synchronous run-to-completion by
-   accident, as before. All 171 tests + both Day 26/28 race tests pass.
-2. Adding tests/integration/ silently broke `npm test`'s glob
-   (tests/**/*.test.ts collapses to one directory level under sh,
-   without globstar) — it started matching ONLY the integration folder
-   and dropped all 23 top-level test files. Fixed with tests/*.test.ts
-   (matches this repo's own "tests/ is flat" convention).
+1. Day 36's PostgresFlightRepository never actually joined a transaction —
+   dataSource.getRepository(FlightEntity) resolved once at factory time
+   (closure) always used the pool's default manager. No exception, every
+   Day 36 test still passed; only a cross-repository rollback test could
+   catch it. Fixed by resolving per call through transaction-context.
+2. TypeORM does not detect nested dataSource.transaction() calls on its
+   own — would silently open a second, unrelated transaction on another
+   pooled connection. Built NestedTransactionError ourselves.
+3. OutboxEntity.payload had to be `any`, not `unknown` — TypeORM's
+   QueryDeepPartialEntity can't type-check an unknown-typed jsonb column.
+   Domain OutboxEntry.payload stays unknown; the any is narrow, at the
+   ORM boundary only.
+4. The 3 Postgres integration test files share one real booking_db, and
+   Node's test runner runs test FILES concurrently by default — one
+   file's TRUNCATE landing mid-transaction in another's test produced
+   flaky "current transaction is aborted" failures. Invisible on Day 36
+   (only one integration file existed). Fixed with --test-concurrency=1.
 ```
 
-## Previous day (Day 35) recap
+## Previous day (Day 36) recap
 
 ```text
-docs/migration-plan-postgres.md: dependency inventory, 6 behavior deltas,
-no dual-write/export decision, 6 risks+mitigations, and the transactional-
-coupling finding that split "dev-complete per repo" from "one combined
-cutover" (flights/audit/outbox/bookings share one TransactionRunner).
+booking_db, FlightEntity + migration, PostgresFlightRepository, first
+Postgres integration-test tier; FlightRepository + TransactionRunner made
+async (required, pg has no sync driver) with SQLite behavior preserved.
 ```
 
 ## Next
 
-Day 37 — Strangler Fig step 2: migrate `OutboxRepository` to Postgres/TypeORM (dev-complete), per `docs/migration-plan-postgres.md` Section 5.1 order.
+Day 38 — Strangler Fig step 3: migrate `AuditRecorder` to Postgres/TypeORM (dev-complete), reusing this day's transaction-context mechanism, per `docs/migration-plan-postgres.md` Section 5.1 order.

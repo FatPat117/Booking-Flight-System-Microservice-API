@@ -47,13 +47,13 @@ function createCapturingOutboxRepository() {
   const entries: OutboxEntry[] = [];
 
   const outboxRepository: OutboxRepository = {
-    enqueue(entry) {
+    async enqueue(entry) {
       entries.push(entry);
     },
-    findUnpublished() {
+    async findUnpublished() {
       return [];
     },
-    markPublished() {},
+    async markPublished() {},
   };
 
   return { outboxRepository, entries };

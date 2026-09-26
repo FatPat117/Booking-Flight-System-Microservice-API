@@ -15,7 +15,7 @@
     "test:watch": "node --import tsx --test --watch tests/*.test.ts",
     "typecheck:test": "tsc -p tsconfig.test.json",
     "postgres:migration:run": "node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx ./src/postgres/run-migrations.ts",
-    "test:integration": "node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --test tests/integration/*.test.ts"
+    "test:integration": "node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --test --test-concurrency=1 tests/integration/*.test.ts"
   },
   "dependencies": {
     "@booking-flight-system/contracts": "*",

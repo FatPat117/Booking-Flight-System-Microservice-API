@@ -61,7 +61,7 @@ export function createCancelBooking(
 
     const bookingId = bookingIdValidation.value;
 
-    return transactionRunner.run(() => {
+    return transactionRunner.run(async () => {
       const cancelResult = bookingRepository.cancel(bookingId);
 
       if (cancelResult.outcome === "not-found") {
@@ -100,7 +100,7 @@ export function createCancelBooking(
       });
 
       // Intentionally not in packages/contracts — no consumer yet (Day 27 rule).
-      outboxRepository.enqueue({
+      await outboxRepository.enqueue({
         id: eventId,
         eventType: BOOKING_CANCELLED_QUEUE,
         payload: {

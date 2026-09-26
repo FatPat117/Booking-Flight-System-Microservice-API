@@ -1,5 +1,6 @@
 import type { DataSource } from "typeorm";
 
+import { resolveEntityManager } from "../../postgres/transaction-context.js";
 import type { Flight } from "../../types.js";
 import type {
   CreateFlightRepositoryResult,
@@ -41,10 +42,10 @@ function mapFlight(entity: FlightEntity): Flight {
 export function createPostgresFlightRepository(
   dataSource: DataSource,
 ): FlightRepository {
-  const repository = dataSource.getRepository(FlightEntity);
-
   return {
     async findPage(request: FlightPageRequest): Promise<FlightPage> {
+      const repository =
+        resolveEntityManager(dataSource).getRepository(FlightEntity);
       const [entities, totalItems] = await repository.findAndCount({
         order: { departureAt: "ASC", id: "ASC" },
         take: request.limit,
@@ -58,11 +59,15 @@ export function createPostgresFlightRepository(
     },
 
     async findById(id: string): Promise<Flight | undefined> {
+      const repository =
+        resolveEntityManager(dataSource).getRepository(FlightEntity);
       const entity = await repository.findOneBy({ id });
       return entity ? mapFlight(entity) : undefined;
     },
 
     async create(flight: Flight): Promise<CreateFlightRepositoryResult> {
+      const repository =
+        resolveEntityManager(dataSource).getRepository(FlightEntity);
       const entity = repository.create({
         id: flight.id,
         flightNumber: flight.flightNumber,

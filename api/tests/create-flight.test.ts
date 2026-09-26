@@ -58,13 +58,13 @@ function createCapturingOutboxRepository() {
   const entries: OutboxEntry[] = [];
 
   const outboxRepository: OutboxRepository = {
-    enqueue(entry) {
+    async enqueue(entry) {
       entries.push(entry);
     },
-    findUnpublished() {
+    async findUnpublished() {
       return [];
     },
-    markPublished() {},
+    async markPublished() {},
   };
 
   return { outboxRepository, entries };
@@ -581,13 +581,13 @@ test("outbox enqueue failure rolls back with the transaction", async () => {
   };
 
   const failingOutboxRepository: OutboxRepository = {
-    enqueue() {
+    async enqueue() {
       throw new Error("outbox write failed");
     },
-    findUnpublished() {
+    async findUnpublished() {
       return [];
     },
-    markPublished() {},
+    async markPublished() {},
   };
 
   const createFlight = createUseCase(

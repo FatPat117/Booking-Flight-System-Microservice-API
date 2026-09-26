@@ -115,7 +115,7 @@ export function createCreateFlight(
         flight,
       };
 
-      outboxRepository.enqueue({
+      await outboxRepository.enqueue({
         id: eventId,
         eventType: FLIGHT_CREATED_QUEUE,
         payload,

@@ -2,10 +2,10 @@ import type { OutboxRepository } from "./outbox-repository.js";
 
 export function createNoopOutboxRepository(): OutboxRepository {
   return {
-    enqueue() {},
-    findUnpublished() {
+    async enqueue() {},
+    async findUnpublished() {
       return [];
     },
-    markPublished() {},
+    async markPublished() {},
   };
 }

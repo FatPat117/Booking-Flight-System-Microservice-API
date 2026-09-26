@@ -16,12 +16,12 @@ export function createOutboxRelayJob(deps: {
     name: "outbox-relay-job",
     intervalMs: deps.intervalMs,
     handler: async () => {
-      const pending = deps.outboxRepository.findUnpublished(batchSize);
+      const pending = await deps.outboxRepository.findUnpublished(batchSize);
 
       for (const entry of pending) {
         try {
           await deps.messagePublisher.publish(entry.eventType, entry.payload);
-          deps.outboxRepository.markPublished(entry.id);
+          await deps.outboxRepository.markPublished(entry.id);
         } catch (error) {
           deps.logger.error("outbox_publish_failed", {
             outboxId: entry.id,

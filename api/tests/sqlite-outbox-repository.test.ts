@@ -29,53 +29,53 @@ function makeEntry(overrides: Partial<OutboxEntry> = {}): OutboxEntry {
   };
 }
 
-test("enqueue then findUnpublished returns the entry", (t) => {
+test("enqueue then findUnpublished returns the entry", async (t) => {
   const { repository } = createRepo(t);
   const entry = makeEntry({ id: "outbox-1" });
 
-  repository.enqueue(entry);
+  await repository.enqueue(entry);
 
-  assert.deepEqual(repository.findUnpublished(10), [entry]);
+  assert.deepEqual(await repository.findUnpublished(10), [entry]);
 });
 
-test("markPublished removes entry from unpublished results", (t) => {
+test("markPublished removes entry from unpublished results", async (t) => {
   const { repository } = createRepo(t);
   const entry = makeEntry({ id: "outbox-1" });
 
-  repository.enqueue(entry);
-  repository.markPublished(entry.id);
+  await repository.enqueue(entry);
+  await repository.markPublished(entry.id);
 
-  assert.deepEqual(repository.findUnpublished(10), []);
+  assert.deepEqual(await repository.findUnpublished(10), []);
 });
 
-test("findUnpublished returns rows ordered by created_at ascending", (t) => {
+test("findUnpublished returns rows ordered by created_at ascending", async (t) => {
   const { repository } = createRepo(t);
 
-  repository.enqueue(
+  await repository.enqueue(
     makeEntry({ id: "second", createdAt: "2026-07-20T00:00:02.000Z" }),
   );
-  repository.enqueue(
+  await repository.enqueue(
     makeEntry({ id: "first", createdAt: "2026-07-20T00:00:01.000Z" }),
   );
 
-  const unpublished = repository.findUnpublished(10);
+  const unpublished = await repository.findUnpublished(10);
   assert.deepEqual(
     unpublished.map((entry) => entry.id),
     ["first", "second"],
   );
 });
 
-test("findUnpublished respects limit", (t) => {
+test("findUnpublished respects limit", async (t) => {
   const { repository } = createRepo(t);
 
-  repository.enqueue(
+  await repository.enqueue(
     makeEntry({ id: "first", createdAt: "2026-07-20T00:00:01.000Z" }),
   );
-  repository.enqueue(
+  await repository.enqueue(
     makeEntry({ id: "second", createdAt: "2026-07-20T00:00:02.000Z" }),
   );
 
-  const unpublished = repository.findUnpublished(1);
+  const unpublished = await repository.findUnpublished(1);
   assert.equal(unpublished.length, 1);
   assert.equal(unpublished[0]?.id, "first");
 });
@@ -85,12 +85,12 @@ test("enqueue rolls back with the surrounding transaction", async (t) => {
 
   await assert.rejects(
     () =>
-      transactionRunner.run(() => {
-        repository.enqueue(makeEntry({ id: "rolled-back" }));
+      transactionRunner.run(async () => {
+        await repository.enqueue(makeEntry({ id: "rolled-back" }));
         throw new Error("abort");
       }),
     /abort/,
   );
 
-  assert.deepEqual(repository.findUnpublished(10), []);
+  assert.deepEqual(await repository.findUnpublished(10), []);
 });

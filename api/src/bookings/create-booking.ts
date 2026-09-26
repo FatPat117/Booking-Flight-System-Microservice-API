@@ -75,7 +75,7 @@ export function createCreateBooking(
     const flightId = flightIdValidation.value;
     const { passengerName } = validation.value;
 
-    return transactionRunner.run(() => {
+    return transactionRunner.run(async () => {
       const reserveResult = bookingRepository.reserveSeat(flightId);
 
       if (reserveResult.outcome === "flight-not-found") {
@@ -134,7 +134,7 @@ export function createCreateBooking(
         },
       };
 
-      outboxRepository.enqueue({
+      await outboxRepository.enqueue({
         id: eventId,
         eventType: BOOKING_CREATED_QUEUE,
         payload,

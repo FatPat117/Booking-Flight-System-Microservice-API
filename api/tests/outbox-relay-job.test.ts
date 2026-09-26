@@ -54,11 +54,11 @@ test("outbox relay publishes and marks successful entries", async () => {
   const marked: string[] = [];
 
   const outboxRepository: OutboxRepository = {
-    findUnpublished() {
+    async findUnpublished() {
       return [makeEntry("outbox-1")];
     },
-    enqueue() {},
-    markPublished(id) {
+    async enqueue() {},
+    async markPublished(id) {
       marked.push(id);
     },
   };
@@ -89,11 +89,11 @@ test("outbox relay logs publish failure and does not mark entry", async () => {
   const { logger, entries } = createMemoryLogger();
 
   const outboxRepository: OutboxRepository = {
-    findUnpublished() {
+    async findUnpublished() {
       return [makeEntry("outbox-1")];
     },
-    enqueue() {},
-    markPublished(id) {
+    async enqueue() {},
+    async markPublished(id) {
       marked.push(id);
     },
   };
@@ -130,11 +130,11 @@ test("outbox relay stops batch after first publish failure to preserve order", a
   const marked: string[] = [];
 
   const outboxRepository: OutboxRepository = {
-    findUnpublished() {
+    async findUnpublished() {
       return [makeEntry("first"), makeEntry("second")];
     },
-    enqueue() {},
-    markPublished(id) {
+    async enqueue() {},
+    async markPublished(id) {
       marked.push(id);
     },
   };

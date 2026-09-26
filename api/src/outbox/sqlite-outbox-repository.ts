@@ -32,7 +32,10 @@ export function createSqliteOutboxRepository(
   `);
 
   return {
-    enqueue(entry) {
+    // node:sqlite is genuinely synchronous; `async` here only satisfies the
+    // Promise-based OutboxRepository port (Day 37) — the DB calls below are
+    // unchanged.
+    async enqueue(entry) {
       insertOutbox.run(
         entry.id,
         entry.eventType,
@@ -41,7 +44,7 @@ export function createSqliteOutboxRepository(
       );
     },
 
-    findUnpublished(limit) {
+    async findUnpublished(limit) {
       const rows = selectUnpublished.all(limit) as OutboxRow[];
 
       return rows.map((row) => ({
@@ -52,7 +55,7 @@ export function createSqliteOutboxRepository(
       }));
     },
 
-    markPublished(id) {
+    async markPublished(id) {
       markPublishedStatement.run(new Date().toISOString(), id);
     },
   };
