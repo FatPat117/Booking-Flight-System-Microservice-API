@@ -22,7 +22,7 @@ function createTestDatabase(t: TestContext) {
   return database;
 }
 
-test("commits operation when it succeeds", (t) => {
+test("commits operation when it succeeds", async (t) => {
   const database = createTestDatabase(t);
 
   const transactionRunner = createSqliteTransactionRunner(database);
@@ -32,7 +32,7 @@ test("commits operation when it succeeds", (t) => {
     VALUES (?, ?)
   `);
 
-  const result = transactionRunner.run(() => {
+  const result = await transactionRunner.run(() => {
     insertItem.run("item-1", "A");
 
     return "done";
@@ -58,7 +58,7 @@ test("commits operation when it succeeds", (t) => {
   assert.equal(row.name, "A");
 });
 
-test("rolls back operation when it throws", (t) => {
+test("rolls back operation when it throws", async (t) => {
   const database = createTestDatabase(t);
 
   const transactionRunner = createSqliteTransactionRunner(database);
@@ -68,7 +68,7 @@ test("rolls back operation when it throws", (t) => {
     VALUES (?, ?)
   `);
 
-  assert.throws(
+  await assert.rejects(
     () =>
       transactionRunner.run(() => {
         insertItem.run("item-1", "A");
@@ -89,14 +89,14 @@ test("rolls back operation when it throws", (t) => {
   assert.equal(row, undefined);
 });
 
-test("rethrows the original operation error", (t) => {
+test("rethrows the original operation error", async (t) => {
   const database = createTestDatabase(t);
 
   const transactionRunner = createSqliteTransactionRunner(database);
 
   const originalError = new Error("original failure");
 
-  assert.throws(
+  await assert.rejects(
     () =>
       transactionRunner.run(() => {
         throw originalError;

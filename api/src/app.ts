@@ -75,8 +75,8 @@ export function createApp(dependencies: AppDependencies) {
     });
   });
 
-  app.get("/api/flights", (req, res) => {
-    const result = listFlights({
+  app.get("/api/flights", async (req, res) => {
+    const result = await listFlights({
       page: req.query.page,
       pageSize: req.query.pageSize,
     });
@@ -95,9 +95,9 @@ export function createApp(dependencies: AppDependencies) {
     });
   });
 
-  app.get("/api/flights/:id", (req, res) => {
+  app.get("/api/flights/:id", async (req, res) => {
     const { id } = req.params;
-    const flight = flightRepository.findById(id);
+    const flight = await flightRepository.findById(id);
 
     if (!flight) {
       return sendApiError(res, 404, {

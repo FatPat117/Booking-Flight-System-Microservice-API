@@ -32,10 +32,10 @@ function createRepo(t: TestContext) {
   return repository;
 }
 
-test("findPage returns empty page for a new repository", (t) => {
+test("findPage returns empty page for a new repository", async (t) => {
   const repository = createRepo(t);
 
-  const result = repository.findPage({
+  const result = await repository.findPage({
     limit: 20,
     offset: 0,
   });
@@ -46,14 +46,14 @@ test("findPage returns empty page for a new repository", (t) => {
   });
 });
 
-test("create then findById returns the same Flight in camelCase", (t) => {
+test("create then findById returns the same Flight in camelCase", async (t) => {
   const repository = createRepo(t);
   const flight = makeFlight({ id: "flight-1" });
 
-  const result = repository.create(flight);
+  const result = await repository.create(flight);
   assert.equal(result.outcome, "created");
 
-  const found = repository.findById("flight-1");
+  const found = await repository.findById("flight-1");
   assert.deepEqual(found, flight);
   assert.equal(
     (found as Flight & { flight_number?: string }).flight_number,
@@ -61,7 +61,7 @@ test("create then findById returns the same Flight in camelCase", (t) => {
   );
 });
 
-test("duplicate create returns duplicate and leaves one row", (t) => {
+test("duplicate create returns duplicate and leaves one row", async (t) => {
   const repository = createRepo(t);
   const first = makeFlight({ id: "a" });
   const second = makeFlight({
@@ -70,24 +70,24 @@ test("duplicate create returns duplicate and leaves one row", (t) => {
     departureAt: "2026-08-10T01:00:00.000Z",
   });
 
-  assert.equal(repository.create(first).outcome, "created");
-  assert.equal(repository.create(second).outcome, "duplicate");
+  assert.equal((await repository.create(first)).outcome, "created");
+  assert.equal((await repository.create(second)).outcome, "duplicate");
 
-  const page = repository.findPage({
+  const page = await repository.findPage({
     limit: 20,
     offset: 0,
   });
 
   assert.equal(page.items.length, 1);
   assert.equal(page.totalItems, 1);
-  assert.equal(repository.findById("a")?.id, "a");
-  assert.equal(repository.findById("b"), undefined);
+  assert.equal((await repository.findById("a"))?.id, "a");
+  assert.equal(await repository.findById("b"), undefined);
 });
 
-test("findPage returns ordered pages with totalItems", (t) => {
+test("findPage returns ordered pages with totalItems", async (t) => {
   const repository = createRepo(t);
 
-  repository.create(
+  await repository.create(
     makeFlight({
       id: "flight-5",
       flightNumber: "VN105",
@@ -95,7 +95,7 @@ test("findPage returns ordered pages with totalItems", (t) => {
       arrivalAt: "2026-08-15T03:00:00.000Z",
     }),
   );
-  repository.create(
+  await repository.create(
     makeFlight({
       id: "flight-1",
       flightNumber: "VN101",
@@ -103,7 +103,7 @@ test("findPage returns ordered pages with totalItems", (t) => {
       arrivalAt: "2026-08-11T03:00:00.000Z",
     }),
   );
-  repository.create(
+  await repository.create(
     makeFlight({
       id: "flight-4",
       flightNumber: "VN104",
@@ -111,7 +111,7 @@ test("findPage returns ordered pages with totalItems", (t) => {
       arrivalAt: "2026-08-14T03:00:00.000Z",
     }),
   );
-  repository.create(
+  await repository.create(
     makeFlight({
       id: "flight-2",
       flightNumber: "VN102",
@@ -119,7 +119,7 @@ test("findPage returns ordered pages with totalItems", (t) => {
       arrivalAt: "2026-08-12T03:00:00.000Z",
     }),
   );
-  repository.create(
+  await repository.create(
     makeFlight({
       id: "flight-3",
       flightNumber: "VN103",
@@ -128,7 +128,7 @@ test("findPage returns ordered pages with totalItems", (t) => {
     }),
   );
 
-  const firstPage = repository.findPage({
+  const firstPage = await repository.findPage({
     limit: 2,
     offset: 0,
   });
@@ -139,7 +139,7 @@ test("findPage returns ordered pages with totalItems", (t) => {
     ["flight-1", "flight-2"],
   );
 
-  const secondPage = repository.findPage({
+  const secondPage = await repository.findPage({
     limit: 2,
     offset: 2,
   });
@@ -149,7 +149,7 @@ test("findPage returns ordered pages with totalItems", (t) => {
     ["flight-3", "flight-4"],
   );
 
-  const lastPage = repository.findPage({
+  const lastPage = await repository.findPage({
     limit: 2,
     offset: 4,
   });
@@ -159,7 +159,7 @@ test("findPage returns ordered pages with totalItems", (t) => {
     ["flight-5"],
   );
 
-  const beyondEnd = repository.findPage({
+  const beyondEnd = await repository.findPage({
     limit: 2,
     offset: 20,
   });

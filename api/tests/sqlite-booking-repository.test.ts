@@ -34,29 +34,35 @@ function createRepos(t: TestContext) {
   return { flightRepository, bookingRepository };
 }
 
-test("reserveSeat succeeds when seats are available", (t) => {
+test("reserveSeat succeeds when seats are available", async (t) => {
   const { flightRepository, bookingRepository } = createRepos(t);
   const flight = makeFlight({ id: "flight-1", availableSeats: 2 });
 
-  assert.equal(flightRepository.create(flight).outcome, "created");
+  assert.equal((await flightRepository.create(flight)).outcome, "created");
   assert.deepEqual(bookingRepository.reserveSeat("flight-1"), {
     outcome: "reserved",
   });
-  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 1);
+  assert.equal(
+    (await flightRepository.findById("flight-1"))?.availableSeats,
+    1,
+  );
 });
 
-test("reserveSeat returns sold-out on second call when only one seat left", (t) => {
+test("reserveSeat returns sold-out on second call when only one seat left", async (t) => {
   const { flightRepository, bookingRepository } = createRepos(t);
   const flight = makeFlight({ id: "flight-1", availableSeats: 1 });
 
-  assert.equal(flightRepository.create(flight).outcome, "created");
+  assert.equal((await flightRepository.create(flight)).outcome, "created");
   assert.deepEqual(bookingRepository.reserveSeat("flight-1"), {
     outcome: "reserved",
   });
   assert.deepEqual(bookingRepository.reserveSeat("flight-1"), {
     outcome: "sold-out",
   });
-  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 0);
+  assert.equal(
+    (await flightRepository.findById("flight-1"))?.availableSeats,
+    0,
+  );
 });
 
 test("reserveSeat returns flight-not-found for unknown flight", (t) => {
@@ -67,11 +73,11 @@ test("reserveSeat returns flight-not-found for unknown flight", (t) => {
   });
 });
 
-test("create persists a booking row", (t) => {
+test("create persists a booking row", async (t) => {
   const { flightRepository, bookingRepository } = createRepos(t);
   const flight = makeFlight({ id: "flight-1", availableSeats: 1 });
 
-  flightRepository.create(flight);
+  await flightRepository.create(flight);
   bookingRepository.reserveSeat("flight-1");
   bookingRepository.create({
     id: "booking-1",
@@ -81,8 +87,7 @@ test("create persists a booking row", (t) => {
     status: "active",
   });
 
-  const row = flightRepository
-    .findById("flight-1");
+  const row = await flightRepository.findById("flight-1");
   assert.equal(row?.availableSeats, 0);
 });
 

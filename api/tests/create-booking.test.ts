@@ -59,13 +59,13 @@ function createCapturingOutboxRepository() {
   return { outboxRepository, entries };
 }
 
-function createTestRuntime(t: TestContext, availableSeats = 1) {
+async function createTestRuntime(t: TestContext, availableSeats = 1) {
   const database = openDatabase(":memory:");
   const flightRepository = createSqliteFlightRepository(database);
   const bookingRepository = createSqliteBookingRepository(database);
   const transactionRunner = createSqliteTransactionRunner(database);
 
-  flightRepository.create(makeFlight({ availableSeats }));
+  await flightRepository.create(makeFlight({ availableSeats }));
 
   t.after(() => {
     database.close();
@@ -80,7 +80,8 @@ function createTestRuntime(t: TestContext, availableSeats = 1) {
 }
 
 test("creates booking with audit and outbox when seat is available", async (t) => {
-  const { bookingRepository, transactionRunner } = createTestRuntime(t);
+  const { bookingRepository, transactionRunner } =
+    await createTestRuntime(t);
   const { auditRecorder, records } = createCapturingAuditRecorder();
   const { outboxRepository, entries } = createCapturingOutboxRepository();
 
@@ -139,7 +140,8 @@ test("creates booking with audit and outbox when seat is available", async (t) =
 });
 
 test("booking outbox correlationId falls back to eventId when requestId is missing", async (t) => {
-  const { bookingRepository, transactionRunner } = createTestRuntime(t);
+  const { bookingRepository, transactionRunner } =
+    await createTestRuntime(t);
   const { auditRecorder } = createCapturingAuditRecorder();
   const { outboxRepository, entries } = createCapturingOutboxRepository();
 
@@ -165,7 +167,7 @@ test("booking outbox correlationId falls back to eventId when requestId is missi
 
 test("returns sold-out without outbox when no seats remain", async (t) => {
   const { bookingRepository, transactionRunner, flightRepository } =
-    createTestRuntime(t);
+    await createTestRuntime(t);
   const { auditRecorder, records } = createCapturingAuditRecorder();
   const { outboxRepository, entries } = createCapturingOutboxRepository();
 
@@ -188,11 +190,15 @@ test("returns sold-out without outbox when no seats remain", async (t) => {
   assert.equal(second.outcome, "sold-out");
   assert.equal(entries.length, 1);
   assert.equal(records.length, 1);
-  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 0);
+  assert.equal(
+    (await flightRepository.findById("flight-1"))?.availableSeats,
+    0,
+  );
 });
 
 test("returns flight-not-found without outbox for missing flight", async (t) => {
-  const { bookingRepository, transactionRunner } = createTestRuntime(t);
+  const { bookingRepository, transactionRunner } =
+    await createTestRuntime(t);
   const { auditRecorder, records } = createCapturingAuditRecorder();
   const { outboxRepository, entries } = createCapturingOutboxRepository();
 
@@ -225,7 +231,7 @@ test("concurrent bookings with one seat yield one created and one sold-out", asy
   const { outboxRepository } = createCapturingOutboxRepository();
   const { auditRecorder } = createCapturingAuditRecorder();
 
-  flightRepository.create(makeFlight({ availableSeats: 1 }));
+  await flightRepository.create(makeFlight({ availableSeats: 1 }));
 
   const createBooking = createCreateBooking({
     bookingRepository,
@@ -250,7 +256,10 @@ test("concurrent bookings with one seat yield one created and one sold-out", asy
 
   const outcomes = [first.outcome, second.outcome].sort();
   assert.deepEqual(outcomes, ["created", "sold-out"]);
-  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 0);
+  assert.equal(
+    (await flightRepository.findById("flight-1"))?.availableSeats,
+    0,
+  );
 
   const bookingCount = database
     .prepare("SELECT COUNT(*) AS count FROM bookings")

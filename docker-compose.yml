@@ -1,4 +1,6 @@
-# Dev topology: app + flight-notifier + RabbitMQ + Postgres (Identity).
+# Dev topology: app + flight-notifier + RabbitMQ + Postgres (identity_db +
+# booking_db — one container, two separate logical databases; see
+# docker/postgres-init).
 
 services:
   app:
@@ -64,6 +66,7 @@ services:
       - "5432:5432"
     volumes:
       - identity_postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U identity -d identity_db"]
       interval: 5s

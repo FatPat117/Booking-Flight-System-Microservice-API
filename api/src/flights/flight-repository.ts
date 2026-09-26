@@ -40,9 +40,9 @@ export type FlightPage = {
  * - snake_case database rows
  */
 export interface FlightRepository {
-  findPage(request: FlightPageRequest): FlightPage;
+  findPage(request: FlightPageRequest): Promise<FlightPage>;
 
-  findById(id: string): Flight | undefined;
+  findById(id: string): Promise<Flight | undefined>;
 
-  create(flight: Flight): CreateFlightRepositoryResult;
+  create(flight: Flight): Promise<CreateFlightRepositoryResult>;
 }

@@ -80,15 +80,17 @@ test("findUnpublished respects limit", (t) => {
   assert.equal(unpublished[0]?.id, "first");
 });
 
-test("enqueue rolls back with the surrounding transaction", (t) => {
+test("enqueue rolls back with the surrounding transaction", async (t) => {
   const { repository, transactionRunner } = createRepo(t);
 
-  assert.throws(() => {
-    transactionRunner.run(() => {
-      repository.enqueue(makeEntry({ id: "rolled-back" }));
-      throw new Error("abort");
-    });
-  }, /abort/);
+  await assert.rejects(
+    () =>
+      transactionRunner.run(() => {
+        repository.enqueue(makeEntry({ id: "rolled-back" }));
+        throw new Error("abort");
+      }),
+    /abort/,
+  );
 
   assert.deepEqual(repository.findUnpublished(10), []);
 });

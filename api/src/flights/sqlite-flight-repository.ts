@@ -102,7 +102,10 @@ export function createSqliteFlightRepository(
   `);
 
   return {
-    findPage(request: FlightPageRequest): FlightPage {
+    // node:sqlite is genuinely synchronous; `async` here only satisfies the
+    // Promise-based FlightRepository port (Day 36) so a Postgres adapter can
+    // sit behind the same interface — the DB calls below are unchanged.
+    async findPage(request: FlightPageRequest): Promise<FlightPage> {
       const rows = selectFlightPage.all(
         request.limit,
         request.offset,
@@ -116,12 +119,12 @@ export function createSqliteFlightRepository(
       };
     },
 
-    findById(id: string): Flight | undefined {
+    async findById(id: string): Promise<Flight | undefined> {
       const row = selectFlightById.get(id) as FlightRow | undefined;
       return row ? mapFlightRow(row) : undefined;
     },
 
-    create(flight: Flight): CreateFlightRepositoryResult {
+    async create(flight: Flight): Promise<CreateFlightRepositoryResult> {
       const result = insertFlight.run(
         flight.id,
         flight.flightNumber,

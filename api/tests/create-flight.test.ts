@@ -19,7 +19,7 @@ const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
 
 function createPassthroughTransactionRunner(): TransactionRunner {
   return {
-    run(operation) {
+    async run(operation) {
       return operation();
     },
   };
@@ -94,9 +94,9 @@ test("valid input creates a normalized flight via repository", async () => {
   let generateIdCalls = 0;
 
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create(flight) {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create(flight) {
       createdFlights.push(flight);
       return { outcome: "created" };
     },
@@ -141,9 +141,9 @@ test("invalid input does not generate ID or call repository", async () => {
   let generateIdCalls = 0;
 
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       createCalls += 1;
       return { outcome: "created" };
     },
@@ -183,9 +183,9 @@ test("invalid input does not generate ID or call repository", async () => {
 
 test("repository duplicate becomes application duplicate", async () => {
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "duplicate" };
     },
   };
@@ -204,9 +204,9 @@ test("ID generator value is passed to repository", async () => {
   let persistedId: string | undefined;
 
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create(flight) {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create(flight) {
       persistedId = flight.id;
       return { outcome: "created" };
     },
@@ -220,9 +220,9 @@ test("ID generator value is passed to repository", async () => {
 
 test("unexpected repository failure is not swallowed", async () => {
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       throw new Error("database failure");
     },
   };
@@ -238,9 +238,9 @@ test("unexpected repository failure is not swallowed", async () => {
 
 test("records audit log when flight is created", async () => {
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "created" };
     },
   };
@@ -291,9 +291,9 @@ test("does not record audit when validation fails", async () => {
   let repositoryCreateCalls = 0;
 
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       repositoryCreateCalls += 1;
       return { outcome: "created" };
     },
@@ -322,9 +322,9 @@ test("does not record audit when validation fails", async () => {
 
 test("does not record audit when flight is duplicate", async () => {
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "duplicate" };
     },
   };
@@ -351,9 +351,9 @@ test("does not record audit when flight is duplicate", async () => {
 
 test("propagates audit recorder failures", async () => {
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "created" };
     },
   };
@@ -386,16 +386,16 @@ test("does not open transaction when validation fails", async () => {
   let transactionCalls = 0;
 
   const transactionRunner: TransactionRunner = {
-    run(operation) {
+    async run(operation) {
       transactionCalls += 1;
       return operation();
     },
   };
 
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "created" };
     },
   };
@@ -424,16 +424,16 @@ test("runs successful create inside a transaction", async () => {
   let transactionCalls = 0;
 
   const transactionRunner: TransactionRunner = {
-    run(operation) {
+    async run(operation) {
       transactionCalls += 1;
       return operation();
     },
   };
 
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "created" };
     },
   };
@@ -460,9 +460,9 @@ test("runs successful create inside a transaction", async () => {
 
 test("enqueues flight-created outbox row after successful create", async () => {
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "created" };
     },
   };
@@ -501,9 +501,9 @@ test("enqueues flight-created outbox row after successful create", async () => {
 
 test("outbox correlationId falls back to eventId when requestId is missing", async () => {
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "created" };
     },
   };
@@ -531,9 +531,9 @@ test("outbox correlationId falls back to eventId when requestId is missing", asy
 
 test("does not enqueue outbox row when create is duplicate", async () => {
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "duplicate" };
     },
   };
@@ -552,9 +552,9 @@ test("does not enqueue outbox row when create is duplicate", async () => {
 
 test("does not enqueue outbox row when validation fails", async () => {
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "created" };
     },
   };
@@ -573,9 +573,9 @@ test("does not enqueue outbox row when validation fails", async () => {
 
 test("outbox enqueue failure rolls back with the transaction", async () => {
   const repository: FlightRepository = {
-    findPage: () => ({ items: [], totalItems: 0 }),
-    findById: () => undefined,
-    create() {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    async create() {
       return { outcome: "created" };
     },
   };

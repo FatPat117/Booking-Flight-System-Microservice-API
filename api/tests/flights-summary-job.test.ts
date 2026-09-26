@@ -45,17 +45,17 @@ test("flights-summary-job logs total from repository page totalItems", async () 
   let findPageCalls = 0;
 
   const flightRepository: FlightRepository = {
-    findPage() {
+    async findPage() {
       findPageCalls += 1;
       return {
         items: [] as Flight[],
         totalItems: 7,
       };
     },
-    findById() {
+    async findById() {
       return undefined;
     },
-    create() {
+    async create() {
       return { outcome: "created" };
     },
   };

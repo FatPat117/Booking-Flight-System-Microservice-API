@@ -18,7 +18,7 @@ export function createFlightsSummaryJob(deps: {
     name: "flights-summary-job",
     intervalMs: deps.intervalMs,
     handler: async () => {
-      const page = deps.flightRepository.findPage({
+      const page = await deps.flightRepository.findPage({
         limit: 1,
         offset: 0,
       });

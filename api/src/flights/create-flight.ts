@@ -74,8 +74,8 @@ export function createCreateFlight(
       availableSeats: validated.availableSeats,
     };
 
-    return transactionRunner.run(() => {
-      const persistResult = flightRepository.create(flight);
+    return transactionRunner.run(async () => {
+      const persistResult = await flightRepository.create(flight);
 
       if (persistResult.outcome === "duplicate") {
         return { outcome: "duplicate" } as const;

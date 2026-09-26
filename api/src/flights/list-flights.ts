@@ -32,7 +32,7 @@ export type ListFlightsResult =
 
 export type ListFlights = (
   query: RawListFlightsQuery,
-) => ListFlightsResult;
+) => Promise<ListFlightsResult>;
 
 type ParsePaginationValueResult =
   | {
@@ -122,9 +122,9 @@ export function createListFlights(
 ): ListFlights {
   const { flightRepository } = dependencies;
 
-  return function listFlights(
+  return async function listFlights(
     rawQuery: RawListFlightsQuery,
-  ): ListFlightsResult {
+  ): Promise<ListFlightsResult> {
     const pageResult = parsePaginationValue(
       "page",
       rawQuery.page,
@@ -174,7 +174,7 @@ export function createListFlights(
       };
     }
 
-    const repositoryResult = flightRepository.findPage({
+    const repositoryResult = await flightRepository.findPage({
       limit: pageSize,
       offset,
     });

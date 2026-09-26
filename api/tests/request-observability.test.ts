@@ -26,7 +26,7 @@ function createNoopAuditRecorder(): AuditRecorder {
 
 function createPassthroughTransactionRunner(): TransactionRunner {
   return {
-    run(operation) {
+    async run(operation) {
       return operation();
     },
   };
@@ -199,13 +199,13 @@ test("logs request started and finished events", async (t) => {
 
 test("logs unexpected errors with request id without leaking them to client", async () => {
   const failingRepository: FlightRepository = {
-    findPage() {
+    async findPage() {
       throw new Error("sensitive database failure");
     },
-    findById() {
+    async findById() {
       return undefined;
     },
-    create() {
+    async create() {
       return {
         outcome: "created",
       };

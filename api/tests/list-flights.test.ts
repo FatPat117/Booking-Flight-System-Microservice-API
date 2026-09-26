@@ -29,16 +29,16 @@ function makeRepository(
   overrides: Partial<FlightRepository> = {},
 ): FlightRepository {
   return {
-    findPage() {
+    async findPage() {
       return {
         items: [],
         totalItems: 0,
       };
     },
-    findById() {
+    async findById() {
       return undefined;
     },
-    create() {
+    async create() {
       return {
         outcome: "created",
       };
@@ -47,11 +47,11 @@ function makeRepository(
   };
 }
 
-test("uses default pagination values", () => {
+test("uses default pagination values", async () => {
   let receivedRequest: FlightPageRequest | undefined;
 
   const repository = makeRepository({
-    findPage(request) {
+    async findPage(request) {
       receivedRequest = request;
       return {
         items: [],
@@ -64,7 +64,7 @@ test("uses default pagination values", () => {
     flightRepository: repository,
   });
 
-  const result = listFlights({});
+  const result = await listFlights({});
 
   assert.deepEqual(receivedRequest, {
     limit: 20,
@@ -83,11 +83,11 @@ test("uses default pagination values", () => {
   });
 });
 
-test("converts page and pageSize to limit and offset", () => {
+test("converts page and pageSize to limit and offset", async () => {
   let receivedRequest: FlightPageRequest | undefined;
 
   const repository = makeRepository({
-    findPage(request) {
+    async findPage(request) {
       receivedRequest = request;
       return {
         items: [],
@@ -100,7 +100,7 @@ test("converts page and pageSize to limit and offset", () => {
     flightRepository: repository,
   });
 
-  const result = listFlights({
+  const result = await listFlights({
     page: "3",
     pageSize: "10",
   });
@@ -154,11 +154,11 @@ test("rejects invalid pagination values without calling repository", async (t) =
   ];
 
   for (const testCase of cases) {
-    await t.test(testCase.name, () => {
+    await t.test(testCase.name, async () => {
       let callCount = 0;
 
       const repository = makeRepository({
-        findPage() {
+        async findPage() {
           callCount += 1;
           return {
             items: [],
@@ -171,7 +171,7 @@ test("rejects invalid pagination values without calling repository", async (t) =
         flightRepository: repository,
       });
 
-      const result = listFlights(testCase.query);
+      const result = await listFlights(testCase.query);
 
       assert.equal(result.outcome, "validation_failed");
       assert.equal(callCount, 0);
@@ -187,14 +187,14 @@ test("rejects invalid pagination values without calling repository", async (t) =
   }
 });
 
-test("calculates total pages from total items", () => {
+test("calculates total pages from total items", async () => {
   const flights = [
     makeFlight({ id: "flight-1" }),
     makeFlight({ id: "flight-2" }),
   ];
 
   const repository = makeRepository({
-    findPage() {
+    async findPage() {
       return {
         items: flights,
         totalItems: 45,
@@ -206,7 +206,7 @@ test("calculates total pages from total items", () => {
     flightRepository: repository,
   });
 
-  const result = listFlights({
+  const result = await listFlights({
     page: "2",
     pageSize: "20",
   });
@@ -219,9 +219,9 @@ test("calculates total pages from total items", () => {
   }
 });
 
-test("propagates unexpected repository failures", () => {
+test("propagates unexpected repository failures", async () => {
   const repository = makeRepository({
-    findPage() {
+    async findPage() {
       throw new Error("database failure");
     },
   });
@@ -230,5 +230,5 @@ test("propagates unexpected repository failures", () => {
     flightRepository: repository,
   });
 
-  assert.throws(() => listFlights({}), /database failure/);
+  await assert.rejects(() => listFlights({}), /database failure/);
 });

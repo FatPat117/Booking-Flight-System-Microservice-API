@@ -26,7 +26,7 @@ function createNoopAuditRecorder(): AuditRecorder {
 
 function createPassthroughTransactionRunner(): TransactionRunner {
   return {
-    run(operation) {
+    async run(operation) {
       return operation();
     },
   };

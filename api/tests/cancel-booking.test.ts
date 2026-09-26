@@ -60,13 +60,13 @@ function createCapturingOutboxRepository() {
   return { outboxRepository, entries };
 }
 
-function createTestRuntime(t: TestContext, availableSeats = 5) {
+async function createTestRuntime(t: TestContext, availableSeats = 5) {
   const database = openDatabase(":memory:");
   const flightRepository = createSqliteFlightRepository(database);
   const bookingRepository = createSqliteBookingRepository(database);
   const transactionRunner = createSqliteTransactionRunner(database);
 
-  flightRepository.create(makeFlight({ availableSeats }));
+  await flightRepository.create(makeFlight({ availableSeats }));
 
   t.after(() => {
     database.close();
@@ -82,7 +82,7 @@ function createTestRuntime(t: TestContext, availableSeats = 5) {
 
 test("cancels booking, releases seat, audits and enqueues outbox", async (t) => {
   const { bookingRepository, transactionRunner, flightRepository } =
-    createTestRuntime(t);
+    await createTestRuntime(t);
   const { auditRecorder, records } = createCapturingAuditRecorder();
   const { outboxRepository, entries } = createCapturingOutboxRepository();
 
@@ -111,11 +111,17 @@ test("cancels booking, releases seat, audits and enqueues outbox", async (t) => 
 
   const created = await createBooking("flight-1", { passengerName: "Alice" });
   assert.equal(created.outcome, "created");
-  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 4);
+  assert.equal(
+    (await flightRepository.findById("flight-1"))?.availableSeats,
+    4,
+  );
 
   const cancelled = await cancelBooking("fixed-booking-id");
   assert.equal(cancelled.outcome, "cancelled");
-  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 5);
+  assert.equal(
+    (await flightRepository.findById("flight-1"))?.availableSeats,
+    5,
+  );
 
   const cancelOutbox = entries.filter((e) => e.eventType === "booking-cancelled");
   assert.equal(cancelOutbox.length, 1);
@@ -124,7 +130,7 @@ test("cancels booking, releases seat, audits and enqueues outbox", async (t) => 
 
 test("second cancel is already-cancelled and does not release another seat", async (t) => {
   const { bookingRepository, transactionRunner, flightRepository } =
-    createTestRuntime(t);
+    await createTestRuntime(t);
   const { auditRecorder } = createCapturingAuditRecorder();
   const { outboxRepository, entries } = createCapturingOutboxRepository();
 
@@ -157,7 +163,10 @@ test("second cancel is already-cancelled and does not release another seat", asy
 
   assert.equal(first.outcome, "cancelled");
   assert.equal(second.outcome, "already-cancelled");
-  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 5);
+  assert.equal(
+    (await flightRepository.findById("flight-1"))?.availableSeats,
+    5,
+  );
   assert.equal(
     entries.filter((e) => e.eventType === "booking-cancelled").length,
     1,
@@ -166,7 +175,7 @@ test("second cancel is already-cancelled and does not release another seat", asy
 
 test("concurrent double-cancel releases seat only once", async (t) => {
   const { bookingRepository, transactionRunner, flightRepository } =
-    createTestRuntime(t, 5);
+    await createTestRuntime(t, 5);
   const { auditRecorder } = createCapturingAuditRecorder();
   const { outboxRepository } = createCapturingOutboxRepository();
 
@@ -195,7 +204,10 @@ test("concurrent double-cancel releases seat only once", async (t) => {
 
   const created = await createBooking("flight-1", { passengerName: "Alice" });
   assert.equal(created.outcome, "created");
-  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 4);
+  assert.equal(
+    (await flightRepository.findById("flight-1"))?.availableSeats,
+    4,
+  );
 
   const [first, second] = await Promise.all([
     cancelBooking("fixed-booking-id"),
@@ -204,11 +216,15 @@ test("concurrent double-cancel releases seat only once", async (t) => {
 
   const outcomes = [first.outcome, second.outcome].sort();
   assert.deepEqual(outcomes, ["already-cancelled", "cancelled"]);
-  assert.equal(flightRepository.findById("flight-1")?.availableSeats, 5);
+  assert.equal(
+    (await flightRepository.findById("flight-1"))?.availableSeats,
+    5,
+  );
 });
 
 test("cancel returns not-found for missing booking", async (t) => {
-  const { bookingRepository, transactionRunner } = createTestRuntime(t);
+  const { bookingRepository, transactionRunner } =
+    await createTestRuntime(t);
   const { auditRecorder } = createCapturingAuditRecorder();
   const { outboxRepository, entries } = createCapturingOutboxRepository();
 
