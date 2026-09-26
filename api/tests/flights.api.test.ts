@@ -1047,7 +1047,7 @@ test("rolls back flight creation when audit recording fails", async (t) => {
   const flightRepository = createSqliteFlightRepository(database);
 
   const failingAuditRecorder: AuditRecorder = {
-    record() {
+    async record() {
       throw new Error("audit database failure");
     },
   };

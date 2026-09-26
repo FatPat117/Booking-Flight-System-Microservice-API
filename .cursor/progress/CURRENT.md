@@ -1,56 +1,52 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 37
-**Current day:** Day 37 — Strangler Fig step 2 (dev-complete): `OutboxRepository` on Postgres/TypeORM + transaction context
-**Status:** Closed — `PostgresOutboxRepository` + `PostgresTransactionRunner` built and tested against real `booking_db`; Day 36's `PostgresFlightRepository` transaction-join gap fixed in the same pass; not wired into `bootstrap/application.ts`, SQLite still runs production
+**Last completed day:** Day 38
+**Current day:** Day 38 — Strangler Fig step 3 (dev-complete): `AuditRecorder` on Postgres/TypeORM + first end-to-end use-case integration test
+**Status:** Closed — `PostgresAuditRecorder` built and tested against real `booking_db`; `create-flight.postgres.integration.test.ts` runs the real `createCreateFlight` use case through every Postgres adapter (Flight + Audit + Outbox + TransactionRunner); not wired into `bootstrap/application.ts`, SQLite still runs production
 
-## Day 37 delivered
+## Day 38 delivered
 
 ```text
-transaction-context.ts (AsyncLocalStorage) + PostgresTransactionRunner
-  (dataSource.transaction(), NestedTransactionError guard, no promise
-  queue — Postgres pools connections, correctness comes from OCC)
-PostgresFlightRepository fixed: resolves its repository per call through
-  transaction-context instead of once at factory time (Day 36 gap)
-OutboxEntity (jsonb, TIMESTAMPTZ, partial index) + PostgresOutboxRepository
-  — enqueue() throws OutboxEnqueueOutsideTransactionError outside a
-  transaction (deliberate asymmetry with SQLite)
-OutboxRepository port made async; ~9 production/test files updated,
+Permanent regression test confirming SqliteTransactionRunner's promise
+  queue already survives a rejected transaction (no fix needed — the queue
+  was already decoupled from each call's result)
+AuditRecorder port made async; ~13 production/test files updated,
   SQLite behavior unchanged
-3 new integration tests (Outbox, and cross-repository TransactionRunner:
-  commit/rollback/nested-throw/permanent counter-proof)
+AuditEntity (actor/target split columns, jsonb metadata, TIMESTAMPTZ) +
+  migration (loose length-only CHECK, no speculative indexes) +
+  PostgresAuditRecorder — record() throws
+  AuditRecordOutsideTransactionError outside a transaction (same pattern
+  as Outbox's enqueue())
+create-flight.postgres.integration.test.ts — first test running a real use
+  case (createCreateFlight) wired to every Postgres adapter: created,
+  duplicate, and mid-transaction-failure, all asserted against real DB rows
 ```
 
 ## Biggest catches
 
 ```text
-1. Day 36's PostgresFlightRepository never actually joined a transaction —
-   dataSource.getRepository(FlightEntity) resolved once at factory time
-   (closure) always used the pool's default manager. No exception, every
-   Day 36 test still passed; only a cross-repository rollback test could
-   catch it. Fixed by resolving per call through transaction-context.
-2. TypeORM does not detect nested dataSource.transaction() calls on its
-   own — would silently open a second, unrelated transaction on another
-   pooled connection. Built NestedTransactionError ourselves.
-3. OutboxEntity.payload had to be `any`, not `unknown` — TypeORM's
-   QueryDeepPartialEntity can't type-check an unknown-typed jsonb column.
-   Domain OutboxEntry.payload stays unknown; the any is narrow, at the
-   ORM boundary only.
-4. The 3 Postgres integration test files share one real booking_db, and
-   Node's test runner runs test FILES concurrently by default — one
-   file's TRUNCATE landing mid-transaction in another's test produced
-   flaky "current transaction is aborted" failures. Invisible on Day 36
-   (only one integration file existed). Fixed with --test-concurrency=1.
+1. COMMIT against an already-aborted Postgres transaction does not throw —
+   the server silently performs a ROLLBACK and returns a plain "ROLLBACK"
+   completion with no client-visible error. Confirmed via raw psql and a
+   raw node pg script. create-flight.ts's duplicate path is safe from this
+   only because it returns immediately after flightRepository.create()
+   reports "duplicate", before any other query in that transaction — a
+   future use case that kept querying after catching a Postgres error
+   would hit "current transaction is aborted, commands ignored" instead.
+2. AuditMetadata (a concrete Record<...> type) did not need Outbox's `any`
+   workaround — that limitation is specific to `unknown`-typed jsonb
+   columns breaking TypeORM's QueryDeepPartialEntity, not jsonb in general.
 ```
 
-## Previous day (Day 36) recap
+## Previous day (Day 37) recap
 
 ```text
-booking_db, FlightEntity + migration, PostgresFlightRepository, first
-Postgres integration-test tier; FlightRepository + TransactionRunner made
-async (required, pg has no sync driver) with SQLite behavior preserved.
+transaction-context.ts (AsyncLocalStorage) + PostgresTransactionRunner;
+fixed Day 36's PostgresFlightRepository transaction-join gap; OutboxEntity
++ PostgresOutboxRepository (jsonb, TIMESTAMPTZ, partial index,
+enqueue()-outside-transaction guard); OutboxRepository port made async.
 ```
 
 ## Next
 
-Day 38 — Strangler Fig step 3: migrate `AuditRecorder` to Postgres/TypeORM (dev-complete), reusing this day's transaction-context mechanism, per `docs/migration-plan-postgres.md` Section 5.1 order.
+Day 39 — Strangler Fig step 4: migrate `BookingRepository` to Postgres/TypeORM (dev-complete) — the highest-risk step (OCC on `reserveSeat`/`cancel`, Day 26/28's race test needs to run again against real Postgres), per `docs/migration-plan-postgres.md` Section 5.1 order.

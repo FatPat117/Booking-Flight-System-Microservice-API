@@ -36,7 +36,7 @@ function createCapturingAuditRecorder() {
   const records: AuditRecordInput[] = [];
 
   const auditRecorder: AuditRecorder = {
-    record(input) {
+    async record(input) {
       records.push(input);
     },
   };

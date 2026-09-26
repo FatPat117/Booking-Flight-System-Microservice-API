@@ -4,7 +4,7 @@ import test from "node:test";
 import { createSqliteAuditRecorder } from "../src/audit/sqlite-audit-recorder.js";
 import { openDatabase } from "../src/database.js";
 
-test("records audit log in SQLite", (t) => {
+test("records audit log in SQLite", async (t) => {
   const database = openDatabase(":memory:");
 
   t.after(() => {
@@ -13,7 +13,7 @@ test("records audit log in SQLite", (t) => {
 
   const auditRecorder = createSqliteAuditRecorder(database);
 
-  auditRecorder.record({
+  await auditRecorder.record({
     id: "audit-1",
     action: "FLIGHT_CREATED",
     actor: {

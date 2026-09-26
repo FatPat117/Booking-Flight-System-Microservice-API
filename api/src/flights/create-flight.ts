@@ -86,7 +86,7 @@ export function createCreateFlight(
       const eventId = generateOutboxId();
       const correlationId = resolveCorrelationId(requestId, eventId);
 
-      auditRecorder.record({
+      await auditRecorder.record({
         id: generateAuditId(),
         action: "FLIGHT_CREATED",
         actor: {

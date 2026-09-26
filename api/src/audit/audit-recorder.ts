@@ -39,5 +39,5 @@ export type AuditRecordInput = {
 };
 
 export interface AuditRecorder {
-  record(input: AuditRecordInput): void;
+  record(input: AuditRecordInput): Promise<void>;
 }

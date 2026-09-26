@@ -104,3 +104,44 @@ test("rethrows the original operation error", async (t) => {
     (error) => error === originalError,
   );
 });
+
+test("a rejected transaction does not block later transactions from running", async (t) => {
+  const database = createTestDatabase(t);
+
+  const transactionRunner = createSqliteTransactionRunner(database);
+
+  const insertItem = database.prepare(`
+    INSERT INTO test_items (id, name)
+    VALUES (?, ?)
+  `);
+
+  const first = transactionRunner.run(() => {
+    throw new Error("A fails");
+  });
+  const second = transactionRunner.run(() => {
+    insertItem.run("item-b", "B");
+
+    return "B ok";
+  });
+
+  await assert.rejects(() => first, /A fails/);
+  assert.equal(await second, "B ok");
+
+  const third = await transactionRunner.run(() => {
+    insertItem.run("item-c", "C");
+
+    return "C ok";
+  });
+
+  assert.equal(third, "C ok");
+
+  const row = database
+    .prepare(`
+      SELECT id
+      FROM test_items
+      WHERE id = ?
+    `)
+    .get("item-c");
+
+  assert.ok(row);
+});

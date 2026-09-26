@@ -80,7 +80,7 @@ export function createCancelBooking(
       const eventId = generateOutboxId();
       const correlationId = resolveCorrelationId(requestId, eventId);
 
-      auditRecorder.record({
+      await auditRecorder.record({
         id: generateAuditId(),
         action: "BOOKING_CANCELLED",
         actor: {

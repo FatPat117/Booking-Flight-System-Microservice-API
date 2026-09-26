@@ -220,7 +220,7 @@ test("verifyJwt rejects a tampered token", () => {
 });
 
 function createNoopAuditRecorder(): AuditRecorder {
-  return { record() {} };
+  return { async record() {} };
 }
 
 function createPassthroughTransactionRunner(): TransactionRunner {

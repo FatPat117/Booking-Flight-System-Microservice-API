@@ -43,7 +43,7 @@ function createCapturingAuditRecorder() {
   const records: AuditRecordInput[] = [];
 
   const auditRecorder: AuditRecorder = {
-    record(input) {
+    async record(input) {
       records.push(input);
     },
   };
@@ -359,7 +359,7 @@ test("propagates audit recorder failures", async () => {
   };
 
   const failingAuditRecorder: AuditRecorder = {
-    record() {
+    async record() {
       throw new Error("audit database failure");
     },
   };

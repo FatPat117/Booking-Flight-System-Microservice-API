@@ -21,7 +21,7 @@ export function createSqliteAuditRecorder(
   `);
 
   return {
-    record(input: AuditRecordInput): void {
+    async record(input: AuditRecordInput): Promise<void> {
       insertAuditLog.run(
         input.id,
         input.action,

@@ -20,7 +20,7 @@ import type { TransactionRunner } from "../src/transactions/transaction-runner.j
 
 function createNoopAuditRecorder(): AuditRecorder {
   return {
-    record() {},
+    async record() {},
   };
 }
 
