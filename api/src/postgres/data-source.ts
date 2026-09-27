@@ -3,12 +3,14 @@ import "reflect-metadata";
 import { DataSource } from "typeorm";
 
 import { AuditEntity } from "../audit/postgres/audit.entity.js";
+import { BookingEntity } from "../bookings/postgres/booking.entity.js";
 import { FlightEntity } from "../flights/postgres/flight.entity.js";
 import { OutboxEntity } from "../outbox/postgres/outbox.entity.js";
 import type { PostgresConfig } from "./config.js";
 import { CreateFlights1790424994000 } from "./migrations/1790424994000-CreateFlights.js";
 import { CreateOutbox1790428672000 } from "./migrations/1790428672000-CreateOutbox.js";
 import { CreateAuditLogs1790432350000 } from "./migrations/1790432350000-CreateAuditLogs.js";
+import { CreateBookings1790436000000 } from "./migrations/1790436000000-CreateBookings.js";
 
 /**
  * Day 36+ — dev-complete only. Entities/migrations are added per Strangler
@@ -26,11 +28,12 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
     database: config.database,
     // Never true outside throwaway local experiments — migrations own schema.
     synchronize: false,
-    entities: [FlightEntity, OutboxEntity, AuditEntity],
+    entities: [FlightEntity, OutboxEntity, AuditEntity, BookingEntity],
     migrations: [
       CreateFlights1790424994000,
       CreateOutbox1790428672000,
       CreateAuditLogs1790432350000,
+      CreateBookings1790436000000,
     ],
   });
 }

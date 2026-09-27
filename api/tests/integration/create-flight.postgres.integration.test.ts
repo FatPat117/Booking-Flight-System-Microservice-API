@@ -64,7 +64,9 @@ before(async () => {
 });
 
 beforeEach(async () => {
-  await dataSource.query('TRUNCATE TABLE "flights", "audit_logs", "outbox"');
+  await dataSource.query(
+    'TRUNCATE TABLE "flights", "audit_logs", "outbox" CASCADE',
+  );
 });
 
 after(async () => {

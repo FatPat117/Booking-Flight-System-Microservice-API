@@ -22,15 +22,15 @@ export type BookingRepository = Readonly<{
   /**
    * Decrement availableSeats atomically — no separate read-then-write.
    */
-  reserveSeat(flightId: string): ReserveSeatResult;
-  create(booking: Booking): void;
+  reserveSeat(flightId: string): Promise<ReserveSeatResult>;
+  create(booking: Booking): Promise<void>;
   /**
    * Mark booking cancelled only when still active (OCC).
    * Seat release stays in the use case — only after a successful first cancel.
    */
-  cancel(bookingId: string): CancelBookingRepositoryResult;
+  cancel(bookingId: string): Promise<CancelBookingRepositoryResult>;
   /**
    * Increment availableSeats by 1. Call only after cancel() returns cancelled.
    */
-  releaseSeat(flightId: string): void;
+  releaseSeat(flightId: string): Promise<void>;
 }>;

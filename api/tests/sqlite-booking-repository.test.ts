@@ -39,7 +39,7 @@ test("reserveSeat succeeds when seats are available", async (t) => {
   const flight = makeFlight({ id: "flight-1", availableSeats: 2 });
 
   assert.equal((await flightRepository.create(flight)).outcome, "created");
-  assert.deepEqual(bookingRepository.reserveSeat("flight-1"), {
+  assert.deepEqual(await bookingRepository.reserveSeat("flight-1"), {
     outcome: "reserved",
   });
   assert.equal(
@@ -53,10 +53,10 @@ test("reserveSeat returns sold-out on second call when only one seat left", asyn
   const flight = makeFlight({ id: "flight-1", availableSeats: 1 });
 
   assert.equal((await flightRepository.create(flight)).outcome, "created");
-  assert.deepEqual(bookingRepository.reserveSeat("flight-1"), {
+  assert.deepEqual(await bookingRepository.reserveSeat("flight-1"), {
     outcome: "reserved",
   });
-  assert.deepEqual(bookingRepository.reserveSeat("flight-1"), {
+  assert.deepEqual(await bookingRepository.reserveSeat("flight-1"), {
     outcome: "sold-out",
   });
   assert.equal(
@@ -65,10 +65,10 @@ test("reserveSeat returns sold-out on second call when only one seat left", asyn
   );
 });
 
-test("reserveSeat returns flight-not-found for unknown flight", (t) => {
+test("reserveSeat returns flight-not-found for unknown flight", async (t) => {
   const { bookingRepository } = createRepos(t);
 
-  assert.deepEqual(bookingRepository.reserveSeat("missing-flight"), {
+  assert.deepEqual(await bookingRepository.reserveSeat("missing-flight"), {
     outcome: "flight-not-found",
   });
 });
@@ -78,8 +78,8 @@ test("create persists a booking row", async (t) => {
   const flight = makeFlight({ id: "flight-1", availableSeats: 1 });
 
   await flightRepository.create(flight);
-  bookingRepository.reserveSeat("flight-1");
-  bookingRepository.create({
+  await bookingRepository.reserveSeat("flight-1");
+  await bookingRepository.create({
     id: "booking-1",
     flightId: "flight-1",
     passengerName: "Alice",
@@ -91,13 +91,13 @@ test("create persists a booking row", async (t) => {
   assert.equal(row?.availableSeats, 0);
 });
 
-test("cancel active booking once; second cancel is already-cancelled", (t) => {
+test("cancel active booking once; second cancel is already-cancelled", async (t) => {
   const { flightRepository, bookingRepository } = createRepos(t);
   const flight = makeFlight({ id: "flight-1", availableSeats: 2 });
 
-  flightRepository.create(flight);
-  bookingRepository.reserveSeat("flight-1");
-  bookingRepository.create({
+  await flightRepository.create(flight);
+  await bookingRepository.reserveSeat("flight-1");
+  await bookingRepository.create({
     id: "booking-1",
     flightId: "flight-1",
     passengerName: "Alice",
@@ -105,19 +105,19 @@ test("cancel active booking once; second cancel is already-cancelled", (t) => {
     status: "active",
   });
 
-  assert.deepEqual(bookingRepository.cancel("booking-1"), {
+  assert.deepEqual(await bookingRepository.cancel("booking-1"), {
     outcome: "cancelled",
     flightId: "flight-1",
   });
-  assert.deepEqual(bookingRepository.cancel("booking-1"), {
+  assert.deepEqual(await bookingRepository.cancel("booking-1"), {
     outcome: "already-cancelled",
   });
 });
 
-test("cancel returns not-found for unknown booking", (t) => {
+test("cancel returns not-found for unknown booking", async (t) => {
   const { bookingRepository } = createRepos(t);
 
-  assert.deepEqual(bookingRepository.cancel("missing-booking"), {
+  assert.deepEqual(await bookingRepository.cancel("missing-booking"), {
     outcome: "not-found",
   });
 });

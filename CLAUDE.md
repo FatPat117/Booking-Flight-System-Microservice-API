@@ -158,6 +158,13 @@ Rules:
   `sendApiError(response, status, descriptor)`. Unexpected thrown errors are caught centrally by
   `createErrorHandler` (from `http-errors.ts`), logged once via the structured `Logger`, and turned
   into a generic `500 INTERNAL_SERVER_ERROR` — never leak raw error details to the client.
+- **A port that can touch I/O declares its methods `Promise<...>` from the start**, even if the
+  first implementation is synchronous. `FlightRepository` (Day 36), `OutboxRepository` (Day 37),
+  and `AuditRecorder`/`BookingRepository` (Day 38-39) each had to convert from sync to async when a
+  Postgres implementation was added, rippling through every use case, caller, and test fake. The
+  one sync port in this codebase existed because it was designed to match `node:sqlite` — one of
+  the few genuinely synchronous drivers in Node.js. Declaring `Promise` up front costs nothing when
+  the implementation is sync; converting later costs a ripple across the whole call chain.
 
 ## Testing conventions
 

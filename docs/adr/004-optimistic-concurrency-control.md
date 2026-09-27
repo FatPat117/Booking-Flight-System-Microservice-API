@@ -34,3 +34,22 @@ Use **optimistic concurrency via conditional `UPDATE … WHERE <guard>`** (e.g. 
 - Failure classification needs an extra SELECT on the miss path — acceptable, but easy to skip and return a vague error.
 - Under heavy contention, many requests fail with conflict outcomes (409) instead of waiting — usually desirable for UX clarity, but not “fair queuing.”
 - Checklist / review habit is enough at current size; automated enforcement stays optional until a real miss happens in review.
+
+## Addendum (Day 38): a caught DB error must end the transaction's work immediately
+
+While migrating `OutboxRepository`/`AuditRecorder` to Postgres, we confirmed a sharp edge in how
+this ADR's conditional `UPDATE`/`INSERT` interacts with `PostgresTransactionRunner`:
+`COMMIT` issued against an **already-aborted** Postgres transaction does not throw — the server
+silently performs a `ROLLBACK` instead and returns a plain `ROLLBACK` completion, with no
+client-visible error. Only a query attempted *after* the failed statement (but before
+COMMIT/ROLLBACK) throws (`current transaction is aborted, commands ignored until end of
+transaction block`).
+
+Practical rule: once a repository catches a Postgres error inside `transactionRunner.run()`
+(e.g. `23505` unique violation) and reports it as an outcome (`duplicate`), the calling code must
+return immediately — it must not run any further query in that same transaction, and it must not
+treat the caller's successful-looking return value as proof anything was persisted beyond what
+ran before the failure. `postgres-flight-repository.ts`'s `create()` and `create-flight.ts`'s
+early return on `{outcome: "duplicate"}` already follow this by construction; it's now written
+down so the next repository (or the next engineer) doesn't add a write after a caught error and
+assume it survives.

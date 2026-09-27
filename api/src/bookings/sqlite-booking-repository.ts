@@ -59,7 +59,7 @@ export function createSqliteBookingRepository(
   `);
 
   return {
-    reserveSeat(flightId): ReserveSeatResult {
+    async reserveSeat(flightId): Promise<ReserveSeatResult> {
       const result = decrementSeat.run(flightId);
 
       if (readChangeCount(result.changes) === 1) {
@@ -77,7 +77,7 @@ export function createSqliteBookingRepository(
       return { outcome: "sold-out" };
     },
 
-    create(booking) {
+    async create(booking) {
       insertBooking.run(
         booking.id,
         booking.flightId,
@@ -87,7 +87,7 @@ export function createSqliteBookingRepository(
       );
     },
 
-    cancel(bookingId): CancelBookingRepositoryResult {
+    async cancel(bookingId): Promise<CancelBookingRepositoryResult> {
       const result = cancelActiveBooking.run(bookingId);
 
       if (readChangeCount(result.changes) === 1) {
@@ -114,7 +114,7 @@ export function createSqliteBookingRepository(
       return { outcome: "already-cancelled" };
     },
 
-    releaseSeat(flightId) {
+    async releaseSeat(flightId) {
       incrementSeat.run(flightId);
     },
   };

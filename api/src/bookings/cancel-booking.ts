@@ -62,7 +62,7 @@ export function createCancelBooking(
     const bookingId = bookingIdValidation.value;
 
     return transactionRunner.run(async () => {
-      const cancelResult = bookingRepository.cancel(bookingId);
+      const cancelResult = await bookingRepository.cancel(bookingId);
 
       if (cancelResult.outcome === "not-found") {
         return { outcome: "not-found" } as const;
@@ -73,7 +73,7 @@ export function createCancelBooking(
       }
 
       const { flightId } = cancelResult;
-      bookingRepository.releaseSeat(flightId);
+      await bookingRepository.releaseSeat(flightId);
 
       const occurredAt = getCurrentTime().toISOString();
       const requestId = getRequestId();
