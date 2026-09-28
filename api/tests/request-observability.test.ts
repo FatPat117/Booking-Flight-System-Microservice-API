@@ -13,7 +13,7 @@ import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
-import { createHealthChecks } from "../src/health/health-checks.js";
+import { createSqliteHealthChecks } from "../src/health/sqlite-health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 
@@ -113,7 +113,7 @@ function createTestContext(t: TestContext) {
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     listFlights,
     logger,
-    healthChecks: createHealthChecks(database),
+    healthChecks: createSqliteHealthChecks(database),
     jwtSecret: "test-jwt-secret-at-least-32-chars!!",
   });
 
@@ -253,7 +253,7 @@ test("logs unexpected errors with request id without leaking them to client", as
     listFlights,
     logger,
     healthChecks: {
-      checkReadiness() {
+      async checkReadiness() {
         return {
           status: "ok",
           checks: {

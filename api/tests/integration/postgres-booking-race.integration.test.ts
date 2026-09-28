@@ -201,16 +201,18 @@ test("Test C — counter-proof: naive SELECT-then-UPDATE overbooks a 5-seat flig
 
   const afterFlight = await flightRepository.findById(flight.id);
 
-  // With only 5 real seats, a correct implementation can never let more
-  // than 5 callers win. The naive implementation lets all 20 "win" (every
-  // caller reads availableSeats = 5 before anyone's UPDATE lands), which is
-  // itself the overbooking bug — recorded here, not asserted away.
-  assert.equal(
-    reservedCount,
-    20,
-    `expected the naive implementation to overbook (all 20 callers reading ` +
-      `stale availableSeats before any UPDATE lands) — got ${reservedCount} ` +
-      `"reserved" outcomes instead; DAY-39.md records the actual numbers observed`,
+  // Weakest claim sufficient to prove the point (Day 40 review — asserting
+  // exactly 20 coupled the test to "every caller's read happens to land
+  // before any write," a stronger claim than the bug itself requires). A
+  // correct implementation can never let more callers win than there are
+  // real seats — any reservedCount > 5 is overbooking, full stop. In
+  // practice this has landed on 20/20 every run observed (DAY-39.md), but
+  // the assertion only needs, and only claims, "more than 5."
+  assert.ok(
+    reservedCount > flight.availableSeats,
+    `expected the naive implementation to overbook (more "reserved" ` +
+      `outcomes than the flight's ${flight.availableSeats} real seats) — ` +
+      `got ${reservedCount} instead`,
   );
 
   // Lost update: every racer computed "5 - 1 = 4" from the same stale read,

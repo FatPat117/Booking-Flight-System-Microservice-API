@@ -1,9 +1,5 @@
-import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-
-import { createSqliteAuditRecorder } from "../audit/sqlite-audit-recorder.js";
+import { createPostgresAuditRecorder } from "../audit/postgres/postgres-audit-recorder.js";
 import type { AppConfig } from "../config.js";
-import { openDatabase } from "../database.js";
 import {
   createCancelBooking,
   type CancelBooking,
@@ -12,7 +8,7 @@ import {
   createCreateBooking,
   type CreateBooking,
 } from "../bookings/create-booking.js";
-import { createSqliteBookingRepository } from "../bookings/sqlite-booking-repository.js";
+import { createPostgresBookingRepository } from "../bookings/postgres/postgres-booking-repository.js";
 import type { BookingRepository } from "../bookings/booking-repository.js";
 import {
   createCreateFlight,
@@ -23,23 +19,22 @@ import {
   createListFlights,
   type ListFlights,
 } from "../flights/list-flights.js";
-import { createSqliteFlightRepository } from "../flights/sqlite-flight-repository.js";
-import {
-  createHealthChecks,
-  type HealthChecks,
-} from "../health/health-checks.js";
+import { createPostgresFlightRepository } from "../flights/postgres/postgres-flight-repository.js";
+import type { HealthChecks } from "../health/health-checks.js";
+import { createPostgresHealthChecks } from "../health/postgres/postgres-health-checks.js";
 import { createFlightsSummaryJob } from "../jobs/flights-summary-job.js";
 import { createInMemoryJobScheduler } from "../jobs/in-memory-job-scheduler.js";
 import { connectPublisherWithRetry } from "../messaging/connect-with-retry.js";
 import type { MessagePublisher } from "../messaging/message-publisher.js";
 import { createOutboxRelayJob } from "../outbox/outbox-relay-job.js";
-import { createSqliteOutboxRepository } from "../outbox/sqlite-outbox-repository.js";
+import { createPostgresOutboxRepository } from "../outbox/postgres/postgres-outbox-repository.js";
 import {
   createConsoleLogger,
   type Logger,
 } from "../observability/logger.js";
 import { getRequestContext } from "../observability/request-context.js";
-import { createSqliteTransactionRunner } from "../transactions/sqlite-transaction-runner.js";
+import { createBookingDataSource } from "../postgres/data-source.js";
+import { createPostgresTransactionRunner } from "../transactions/postgres-transaction-runner.js";
 
 const DEFAULT_FLIGHTS_SUMMARY_INTERVAL_MS = 60_000;
 const DEFAULT_OUTBOX_RELAY_INTERVAL_MS = 5_000;
@@ -47,7 +42,7 @@ const DEFAULT_OUTBOX_RELAY_INTERVAL_MS = 5_000;
 /**
  * Fully wired application graph.
  * Built once at the Composition Root; HTTP consumes this object.
- * SQLite + JobScheduler + MessagePublisher stay private — consumers use close().
+ * DataSource + JobScheduler + MessagePublisher stay private — consumers use close().
  * Message consumption lives in services/flight-notifier (Day 22).
  */
 export type Application = Readonly<{
@@ -90,16 +85,20 @@ export async function createApplication(
   const outboxRelayIntervalMs =
     options.outboxRelayIntervalMs ?? DEFAULT_OUTBOX_RELAY_INTERVAL_MS;
 
-  const databasePath = resolveDatabasePath(config.databasePath);
-  ensureDatabaseDirectory(databasePath);
+  const dataSource = createBookingDataSource(config.postgres);
+  await dataSource.initialize();
+  // Single api instance today (Day 17 limitation) — running migrations at
+  // startup is safe here and keeps behavior unchanged from SQLite (which
+  // always applied pending migrations on boot). Multiple instances starting
+  // concurrently would need this run as a separate step instead.
+  await dataSource.runMigrations();
 
-  const database = openDatabase(databasePath);
-  const flightRepository = createSqliteFlightRepository(database);
-  const bookingRepository = createSqliteBookingRepository(database);
-  const auditRecorder = createSqliteAuditRecorder(database);
-  const outboxRepository = createSqliteOutboxRepository(database);
-  const transactionRunner = createSqliteTransactionRunner(database);
-  const healthChecks = createHealthChecks(database);
+  const flightRepository = createPostgresFlightRepository(dataSource);
+  const bookingRepository = createPostgresBookingRepository(dataSource);
+  const auditRecorder = createPostgresAuditRecorder(dataSource);
+  const outboxRepository = createPostgresOutboxRepository(dataSource);
+  const transactionRunner = createPostgresTransactionRunner(dataSource);
+  const healthChecks = createPostgresHealthChecks(dataSource);
 
   const messagePublisher =
     options.messagePublisher ??
@@ -176,25 +175,11 @@ export async function createApplication(
     listFlights,
     healthChecks,
     async close() {
+      // Same order as before (Day 17): stop the job before closing what it
+      // depends on. dataSource.destroy() replaces database.close().
       jobScheduler.stop();
       await messagePublisher.close();
-      database.close();
+      await dataSource.destroy();
     },
   };
-}
-
-function resolveDatabasePath(databasePath: string): string {
-  if (databasePath === ":memory:") {
-    return ":memory:";
-  }
-
-  return resolve(databasePath);
-}
-
-function ensureDatabaseDirectory(databasePath: string): void {
-  if (databasePath === ":memory:") {
-    return;
-  }
-
-  mkdirSync(dirname(databasePath), { recursive: true });
 }

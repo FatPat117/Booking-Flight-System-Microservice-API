@@ -10,14 +10,25 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     ports:
       - "3000:3000"
     environment:
-      DATABASE_PATH: /app/data/booking.db
       JWT_SECRET: ${JWT_SECRET}
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-    volumes:
-      - booking_data:/app/data
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      BOOKING_POSTGRES_USER: ${BOOKING_POSTGRES_USER:-booking}
+      BOOKING_POSTGRES_PASSWORD: ${BOOKING_POSTGRES_PASSWORD:-booking_dev_password}
+    # Day 40 finding (Scenario 6): the RabbitMQ publisher has no
+    # reconnect-on-drop logic (out of scope to fix today — a messaging
+    # concern, not part of the Postgres cutover). When RabbitMQ force-closes
+    # the connection, the process crashes uncaught. Without a restart
+    # policy the container would stay down until a human intervenes, which
+    # defeats the outbox's whole "never lose the event" point — matches
+    # flight-notifier's existing policy below.
+    restart: unless-stopped
     healthcheck:
       test:
         [
@@ -62,6 +73,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-identity}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-identity_dev_password}
       POSTGRES_DB: ${POSTGRES_DB:-identity_db}
+      # Day 40: read by docker/postgres-init/01-create-booking-db.sh to
+      # create api's own role, separate from identity's POSTGRES_USER above
+      # — api's connection has no path to identity_db's tables.
+      BOOKING_POSTGRES_USER: ${BOOKING_POSTGRES_USER:-booking}
+      BOOKING_POSTGRES_PASSWORD: ${BOOKING_POSTGRES_PASSWORD:-booking_dev_password}
     ports:
       - "5432:5432"
     volumes:

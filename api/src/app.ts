@@ -58,8 +58,8 @@ export function createApp(dependencies: AppDependencies) {
     });
   });
 
-  app.get("/ready", (_request, response) => {
-    const readiness = healthChecks.checkReadiness();
+  app.get("/ready", async (_request, response) => {
+    const readiness = await healthChecks.checkReadiness();
     const statusCode = readiness.status === "ok" ? 200 : 503;
 
     return response.status(statusCode).json(readiness);

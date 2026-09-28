@@ -13,7 +13,7 @@ import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
-import { createHealthChecks } from "../src/health/health-checks.js";
+import { createSqliteHealthChecks } from "../src/health/sqlite-health-checks.js";
 import type { Logger } from "../src/observability/logger.js";
 import {
   getAuthenticatedUser,
@@ -271,7 +271,7 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
-    healthChecks: createHealthChecks(database),
+    healthChecks: createSqliteHealthChecks(database),
     jwtSecret: TEST_JWT_SECRET,
   });
 
@@ -316,7 +316,7 @@ test("GET /api/whoami returns 401 without a token", async () => {
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
-    healthChecks: createHealthChecks(database),
+    healthChecks: createSqliteHealthChecks(database),
     jwtSecret: TEST_JWT_SECRET,
   });
 

@@ -13,7 +13,7 @@ import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 import type { HealthChecks } from "../src/health/health-checks.js";
-import { createHealthChecks } from "../src/health/health-checks.js";
+import { createSqliteHealthChecks } from "../src/health/sqlite-health-checks.js";
 import type { Logger } from "../src/observability/logger.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 
@@ -78,7 +78,7 @@ function createTestContext(t: TestContext) {
     flightRepository,
   });
 
-  const healthChecks = createHealthChecks(database);
+  const healthChecks = createSqliteHealthChecks(database);
 
   const app = createApp({
     flightRepository,
@@ -163,7 +163,7 @@ test("GET /ready returns 503 when database is unavailable", async (t) => {
   });
 
   const unhealthyHealthChecks: HealthChecks = {
-    checkReadiness() {
+    async checkReadiness() {
       return {
         status: "unavailable",
         checks: {

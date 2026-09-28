@@ -337,8 +337,56 @@ databases.)*
 
 ### 5.2 Cutover criteria (one combined step, after all four above are checked off)
 
+**Revised on Day 40** (see Section 6): this step originally planned to delete
+`node:sqlite` from the dependency tree in the *same* commit as the wiring
+cutover. That's reversed — the isolation-of-change principle (Day 19) that
+justified "cutover as one atomic wiring step, not per-table" applies just as
+much to "cutover, then clean up separately": mixing a wiring change with a
+mass file deletion in one commit means a failure can't be attributed to
+either half, and rollback stops being `git revert`. SQLite code is deleted
+in Day 41, once the test strategy question it forces (Section 6) has an
+answer, not bundled into today's commit.
+
 - [ ] `bootstrap/application.ts` wires a single Postgres `TransactionRunner` and all four Postgres repositories together, replacing the SQLite ones in the same commit — no partial state where some use cases run on SQLite and others on Postgres.
-- [ ] Full `api` test suite (unit + the new Postgres-backed tests) passes with `node:sqlite` fully removed from the dependency tree — `migration-runner.ts`, `migration.ts`, and `migrations.ts` deleted, not left dormant.
+- [ ] Full `api` test suite (unit + the Postgres-backed integration tests) passes. `node:sqlite` code stays in the tree, unwired — removed in Day 41, not today.
 - [ ] `health-checks.ts` pings the Postgres connection, not `DatabaseSync`.
-- [ ] Manual Postman run through the full create-flight → create-booking → cancel-booking → outbox-relay-to-RabbitMQ path confirms identical behavior to pre-migration.
-- [ ] `api/data/booking.db` and its gitignore entry are removed — nothing in the codebase still expects a local SQLite file to exist.
+- [ ] End-to-end run through the full create-flight → create-booking → cancel-booking → outbox-relay-to-RabbitMQ path (plus the outbox self-healing and health-reflects-Postgres scenarios — Section 6/DAY-40.md) confirms identical behavior to pre-migration.
+- [ ] `api/data/booking.db` and its gitignore entry stay as they are today — removing them is part of Day 41's SQLite cleanup, not today's wiring change.
+
+## 6. Rollback plan (written before cutover, per Day 40)
+
+**Rollback is exactly one action: `git revert` the cutover commit.** Nothing
+else changes — no env var edits, no container rebuild beyond `docker compose
+up` picking up the reverted `docker-compose.yml`/`.env` defaults, because the
+cutover commit is scoped to *only* wiring + config + docker-compose (Section
+5.2's whole point). If rollback ever requires more than one revert plus one
+`docker compose up`, that is itself a signal the cutover commit was not
+scoped tightly enough.
+
+**What happens to data written to Postgres between cutover and rollback:**
+it does not travel back to SQLite. Day 35 (Section 3) already decided against
+dual-write, so this was known before cutover, not discovered after. Concretely:
+any flight created, booking made, or booking cancelled while running on
+Postgres is invisible to the app the moment it reverts to the SQLite adapters
+— SQLite's file still has whatever was in it *before* cutover, untouched.
+For this project's dev data this is acceptable (there is no real traffic to
+lose, per Section 3). It is written down here because the same shape of
+decision, for a system with real users, is exactly why production rollback
+windows are kept short and treated as "abort before real data exists
+downstream," not "instant, lossless undo" — the trade-off is the same one,
+just at different stakes.
+
+**Signals that mean revert, vs. signals that mean fix forward:**
+
+| Signal | Action |
+|---|---|
+| `/ready` never turns healthy after `docker compose up` (DataSource can't connect) | Revert — this is a config/wiring problem the running system can't fix itself |
+| A route that worked pre-cutover now 500s consistently (not an isolated edge case) | Revert — a repository/adapter gap slipped past the integration tests |
+| One specific edge case behaves slightly differently (e.g. an error message's wording) and does not affect correctness | Fix forward — a revert for this trades a bigger, riskier change (re-cutover later) for a smaller one |
+| Health checks pass, core flows work, but a background job (outbox relay) is slow or briefly stalled | Fix forward — same category of issue Day 24's outbox design already exists to absorb |
+
+The dividing line: if the system cannot serve **basic, previously-working
+requests** at all, revert immediately rather than debugging live. If it can,
+prefer fixing forward — a second cutover attempt after a revert carries the
+same risk as the first one, so reverting should be reserved for cases where
+staying on Postgres is actively worse than going back.

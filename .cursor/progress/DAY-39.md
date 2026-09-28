@@ -96,10 +96,12 @@ status CHECK stays strict (IN ('active', 'cancelled')) — unlike audit_logs'
   deliberately loose CHECK, this is business data with a genuinely fixed,
   small value set, matching SQLite's own 005_add_booking_status migration.
 idx_bookings_flight_id kept on the new Postgres table (mirrors SQLite) —
-  unlike Day 38's audit_logs decision to skip speculative indexes, this one
-  has a real, already-existing access pattern behind it: reserveSeat/
-  releaseSeat both look flights up by id, and Day 26 added this same index
-  on SQLite for that reason, not speculatively.
+  corrected reasoning (Day 40 review): NOT for reserveSeat/releaseSeat, which
+  look flights up by its own primary key (id), never by scanning bookings.
+  It serves the FK constraint itself (checking for referencing bookings rows
+  when a flights row is deleted or its id changes is an indexed lookup, not
+  a sequential scan) and any future "bookings for this flight" read — the
+  same reason Day 26 added this index on SQLite, not speculatively.
 ```
 
 ## Test C — counter-proof numbers (Step 6)

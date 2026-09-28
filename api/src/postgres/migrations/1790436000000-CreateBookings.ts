@@ -20,10 +20,12 @@ import type { MigrationInterface, QueryRunner } from "typeorm";
  *   FK was never actually enforced), Postgres enforces this FK for real —
  *   a genuine behavior change, exercised by a dedicated test.
  * - idx_bookings_flight_id: Postgres does not auto-create an index for FK
- *   columns (unlike the primary key) — needed for the same reason Day 26
- *   added it on SQLite: querying/joining by flight_id is a real, existing
- *   access pattern (releaseSeat/reserveSeat's flight lookups, and any
- *   future "bookings for this flight" read).
+ *   columns (unlike the primary key). Not for reserveSeat/releaseSeat — those
+ *   look flights up by its own primary key (id), never by scanning bookings.
+ *   This index serves the FK constraint itself (checking for referencing
+ *   bookings rows when a flights row is deleted or its id is updated is an
+ *   indexed lookup instead of a sequential scan) and any future "bookings
+ *   for this flight" read — the same reason Day 26 added it on SQLite.
  */
 export class CreateBookings1790436000000 implements MigrationInterface {
   name = "CreateBookings1790436000000";

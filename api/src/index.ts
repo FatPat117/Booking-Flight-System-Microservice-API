@@ -19,7 +19,8 @@ const expressApp = createApp({
 const httpServer = expressApp.listen(runtime.config.port, () => {
   runtime.logger.info("server_started", {
     port: runtime.config.port,
-    databasePath: runtime.config.databasePath,
+    postgresHost: runtime.config.postgres.host,
+    postgresDatabase: runtime.config.postgres.database,
   });
 });
 

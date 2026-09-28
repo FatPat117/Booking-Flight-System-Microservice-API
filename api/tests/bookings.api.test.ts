@@ -14,7 +14,7 @@ import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
-import { createHealthChecks } from "../src/health/health-checks.js";
+import { createSqliteHealthChecks } from "../src/health/sqlite-health-checks.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { Logger } from "../src/observability/logger.js";
 import { createSqliteTransactionRunner } from "../src/transactions/sqlite-transaction-runner.js";
@@ -86,7 +86,7 @@ function createBookingApp(database: DatabaseSync) {
     cancelBooking,
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
-    healthChecks: createHealthChecks(database),
+    healthChecks: createSqliteHealthChecks(database),
     jwtSecret: TEST_JWT_SECRET,
   });
 }

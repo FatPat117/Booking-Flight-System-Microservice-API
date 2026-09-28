@@ -21,7 +21,7 @@ import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 import type { HealthChecks } from "../src/health/health-checks.js";
-import { createHealthChecks } from "../src/health/health-checks.js";
+import { createSqliteHealthChecks } from "../src/health/sqlite-health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 import { getRequestContext } from "../src/observability/request-context.js";
 import { createSqliteTransactionRunner } from "../src/transactions/sqlite-transaction-runner.js";
@@ -103,7 +103,7 @@ function makeValidFlight(
 }
 
 const healthyHealthChecks: HealthChecks = {
-  checkReadiness() {
+  async checkReadiness() {
     return {
       status: "ok",
       checks: {
@@ -184,7 +184,7 @@ function createTestContext(t: TestContext): {
   const app = createAppWithRepository(
     database,
     repository,
-    createHealthChecks(database),
+    createSqliteHealthChecks(database),
   );
 
   t.after(() => {
@@ -1093,7 +1093,7 @@ test("rolls back flight creation when audit recording fails", async (t) => {
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     listFlights,
     logger,
-    healthChecks: createHealthChecks(database),
+    healthChecks: createSqliteHealthChecks(database),
     jwtSecret: TEST_JWT_SECRET,
   });
 

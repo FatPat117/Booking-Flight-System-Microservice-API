@@ -15,19 +15,28 @@ const DEFAULT_POSTGRES_PORT = 5432;
 const BOOKING_DATABASE_NAME = "booking_db";
 
 /**
- * Day 36 — dev-complete only. Not read by config.ts/parseConfig and not
- * wired into bootstrap/application.ts yet; exists so the new Postgres
- * repositories and their integration tests have a typed config source
- * ahead of the Strangler Fig cutover (docs/migration-plan-postgres.md
- * Section 5.2).
+ * Test-convenience config for the *.integration.test.ts files: soft
+ * defaults so `npm run test:integration` works with zero required env vars
+ * locally. NOT used by the real Composition Root (src/config.ts's
+ * parseConfig builds its own fail-fast PostgresConfig for that — see its
+ * doc comment).
+ *
+ * Day 40: defaults changed from identity's own POSTGRES_USER/PASSWORD
+ * (which, via the official postgres image's bootstrap env vars, is
+ * actually the cluster SUPERUSER — it bypasses every privilege check,
+ * including the identity_db CONNECT revoke docker/postgres-init adds) to
+ * BOOKING_POSTGRES_USER/PASSWORD, the same dedicated, non-superuser role
+ * the real app connects with. Using the superuser here would let every
+ * integration test quietly pass even if the booking role's privileges were
+ * wrong — these tests are the one thing that actually exercises that role.
  */
 export function parsePostgresConfig(environment: Environment): PostgresConfig {
   return {
     host: environment.POSTGRES_HOST?.trim() || "localhost",
     port: parsePostgresPort(environment.POSTGRES_PORT),
-    username: environment.POSTGRES_USER?.trim() || "identity",
+    username: environment.BOOKING_POSTGRES_USER?.trim() || "booking",
     password:
-      environment.POSTGRES_PASSWORD?.trim() || "identity_dev_password",
+      environment.BOOKING_POSTGRES_PASSWORD?.trim() || "booking_dev_password",
     database: BOOKING_DATABASE_NAME,
   };
 }
