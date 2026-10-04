@@ -1,21 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { TestContext } from "node:test";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
 import type { AuditRecorder } from "../src/audit/audit-recorder.js";
-import { openDatabase } from "../src/database.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
-import { createSqliteBookingRepository } from "../src/bookings/sqlite-booking-repository.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
-import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
+import type { BookingRepository } from "../src/bookings/booking-repository.js";
 import type { HealthChecks } from "../src/health/health-checks.js";
-import { createSqliteHealthChecks } from "../src/health/sqlite-health-checks.js";
 import type { Logger } from "../src/observability/logger.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
+import {
+  createInMemoryBookingRepository,
+  createInMemoryFlightRepository,
+  createInMemoryFlightStore,
+  createInMemoryHealthChecks,
+} from "./fakes/in-memory.js";
 
 
 function createNoopAuditRecorder(): AuditRecorder {
@@ -41,7 +43,7 @@ function createMemoryLogger(): Logger {
 }
 
 function createTestCreateBooking(
-  bookingRepository: ReturnType<typeof createSqliteBookingRepository>,
+  bookingRepository: BookingRepository,
 ) {
   return createCreateBooking({
     bookingRepository,
@@ -56,11 +58,11 @@ function createTestCreateBooking(
   });
 }
 
-function createTestContext(t: TestContext) {
-  const database = openDatabase(":memory:");
+function createTestContext() {
+  const flights = createInMemoryFlightStore();
 
-  const flightRepository = createSqliteFlightRepository(database);
-  const bookingRepository = createSqliteBookingRepository(database);
+  const flightRepository = createInMemoryFlightRepository(flights);
+  const bookingRepository = createInMemoryBookingRepository({ flights });
 
   const createFlight = createCreateFlight({
     flightRepository,
@@ -78,7 +80,7 @@ function createTestContext(t: TestContext) {
     flightRepository,
   });
 
-  const healthChecks = createSqliteHealthChecks(database);
+  const healthChecks = createInMemoryHealthChecks();
 
   const app = createApp({
     flightRepository,
@@ -91,18 +93,13 @@ function createTestContext(t: TestContext) {
     jwtSecret: "test-jwt-secret-at-least-32-chars!!",
   });
 
-  t.after(() => {
-    database.close();
-  });
-
   return {
     app,
-    database,
   };
 }
 
-test("GET /live returns liveness status", async (t) => {
-  const { app } = createTestContext(t);
+test("GET /live returns liveness status", async () => {
+  const { app } = createTestContext();
 
   const response = await request(app).get("/live");
 
@@ -113,8 +110,8 @@ test("GET /live returns liveness status", async (t) => {
   assert.equal(typeof response.headers["x-request-id"], "string");
 });
 
-test("GET /health remains a liveness alias", async (t) => {
-  const { app } = createTestContext(t);
+test("GET /health remains a liveness alias", async () => {
+  const { app } = createTestContext();
 
   const response = await request(app).get("/health");
 
@@ -124,8 +121,8 @@ test("GET /health remains a liveness alias", async (t) => {
   });
 });
 
-test("GET /ready returns ok when database is available", async (t) => {
-  const { app } = createTestContext(t);
+test("GET /ready returns ok when database is available", async () => {
+  const { app } = createTestContext();
 
   const response = await request(app).get("/ready");
 
@@ -140,11 +137,11 @@ test("GET /ready returns ok when database is available", async (t) => {
   });
 });
 
-test("GET /ready returns 503 when database is unavailable", async (t) => {
-  const database = openDatabase(":memory:");
+test("GET /ready returns 503 when database is unavailable", async () => {
+  const flights = createInMemoryFlightStore();
 
-  const flightRepository = createSqliteFlightRepository(database);
-  const bookingRepository = createSqliteBookingRepository(database);
+  const flightRepository = createInMemoryFlightRepository(flights);
+  const bookingRepository = createInMemoryBookingRepository({ flights });
 
   const createFlight = createCreateFlight({
     flightRepository,
@@ -184,10 +181,6 @@ test("GET /ready returns 503 when database is unavailable", async (t) => {
     logger: createMemoryLogger(),
     healthChecks: unhealthyHealthChecks,
     jwtSecret: "test-jwt-secret-at-least-32-chars!!",
-  });
-
-  t.after(() => {
-    database.close();
   });
 
   const response = await request(app).get("/ready");

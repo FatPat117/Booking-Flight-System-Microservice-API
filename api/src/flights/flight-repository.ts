@@ -36,7 +36,7 @@ export type FlightPage = {
  * Does not contain:
  * - Express Request/Response
  * - HTTP status
- * - SQLite DatabaseSync
+ * - database driver types (DataSource, TypeORM entities)
  * - snake_case database rows
  */
 export interface FlightRepository {

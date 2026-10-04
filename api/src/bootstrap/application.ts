@@ -88,8 +88,8 @@ export async function createApplication(
   const dataSource = createBookingDataSource(config.postgres);
   await dataSource.initialize();
   // Single api instance today (Day 17 limitation) — running migrations at
-  // startup is safe here and keeps behavior unchanged from SQLite (which
-  // always applied pending migrations on boot). Multiple instances starting
+  // startup is safe here and keeps the migrate-on-boot behavior the app has
+  // had since Day 15. Multiple instances starting
   // concurrently would need this run as a separate step instead.
   await dataSource.runMigrations();
 

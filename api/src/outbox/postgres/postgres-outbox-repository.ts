@@ -9,14 +9,14 @@ import type { OutboxEntry, OutboxRepository } from "../outbox-repository.js";
 import { OutboxEntity } from "./outbox.entity.js";
 
 /**
- * Deliberate asymmetry with SqliteOutboxRepository (which has no such
- * check): enqueue() only exists to be atomic with the business write beside
+ * Deliberate asymmetry with the former SQLite repository (removed Day 41),
+ * which had no such check: enqueue() only exists to be atomic with the business write beside
  * it (ADR-001) — calling it outside a transaction on Postgres is a
  * programmer error worth failing loudly for, the same way
  * NestedTransactionError and setAuthenticatedUser (request-context.ts) fail
- * loudly on their own kind of context misuse. SQLite can't cheaply detect
- * this the same way without adopting the same AsyncLocalStorage machinery
- * for a problem it hasn't caused a bug yet.
+ * loudly on their own kind of context misuse. SQLite couldn't cheaply detect
+ * this without adopting the same AsyncLocalStorage machinery for a problem
+ * it never caused a bug for.
  */
 export class OutboxEnqueueOutsideTransactionError extends Error {
   constructor() {

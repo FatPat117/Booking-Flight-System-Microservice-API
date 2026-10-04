@@ -1,23 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { TestContext } from "node:test";
-import type { DatabaseSync } from "node:sqlite";
 import jwt from "jsonwebtoken";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
 import { createCancelBooking } from "../src/bookings/cancel-booking.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
-import { createSqliteBookingRepository } from "../src/bookings/sqlite-booking-repository.js";
-import { createSqliteAuditRecorder } from "../src/audit/sqlite-audit-recorder.js";
-import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
-import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
-import { createSqliteHealthChecks } from "../src/health/sqlite-health-checks.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { Logger } from "../src/observability/logger.js";
-import { createSqliteTransactionRunner } from "../src/transactions/sqlite-transaction-runner.js";
+import {
+  createInMemoryAuditRecorder,
+  createInMemoryBookingRepository,
+  createInMemoryFlightRepository,
+  createInMemoryFlightStore,
+  createInMemoryHealthChecks,
+  createInMemoryTransactionRunner,
+} from "./fakes/in-memory.js";
 
 const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
 const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
@@ -38,11 +38,12 @@ function createMemoryLogger(): Logger {
   };
 }
 
-function createBookingApp(database: DatabaseSync) {
-  const flightRepository = createSqliteFlightRepository(database);
-  const bookingRepository = createSqliteBookingRepository(database);
-  const auditRecorder = createSqliteAuditRecorder(database);
-  const transactionRunner = createSqliteTransactionRunner(database);
+function createBookingApp() {
+  const flights = createInMemoryFlightStore();
+  const flightRepository = createInMemoryFlightRepository(flights);
+  const bookingRepository = createInMemoryBookingRepository({ flights });
+  const auditRecorder = createInMemoryAuditRecorder();
+  const transactionRunner = createInMemoryTransactionRunner();
 
   const createFlight = createCreateFlight({
     flightRepository,
@@ -86,24 +87,17 @@ function createBookingApp(database: DatabaseSync) {
     cancelBooking,
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
-    healthChecks: createSqliteHealthChecks(database),
+    healthChecks: createInMemoryHealthChecks(),
     jwtSecret: TEST_JWT_SECRET,
   });
 }
 
-function createContext(t: TestContext) {
-  const database = openDatabase(":memory:");
-  const app = createBookingApp(database);
-
-  t.after(() => {
-    database.close();
-  });
-
-  return { app, database };
+function createContext() {
+  return { app: createBookingApp() };
 }
 
-test("POST booking returns 201 when seat is available", async (t) => {
-  const { app } = createContext(t);
+test("POST booking returns 201 when seat is available", async () => {
+  const { app } = createContext();
 
   const flightResponse = await request(app)
     .post("/api/flights")
@@ -132,8 +126,8 @@ test("POST booking returns 201 when seat is available", async (t) => {
   assert.match(bookingResponse.headers.location ?? "", new RegExp(flightId));
 });
 
-test("POST booking returns 409 when flight is sold out", async (t) => {
-  const { app } = createContext(t);
+test("POST booking returns 409 when flight is sold out", async () => {
+  const { app } = createContext();
 
   const flightResponse = await request(app)
     .post("/api/flights")
@@ -164,8 +158,8 @@ test("POST booking returns 409 when flight is sold out", async (t) => {
   assert.equal(second.body.error.code, "FLIGHT_SOLD_OUT");
 });
 
-test("POST booking returns 404 when flight does not exist", async (t) => {
-  const { app } = createContext(t);
+test("POST booking returns 404 when flight does not exist", async () => {
+  const { app } = createContext();
 
   const response = await request(app)
     .post("/api/flights/missing-flight/bookings")
@@ -175,8 +169,8 @@ test("POST booking returns 404 when flight does not exist", async (t) => {
   assert.equal(response.body.error.code, "FLIGHT_NOT_FOUND");
 });
 
-test("POST booking returns 422 for invalid passenger name", async (t) => {
-  const { app } = createContext(t);
+test("POST booking returns 422 for invalid passenger name", async () => {
+  const { app } = createContext();
 
   const flightResponse = await request(app)
     .post("/api/flights")
@@ -202,8 +196,8 @@ test("POST booking returns 422 for invalid passenger name", async (t) => {
   assert.equal(response.body.error.code, "VALIDATION_FAILED");
 });
 
-test("DELETE booking returns 204 then 409 on second cancel", async (t) => {
-  const { app } = createContext(t);
+test("DELETE booking returns 204 then 409 on second cancel", async () => {
+  const { app } = createContext();
 
   const flightResponse = await request(app)
     .post("/api/flights")
@@ -239,8 +233,8 @@ test("DELETE booking returns 204 then 409 on second cancel", async (t) => {
   assert.equal(flightAfter.body.availableSeats, 3);
 });
 
-test("DELETE booking returns 404 when booking does not exist", async (t) => {
-  const { app } = createContext(t);
+test("DELETE booking returns 404 when booking does not exist", async () => {
+  const { app } = createContext();
 
   const response = await request(app).delete("/api/bookings/missing-booking");
 

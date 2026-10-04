@@ -27,11 +27,11 @@ export class NestedTransactionError extends Error {
 }
 
 /**
- * Unlike SqliteTransactionRunner, no promise queue: Postgres borrows a
- * separate connection per transaction from the pool, so concurrent
- * transactions are the normal case. Correctness under contention still comes
- * from OCC (conditional UPDATE, ADR-004), not from serializing on one
- * connection like SQLite has to.
+ * Unlike the former SQLite runner (removed Day 41), no promise queue:
+ * Postgres borrows a separate connection per transaction from the pool, so
+ * concurrent transactions are the normal case. Correctness under contention
+ * still comes from OCC (conditional UPDATE, ADR-004), not from serializing on
+ * one connection like SQLite had to.
  *
  * dataSource.transaction() (EntityManager.transaction under the hood) already
  * does createQueryRunner -> startTransaction -> run callback ->

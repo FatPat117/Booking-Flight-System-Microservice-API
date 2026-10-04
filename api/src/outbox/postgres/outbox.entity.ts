@@ -2,13 +2,13 @@ import { Column, Entity, PrimaryColumn } from "typeorm";
 
 /**
  * Day 37 — dev-complete only (same caveat as FlightEntity's doc comment).
- * Mirrors SQLite's `outbox` table (api/src/migrations/migrations.ts,
- * 003_create_outbox) with two deliberate deltas — see this entity's sibling
+ * Mirrors the former SQLite `outbox` table (003_create_outbox, removed
+ * Day 41 — see git history) with two deliberate deltas — see this entity's sibling
  * migration for the full reasoning:
  * - payload: jsonb, not text — TypeORM's Postgres driver stringifies on
  *   write and node-postgres auto-parses jsonb back to a JS value on read,
  *   so postgres-outbox-repository.ts needs no manual JSON.stringify/parse,
- *   unlike sqlite-outbox-repository.ts.
+ *   unlike the former SQLite repository.
  * - created_at/published_at: TIMESTAMPTZ, not text — same reasoning
  *   FlightEntity already applies for its own timestamps (real chronological
  *   comparison, not string-format discipline).

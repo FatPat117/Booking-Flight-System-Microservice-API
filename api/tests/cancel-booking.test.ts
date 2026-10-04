@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { TestContext } from "node:test";
 
 import type {
   AuditRecordInput,
@@ -8,12 +7,14 @@ import type {
 } from "../src/audit/audit-recorder.js";
 import { createCancelBooking } from "../src/bookings/cancel-booking.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
-import { createSqliteBookingRepository } from "../src/bookings/sqlite-booking-repository.js";
-import { openDatabase } from "../src/database.js";
-import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
 import type { OutboxEntry, OutboxRepository } from "../src/outbox/outbox-repository.js";
-import { createSqliteTransactionRunner } from "../src/transactions/sqlite-transaction-runner.js";
 import type { Flight } from "../src/types.js";
+import {
+  createInMemoryBookingRepository,
+  createInMemoryFlightRepository,
+  createInMemoryFlightStore,
+  createInMemoryTransactionRunner,
+} from "./fakes/in-memory.js";
 
 const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
 
@@ -60,29 +61,24 @@ function createCapturingOutboxRepository() {
   return { outboxRepository, entries };
 }
 
-async function createTestRuntime(t: TestContext, availableSeats = 5) {
-  const database = openDatabase(":memory:");
-  const flightRepository = createSqliteFlightRepository(database);
-  const bookingRepository = createSqliteBookingRepository(database);
-  const transactionRunner = createSqliteTransactionRunner(database);
+async function createTestRuntime(availableSeats = 5) {
+  const flights = createInMemoryFlightStore();
+  const flightRepository = createInMemoryFlightRepository(flights);
+  const bookingRepository = createInMemoryBookingRepository({ flights });
+  const transactionRunner = createInMemoryTransactionRunner();
 
   await flightRepository.create(makeFlight({ availableSeats }));
 
-  t.after(() => {
-    database.close();
-  });
-
   return {
-    database,
     flightRepository,
     bookingRepository,
     transactionRunner,
   };
 }
 
-test("cancels booking, releases seat, audits and enqueues outbox", async (t) => {
+test("cancels booking, releases seat, audits and enqueues outbox", async () => {
   const { bookingRepository, transactionRunner, flightRepository } =
-    await createTestRuntime(t);
+    await createTestRuntime();
   const { auditRecorder, records } = createCapturingAuditRecorder();
   const { outboxRepository, entries } = createCapturingOutboxRepository();
 
@@ -128,9 +124,9 @@ test("cancels booking, releases seat, audits and enqueues outbox", async (t) => 
   assert.equal(records.filter((r) => r.action === "BOOKING_CANCELLED").length, 1);
 });
 
-test("second cancel is already-cancelled and does not release another seat", async (t) => {
+test("second cancel is already-cancelled and does not release another seat", async () => {
   const { bookingRepository, transactionRunner, flightRepository } =
-    await createTestRuntime(t);
+    await createTestRuntime();
   const { auditRecorder } = createCapturingAuditRecorder();
   const { outboxRepository, entries } = createCapturingOutboxRepository();
 
@@ -173,58 +169,9 @@ test("second cancel is already-cancelled and does not release another seat", asy
   );
 });
 
-test("concurrent double-cancel releases seat only once", async (t) => {
-  const { bookingRepository, transactionRunner, flightRepository } =
-    await createTestRuntime(t, 5);
-  const { auditRecorder } = createCapturingAuditRecorder();
-  const { outboxRepository } = createCapturingOutboxRepository();
-
-  const createBooking = createCreateBooking({
-    bookingRepository,
-    auditRecorder,
-    outboxRepository,
-    transactionRunner,
-    generateId: () => "fixed-booking-id",
-    generateAuditId: () => crypto.randomUUID(),
-    generateOutboxId: () => crypto.randomUUID(),
-    getRequestId: () => undefined,
-    getCurrentTime: () => FIXED_TIME,
-  });
-
-  const cancelBooking = createCancelBooking({
-    bookingRepository,
-    auditRecorder,
-    outboxRepository,
-    transactionRunner,
-    generateAuditId: () => crypto.randomUUID(),
-    generateOutboxId: () => crypto.randomUUID(),
-    getRequestId: () => undefined,
-    getCurrentTime: () => FIXED_TIME,
-  });
-
-  const created = await createBooking("flight-1", { passengerName: "Alice" });
-  assert.equal(created.outcome, "created");
-  assert.equal(
-    (await flightRepository.findById("flight-1"))?.availableSeats,
-    4,
-  );
-
-  const [first, second] = await Promise.all([
-    cancelBooking("fixed-booking-id"),
-    cancelBooking("fixed-booking-id"),
-  ]);
-
-  const outcomes = [first.outcome, second.outcome].sort();
-  assert.deepEqual(outcomes, ["already-cancelled", "cancelled"]);
-  assert.equal(
-    (await flightRepository.findById("flight-1"))?.availableSeats,
-    5,
-  );
-});
-
-test("cancel returns not-found for missing booking", async (t) => {
+test("cancel returns not-found for missing booking", async () => {
   const { bookingRepository, transactionRunner } =
-    await createTestRuntime(t);
+    await createTestRuntime();
   const { auditRecorder } = createCapturingAuditRecorder();
   const { outboxRepository, entries } = createCapturingOutboxRepository();
 

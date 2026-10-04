@@ -14,7 +14,7 @@ docker-compose.yml
   ├── app          (build context: ., Dockerfile: api/Dockerfile)
   ├── flight-notifier (build context: ., Dockerfile: services/flight-notifier/Dockerfile)
   └── rabbitmq
-        └── outbox in SQLite bridges app ↔ broker (eventual delivery)
+        └── outbox in Postgres (booking_db) bridges app ↔ broker (eventual delivery)
 ```
 
 Object creation happens only in the Composition Root. Routes and use cases receive dependencies; they do not `new` infrastructure themselves.
@@ -24,7 +24,10 @@ Object creation happens only in the Composition Root. Routes and use cases recei
 | Variable | Required | Default | Meaning |
 |----------|----------|---------|---------|
 | `PORT` | No | `3000` | HTTP listening port (`1–65535`) |
-| `DATABASE_PATH` | No | `data/booking.db` | SQLite database file (relative or absolute) |
+| `POSTGRES_HOST` | No | `localhost` | Postgres host (`postgres` inside compose) |
+| `POSTGRES_PORT` | No | `5432` | Postgres port |
+| `BOOKING_POSTGRES_USER` | Yes | none | api's own role on `booking_db` (not identity's `POSTGRES_USER`) |
+| `BOOKING_POSTGRES_PASSWORD` | Yes | none | Password for that role |
 | `JWT_SECRET` | Yes | none | Shared with Identity; Bearer JWT for `POST /api/flights` (≥32 chars) |
 | `RABBITMQ_URL` | No | `amqp://guest:guest@localhost:5672` | AMQP URL (`rabbitmq` host inside compose) |
 
@@ -37,7 +40,7 @@ Precedence:
 ```text
 Operating-system environment
   → .env (if loaded)
-    → Application defaults (PORT, DATABASE_PATH, RABBITMQ_URL)
+    → Application defaults (PORT, POSTGRES_HOST, POSTGRES_PORT, RABBITMQ_URL)
 ```
 
 Local setup:
@@ -88,7 +91,7 @@ Missing/invalid/expired JWT on protected routes returns `401 Unauthorized` with 
 
 ## Audit trail
 
-Successful flight creation records an audit entry in the local SQLite database.
+Successful flight creation records an audit entry in the `audit_logs` table (Postgres).
 
 Current audited action:
 
@@ -116,7 +119,7 @@ actorId   = admin
 
 Because the system currently uses one shared admin API key, audit logs do not identify an individual human user.
 
-Flight creation and its `FLIGHT_CREATED` audit record are written inside a single SQLite transaction.
+Flight creation and its `FLIGHT_CREATED` audit record are written inside a single Postgres transaction.
 
 If audit recording fails after the flight insert, the transaction is rolled back and the flight is not persisted.
 
@@ -133,7 +136,7 @@ Config + Logger
   → Application { ... , close() }
 ```
 
-The SQLite connection and job scheduler are not part of the public `Application` type. Consumers use repositories / health checks; shutdown goes through `close()` (stop jobs, then close database).
+The Postgres `DataSource` and job scheduler are not part of the public `Application` type. Consumers use repositories / health checks; shutdown goes through `close()` (stop jobs, then close database).
 
 `index.ts` only parses config, builds the runtime, hands dependencies to Express, and manages process shutdown via `runtime.close()`.
 
@@ -155,13 +158,13 @@ Design notes:
 - Failures are logged; they do not crash the process or other jobs.
 - Recursive `setTimeout` avoids overlapping runs of the same job.
 - Multi-instance deployments would duplicate job execution (accepted for Day 17 — no broker / distributed lock yet).
-- Flight count reuses `FlightRepository.findPage({ limit: 1 }).totalItems` (SQLite `COUNT(*)`), avoiding a new repository method for one consumer.
+- Flight count reuses `FlightRepository.findPage({ limit: 1 }).totalItems` (`COUNT(*)` in the database), avoiding a new repository method for one consumer.
 
 ## Docker (Day 18)
 
 The API ships as a multi-stage image: TypeScript builds in a `build` stage; the `runtime` stage keeps only compiled JS + production dependencies, runs as non-root `appuser`, and probes `GET /live`.
 
-Requires **Node 22+** (`engines` + `FROM node:22-slim`) because the app uses built-in `node:sqlite`.
+Requires **Node 22+** (`engines` + `FROM node:22-slim`). Day 18 needed it for the built-in `node:sqlite`, removed on Day 41; the floor stays because Node 20 reached end-of-life (2026-04-30) and 22 is the oldest maintained LTS, matching the Docker base image.
 
 ```bash
 docker build -t booking-api:day18 .
@@ -169,8 +172,8 @@ docker build -t booking-api:day18 .
 # Git Bash on Windows: prefix with MSYS_NO_PATHCONV=1 so /app/... is not rewritten.
 docker run --rm -p 3000:3000 \
   -e JWT_SECRET="replace-with-at-least-32-character-secret!!" \
-  -e DATABASE_PATH=/app/data/booking.db \
-  -v booking_data:/app/data \
+  -e POSTGRES_HOST=host.docker.internal \
+  -e BOOKING_POSTGRES_USER=booking -e BOOKING_POSTGRES_PASSWORD=booking_dev_password \
   booking-api:day18
 ```
 
@@ -178,7 +181,7 @@ docker run --rm -p 3000:3000 \
 |---------|------------------------|
 | Reproducible runtime | Pinned `node:22-slim`, `npm ci`, lockfile |
 | Secrets | `.env` is in `.dockerignore` — pass `-e` / compose `env_file` at run time |
-| SQLite persistence | Named volume on `/app/data` matching `DATABASE_PATH` |
+| Persistence | None in the image — data lives in Postgres (Day 40+; the Day 18 `/app/data` SQLite volume was removed on Day 41) |
 | Graceful stop | `CMD ["node", "dist/index.js"]` as PID 1; `SIGTERM` → `runtime.close()` |
 | Health | Docker `HEALTHCHECK` uses `/live` (process up), not `/ready` (DB ready) |
 
@@ -198,12 +201,14 @@ curl http://localhost:3000/live
 docker compose down
 ```
 
+> **Before `docker compose down -v`:** stop every `npm run dev` that is still running (`ps aux | grep tsx`). `-v` wipes the shared Postgres/RabbitMQ volumes out from under those processes, and their restart-on-change makes the resulting errors look like real bugs (Day 40).
+
 | Concern | How Day 19 handles it |
 |---------|------------------------|
 | Multi-container topology | One YAML: `app` + `rabbitmq` |
 | Startup order | `app` waits until `rabbitmq` is **healthy** (`depends_on` + healthcheck) |
 | DNS inside the compose network | Service name `rabbitmq` resolves from `app` (not `localhost`) |
-| Persistence | Named volumes `booking_data` and `rabbitmq_data` |
+| Persistence | Named volumes `rabbitmq_data` and `identity_postgres_data` (Postgres holds both `identity_db` and `booking_db`) |
 | App ↔ broker code | **Publisher only** — `CreateFlight` publishes `flight-created` after DB commit; no consumer yet |
 
 From the host use `localhost:15672`. From inside the `app` container, connection uses hostname `rabbitmq` via `RABBITMQ_URL`.
@@ -216,18 +221,20 @@ docker compose exec app sh -c "getent hosts rabbitmq"
 
 ## Messaging (Day 20–24)
 
-After a successful `POST /api/flights` (outcome `created`), the app enqueues a row in SQLite `outbox` inside the same transaction as flight + audit. `outbox-relay-job` (default every 5s) reads unpublished rows and publishes to durable queue `flight-created`.
+After a successful `POST /api/flights` (outcome `created`), the app enqueues a row in the Postgres `outbox` table inside the same transaction as flight + audit. `outbox-relay-job` (default every 5s) reads unpublished rows and publishes to durable queue `flight-created`.
 
 | Decision | Choice | Why |
 |----------|--------|-----|
 | Payload | Fat event (`type`, `occurredAt`, full `flight`) | No consumer API callback yet; UI can inspect the body |
-| Publish path | Outbox relay (not direct from `CreateFlight`) | Flight + event intent are atomic in SQLite; RabbitMQ can be down |
+| Publish path | Outbox relay (not direct from `CreateFlight`) | Flight + event intent are atomic in one Postgres transaction; RabbitMQ can be down |
 | Delivery | Eventual (relay interval, default 5s) | Trade latency for reliability — no lost events when broker is unavailable |
 | Publish failure in relay | Log `outbox_publish_failed`; retry next tick | Row stays unpublished until publish succeeds |
 | Order | Relay stops batch on first failure (`break`) | Preserve publish order by `created_at` |
 | DLQ | `flight-created.dlq` via dead-letter exchange | Poison messages after delivery — manual investigation only |
 
 Startup connects publisher with bounded retry (`connectPublisherWithRetry`, 10 × 2s) then fail-fast. `close()` is async: stop jobs → close publisher → close DB.
+
+After startup, the publisher reconnects lazily (Day 41): an unexpected connection/channel close (e.g. RabbitMQ restart) drops the session and logs `rabbitmq_connection_lost`; the next `publish()` opens a new connection (`rabbitmq_reconnected`). There is no separate retry timer — a failed reconnect fails that publish, the outbox row stays unpublished, and the relay retries on its next tick. `flight-notifier` recovers differently: it crashes and `restart: unless-stopped` + `connectConsumerWithRetry` bring it back.
 
 ### flight-notifier service (Day 22)
 
@@ -247,23 +254,16 @@ docker compose up --build
 
 ## Database migrations
 
-The application runs SQLite migrations on startup.
+The application runs TypeORM migrations (`api/src/postgres/migrations/`) on startup, right after the `DataSource` initializes. Applied migrations are tracked in TypeORM's `migrations` table.
 
-Applied migrations are tracked in the `schema_migrations` table.
-
-Current migrations:
-
-| ID | Purpose |
+| Migration | Purpose |
 |---|---|
-| `001_create_flights` | Creates the `flights` table |
-| `002_create_audit_logs` | Creates the `audit_logs` table and indexes |
+| `CreateFlights` | `flights` (TIMESTAMPTZ dates, chronological CHECK, unique flight number + departure) |
+| `CreateOutbox` | `outbox` (jsonb payload, partial index on unpublished rows) |
+| `CreateAuditLogs` | `audit_logs` |
+| `CreateBookings` | `bookings` (FK to `flights`, status CHECK) |
 
-Migration behavior:
-
-- Pending migrations run in order.
-- Each migration is recorded after successful execution.
-- Failed migrations roll back and fail startup.
-- Existing Day 14 databases are adopted through `CREATE TABLE IF NOT EXISTS`.
+Run them without starting the app: `npm run postgres:migration:run --workspace=@booking-flight-system/api`.
 
 ## Health endpoints
 
@@ -283,7 +283,7 @@ Backward-compatible alias for `/live`.
 
 ### GET /ready
 
-Readiness check. Verifies that the application can query its SQLite database.
+Readiness check. Verifies that the application can query Postgres (`SELECT 1`).
 
 Healthy response:
 
@@ -309,9 +309,9 @@ Request
   → optional API key auth (POST /api/flights only)
   → CreateFlight | CreateBooking | ListFlights | findById
   → TransactionRunner (create flight / create booking)
-      ├── FlightRepository / BookingRepository → SQLite
-      ├── AuditRecorder → SQLite audit_logs
-      └── OutboxRepository → SQLite outbox (booking-created | flight-created)
+      ├── FlightRepository / BookingRepository → Postgres
+      ├── AuditRecorder → Postgres audit_logs
+      └── OutboxRepository → Postgres outbox (booking-created | flight-created)
 ```
 
 Every response includes header `x-request-id` (generated or echoed from the client).
@@ -369,10 +369,11 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - Outbox relay polls every 5s (not immediate publish); duplicate delivery possible if `markPublished` fails after successful publish
 - Dead-letter: rejected/poison messages route to `*.dlq` via per-queue DLX — manual inspection only (no auto-retry or alerting)
 - `guest`/`guest` RabbitMQ credentials are for local compose only
-- Transaction support is local to one SQLite database connection
+- Transaction support is local to one Postgres database (`booking_db`)
 - No nested transaction or savepoint support yet
 - No cross-service or distributed transaction
 - No outbox monitoring or DLQ alerting
+- `/ready` does not include RabbitMQ — a broker outage shows up only as `outbox_publish_failed` logs and unpublished outbox rows
 - `eventId` in flight-created payload (Day 25) — consumer dedupe store not built yet; duplicate delivery still possible
 - No migration CLI yet
 - No down/rollback migrations
@@ -381,7 +382,7 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - Migrations run in-process at application startup
 - Audit `actor` for flight create still labeled `admin_api_key` (auth is JWT; actor typing not migrated yet)
 - Roles are a single `user` | `admin` claim — no permission tables
-- Current health checks only verify SQLite with a lightweight `SELECT 1`
+- Current health checks only verify Postgres with a lightweight `SELECT 1`
 - Logs go to console only (no transports / log level config)
 - Offset pagination only (no cursor)
 - Configuration covers port, database path, JWT secret, and RabbitMQ URL

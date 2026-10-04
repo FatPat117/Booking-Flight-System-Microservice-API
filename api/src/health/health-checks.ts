@@ -12,11 +12,10 @@ export type ReadinessHealth = {
 };
 
 /**
- * Port only — must not know whether the database behind it is node:sqlite
- * or Postgres. checkReadiness() is async even though the SQLite
- * implementation could answer synchronously, so swapping implementations
- * never changes this interface (Day 40 — the same rule already applied to
- * every repository port).
+ * Port only — must not know which database answers it. checkReadiness() is
+ * async even if an implementation could answer synchronously, so swapping
+ * implementations never changes this interface (Day 40 — the same rule
+ * already applied to every repository port).
  */
 export type HealthChecks = {
   checkReadiness(): Promise<ReadinessHealth>;

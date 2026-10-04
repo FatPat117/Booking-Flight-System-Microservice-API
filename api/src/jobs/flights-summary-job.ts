@@ -5,7 +5,7 @@ import type { Job } from "./job-scheduler.js";
 /**
  * Periodically logs how many flights exist.
  *
- * Uses findPage({ limit: 1 }) so SQLite still runs COUNT(*) for totalItems
+ * Uses findPage({ limit: 1 }) so the database still runs COUNT(*) for totalItems
  * without loading the full table. Trade-off: one unused row is selected;
  * a dedicated count() would be cleaner at large scale — deferred until needed.
  */

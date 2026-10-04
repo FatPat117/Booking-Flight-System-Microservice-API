@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Booking Microservices (Day 33)",
-    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31–34: Identity JWT + role; POST /api/flights requires admin JWT\n\nImport together with Booking-microservices.local.postman_environment.json.\nidentityBaseUrl defaults to http://localhost:3001. Register, promote-to-admin, login to set accessToken (role=admin).",
+    "name": "Booking Microservices (Day 40)",
+    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31–34: Identity JWT + role; POST /api/flights requires admin JWT\n- Day 35–40: api + identity run on Postgres (booking_db / identity_db); /ready checks Postgres\n\nImport together with Booking-microservices.local.postman_environment.json.\nServices: api http://localhost:3000, identity http://localhost:3001.\nFlow: register -> promote-to-admin (CLI) -> login (sets accessToken, role=admin) -> create flight -> booking.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -24,12 +24,16 @@
     {
       "key": "identityBaseUrl",
       "value": "http://localhost:3001"
+    },
+    {
+      "key": "userAccessToken",
+      "value": ""
     }
   ],
   "item": [
     {
       "name": "Health",
-      "description": "Public liveness and readiness checks (Day 11).",
+      "description": "Public liveness and readiness checks (Day 11). /ready checks Postgres (booking_db) since Day 40 -> 200 {status:ok, checks:{database:{status:ok}}} or 503.",
       "item": [
         {
           "name": "GET /live",
@@ -77,7 +81,7 @@
       ]
     },
     {
-      "name": "JWT probe (Day 33)",
+      "name": "JWT probe (Day 33–34)",
       "description": "JWT probe. Login via Identity first to set accessToken.",
       "item": [
         {
@@ -96,7 +100,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/api/whoami",
-            "description": "200 + { userId, email } when Bearer JWT is valid.\n401 MISSING_TOKEN / INVALID_TOKEN / TOKEN_EXPIRED otherwise."
+            "description": "200 + { userId, email, role } when Bearer JWT is valid.\n401 MISSING_TOKEN / INVALID_TOKEN / TOKEN_EXPIRED otherwise."
           },
           "response": []
         },
@@ -170,7 +174,8 @@
                   "description": "Default: 20, max: 100"
                 }
               ]
-            }
+            },
+            "description": "200 + { items: Flight[], pagination }. 422 VALIDATION_FAILED on invalid page/pageSize."
           },
           "response": []
         },
@@ -185,7 +190,7 @@
               }
             ],
             "url": "{{baseUrl}}/api/flights/{{flightId}}",
-            "description": "Uses {{flightId}} from a previous create. Run POST /api/flights first or set flightId manually."
+            "description": "Uses {{flightId}} from a previous create. Run POST /api/flights first or set flightId manually.\n404 FLIGHT_NOT_FOUND when id does not exist."
           },
           "response": []
         }
@@ -193,7 +198,7 @@
     },
     {
       "name": "Flights (Write)",
-      "description": "Protected write endpoint. Requires Authorization: Bearer {{accessToken}} with role=admin (Day 34).\nDay 29: x-request-id becomes correlationId on flight.created outbox + flight_created_consumed logs.",
+      "description": "Protected write endpoint. Requires Authorization: Bearer {{accessToken}} with role=admin (Day 34).\nMissing/invalid token -> 401; valid token but role != admin -> 403 FORBIDDEN.\nDay 29: x-request-id becomes correlationId on flight.created outbox + flight_created_consumed logs.",
       "auth": {
         "type": "bearer",
         "bearer": [
@@ -277,7 +282,7 @@
     },
     {
       "name": "Bookings",
-      "description": "Day 26 create booking (public). Day 28 cancel booking. Day 29: x-request-id → correlationId on booking.created.",
+      "description": "Public (no JWT). Day 26 create booking, Day 28 cancel. Day 29: x-request-id -> correlationId on booking.created.\nDay 39–40: seat reserve/release is atomic in Postgres (no overselling under concurrency).",
       "item": [
         {
           "name": "POST /api/flights/:flightId/bookings",
@@ -321,6 +326,52 @@
             },
             "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
             "description": "Public (no admin key).\n201 created | 409 sold-out | 404 flight-not-found | 422 validation.\nSaves {{bookingId}}. Wait ~5s → booking_created_consumed with same correlationId."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/flights/:flightId/bookings (invalid body → 422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}-invalid-booking"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "description": "Expect 422 VALIDATION_FAILED (passengerName required)."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/flights/:flightId/bookings (flight not found → 404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}-no-flight"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/00000000-0000-0000-0000-000000000000/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengerName\": \"Ghost\"\n}"
+            },
+            "description": "Expect 404 FLIGHT_NOT_FOUND."
           },
           "response": []
         },
@@ -467,9 +518,19 @@
       ]
     },
     {
-      "name": "Identity (Day 31–32)",
-      "description": "Identity service on {{identityBaseUrl}} (default :3001). Register + JWT login. api does not verify JWT yet (Day 33).",
+      "name": "Identity (Day 31–34)",
+      "description": "Identity service on {{identityBaseUrl}} (default :3001), backed by identity_db (Postgres).\nRegister + JWT login. api verifies the JWT (shared JWT_SECRET) and POST /api/flights needs role=admin.\nNew users are role=user; promote with:\nnpm run promote-to-admin --workspace=@booking-flight-system/identity -- alice@example.com\nthen log in again to get a token with role=admin.",
       "item": [
+        {
+          "name": "GET /live (identity)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{identityBaseUrl}}/live",
+            "description": "Identity liveness. 200 { status: ok }."
+          },
+          "response": []
+        },
         {
           "name": "POST /api/identity/register",
           "request": {
@@ -580,6 +641,79 @@
             "description": "401 INVALID_CREDENTIALS — identical body to wrong-password case."
           },
           "response": []
+        },
+        {
+          "name": "POST /api/identity/register (invalid body → 422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"not-an-email\",\n  \"password\": \"short\"\n}"
+            },
+            "description": "Expect 422 VALIDATION_FAILED with details."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/identity/register (regular user: bob)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bob@example.com\",\n  \"password\": \"secret123\"\n}"
+            },
+            "description": "Second account that stays role=user (do NOT promote). Used to demo 403 on POST /api/flights."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/identity/login (regular user: bob)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bob@example.com\",\n  \"password\": \"secret123\"\n}"
+            },
+            "description": "Saves userAccessToken (role=user) to the environment."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.accessToken) {",
+                  "    pm.environment.set('userAccessToken', body.accessToken);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -609,6 +743,39 @@
               "raw": "{\n  \"flightNumber\": \"VN999\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-11T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-11T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 120\n}"
             },
             "url": "{{baseUrl}}/api/flights"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/flights (non-admin token → 403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}-forbidden"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{userAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN403\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-12T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-12T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 10\n}"
+            },
+            "description": "Login as bob first (role=user). Expect 403 FORBIDDEN."
           },
           "response": []
         },
@@ -669,6 +836,26 @@
               }
             ],
             "url": "{{baseUrl}}/api/bookings/missing-booking-id"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/flights/missing → 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/00000000-0000-0000-0000-000000000000",
+            "description": "Expect 404 FLIGHT_NOT_FOUND."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /unknown-route → 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/does-not-exist",
+            "description": "Expect 404 from notFoundHandler (single error envelope)."
           },
           "response": []
         }

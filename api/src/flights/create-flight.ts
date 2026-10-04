@@ -30,9 +30,9 @@ type CreateFlightDependencies = {
 
 /**
  * Application use case: create a flight from untrusted input.
- * No Express, HTTP status, or SQLite knowledge.
+ * No Express, HTTP status, or database knowledge.
  *
- * Enqueues a `flight-created` outbox row inside the same SQLite transaction
+ * Enqueues a `flight-created` outbox row inside the same transaction
  * as flight + audit — OutboxRelay publishes to RabbitMQ asynchronously.
  */
 export function createCreateFlight(

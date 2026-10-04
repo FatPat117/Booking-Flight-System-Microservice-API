@@ -4,6 +4,8 @@
 
 Accepted
 
+> **Update (Day 41):** storage is now Postgres (`booking_db`), not SQLite — see [ADR-006](./006-sqlite-to-postgres-migration.md). The decision is unchanged: the outbox row is written in the same Postgres transaction as the business data.
+
 ## Context
 
 The API persists business data in SQLite and notifies other services via RabbitMQ. Those are two systems with **no shared transaction**.

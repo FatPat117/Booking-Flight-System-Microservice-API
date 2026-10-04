@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Learning project status after Day 29 (messaging + correlation). Day 30 documents decisions; it does not change runtime topology.
+Learning project status after Day 29 (messaging + correlation). Day 30 documents decisions; it does not change runtime topology. Storage lines updated on Day 41 (api moved SQLite → Postgres on Day 40, SQLite removed Day 41); the rest is still the Day 29 snapshot.
 
 ## Current topology
 
@@ -8,8 +8,8 @@ Learning project status after Day 29 (messaging + correlation). Day 30 documents
                     ┌─────────────────────────────────────┐
   Client/Postman ──►│  api (Express HTTP)                 │
                     │  Composition Root → use cases       │
-                    │  SQLite (flights, bookings, audit,  │
-                    │          outbox)                    │
+                    │  Postgres booking_db (flights,      │
+                    │    bookings, audit, outbox)         │
                     │  OutboxRelay job → RabbitMQ publish │
                     └─────────────────┬───────────────────┘
                                       │ default exchange
@@ -51,7 +51,7 @@ Destination reference: sibling / target style of `meysamhadeli/booking-microserv
 |------------------------|-----------|---------------------------|
 | Single Express API | ✅ | Learning path started here |
 | REST + validation + auth | ✅ | Manual validation; single shared API key (not JWT/OAuth/RBAC) |
-| Persistence + Repository | ✅ | `node:sqlite`, not Postgres/TypeORM |
+| Persistence + Repository | ✅ | Postgres/TypeORM behind repository ports (Day 36–41; was `node:sqlite`) |
 | Dependency Injection | ✅ partial | Manual Composition Root only — graph still small; container DI not earned |
 | Background jobs | ✅ | In-process scheduler; no durable job store / multi-instance safety |
 | RabbitMQ + consumers | ✅ | Default exchange + per-queue DLX/DLQ; not a full broker topology/catalog |

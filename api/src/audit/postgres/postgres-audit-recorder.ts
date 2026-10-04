@@ -12,8 +12,8 @@ import { AuditEntity } from "./audit.entity.js";
  * call only exists to be atomic with the business write beside it — an audit
  * row written outside a transaction could survive a rollback of the action
  * it's supposed to describe, i.e. the log would lie. Postgres can cheaply
- * detect this via transaction-context; SqliteAuditRecorder has no such check
- * for the same reason SqliteOutboxRepository doesn't.
+ * detect this via transaction-context (the former SQLite recorder, removed
+ * Day 41, had no such check).
  */
 export class AuditRecordOutsideTransactionError extends Error {
   constructor() {

@@ -31,7 +31,6 @@ COPY --from=build /app/packages/contracts/dist ./packages/contracts/dist
 COPY --from=build /app/api/dist ./api/dist
 
 RUN useradd --uid 1001 --shell /bin/false appuser \
-  && mkdir -p /app/data \
   && chown -R appuser:appuser /app
 USER appuser
 

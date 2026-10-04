@@ -355,6 +355,16 @@ answer, not bundled into today's commit.
 
 ## 6. Rollback plan (written before cutover, per Day 40)
 
+> **From Day 41 on, the plan below no longer applies.** The SQLite adapters,
+> `database.ts` and the hand-written migration runner were deleted in Day 41's
+> commit, so reverting the Day 40 cutover commit alone would no longer even
+> compile. Going back to SQLite now means restoring those files from git
+> history (the commit before Day 41), re-wiring `bootstrap/application.ts`
+> by hand, and re-adding `DATABASE_PATH` and the `/app/data` volume — a
+> forward change of its own, not an undo. This is the migration's
+> point of no return, taken deliberately after the cutover was verified on
+> the real stack (DAY-40.md) and stayed stable.
+
 **Rollback is exactly one action: `git revert` the cutover commit.** Nothing
 else changes — no env var edits, no container rebuild beyond `docker compose
 up` picking up the reverted `docker-compose.yml`/`.env` defaults, because the

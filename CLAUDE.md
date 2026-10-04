@@ -92,6 +92,11 @@ Claude call on every single commit.
 Skip it for one push with `SKIP_PROGRESS_HOOK=1 git push`; remove it entirely
 with `git config --unset core.hooksPath`.
 
+## Shared dev infrastructure
+
+Before `docker compose down -v`, check for live `npm run dev` processes (`ps aux | grep tsx`)
+and stop them — `-v` wipes the Postgres/RabbitMQ volumes they are still using (Day 40).
+
 ## Code organization
 
 ```

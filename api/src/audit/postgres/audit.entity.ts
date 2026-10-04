@@ -2,16 +2,16 @@ import { Column, Entity, PrimaryColumn } from "typeorm";
 
 /**
  * Day 38 — dev-complete only (same caveat as FlightEntity/OutboxEntity's doc
- * comments). Mirrors SQLite's `audit_logs` table
- * (api/src/migrations/migrations.ts, 002_create_audit_logs) with the same
+ * comments). Mirrors the former SQLite `audit_logs` table (002_create_audit_logs,
+ * removed Day 41 — see git history) with the same
  * two deltas already applied to Outbox — see this entity's sibling
  * migration for the full reasoning:
  * - metadata: jsonb, not text — no manual JSON.stringify/parse needed in
- *   postgres-audit-recorder.ts, unlike sqlite-audit-recorder.ts.
+ *   postgres-audit-recorder.ts, unlike the former SQLite recorder.
  * - occurred_at: TIMESTAMPTZ, not text.
  *
  * actor/target stay split into actor_type/actor_id/target_type/target_id
- * columns (not jsonb) — same shape as SQLite, and it keeps
+ * columns (not jsonb) — same shape as the SQLite table had, and it keeps
  * `WHERE target_type = ? AND target_id = ?` a plain column query if a reader
  * is ever added.
  *

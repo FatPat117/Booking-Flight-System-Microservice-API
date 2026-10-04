@@ -4,6 +4,8 @@
 
 Accepted
 
+> **Update (Day 41):** storage is now Postgres — see [ADR-006](./006-sqlite-to-postgres-migration.md). The decision held unchanged: the conditional `UPDATE` was ported as-is and proven under real concurrent connections (`postgres-booking-race.integration.test.ts`), which SQLite's single connection never exercised.
+
 ## Context
 
 Booking flows mutate contested state: scarce seats (create) and one-shot transitions (cancel). A classic **read-then-write** in application code allows two concurrent requests to both observe “allowed” and both succeed — overbooking, or releasing a seat twice.

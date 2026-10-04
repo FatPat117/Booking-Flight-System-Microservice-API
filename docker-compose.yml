@@ -21,13 +21,10 @@ services:
       POSTGRES_PORT: 5432
       BOOKING_POSTGRES_USER: ${BOOKING_POSTGRES_USER:-booking}
       BOOKING_POSTGRES_PASSWORD: ${BOOKING_POSTGRES_PASSWORD:-booking_dev_password}
-    # Day 40 finding (Scenario 6): the RabbitMQ publisher has no
-    # reconnect-on-drop logic (out of scope to fix today — a messaging
-    # concern, not part of the Postgres cutover). When RabbitMQ force-closes
-    # the connection, the process crashes uncaught. Without a restart
-    # policy the container would stay down until a human intervenes, which
-    # defeats the outbox's whole "never lose the event" point — matches
-    # flight-notifier's existing policy below.
+    # Day 40 added this after a RabbitMQ restart left the app stuck. Day 41
+    # made the publisher reconnect in-process, so a broker restart no longer
+    # needs it — it stays for any other unexpected crash (matches
+    # flight-notifier below).
     restart: unless-stopped
     healthcheck:
       test:
@@ -90,6 +87,5 @@ services:
       retries: 5
 
 volumes:
-  booking_data:
   rabbitmq_data:
   identity_postgres_data:

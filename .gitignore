@@ -1,7 +1,5 @@
 node_modules/
 dist/
-data/
-flights.db
 .env
 .env.*
 !.env.example

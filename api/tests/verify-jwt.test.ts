@@ -8,12 +8,8 @@ import { createApp } from "../src/app.js";
 import { createVerifyJwtMiddleware } from "../src/auth/verify-jwt.js";
 import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
-import { createSqliteBookingRepository } from "../src/bookings/sqlite-booking-repository.js";
-import { openDatabase } from "../src/database.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createListFlights } from "../src/flights/list-flights.js";
-import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
-import { createSqliteHealthChecks } from "../src/health/sqlite-health-checks.js";
 import type { Logger } from "../src/observability/logger.js";
 import {
   getAuthenticatedUser,
@@ -21,6 +17,12 @@ import {
 } from "../src/observability/request-context.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
+import {
+  createInMemoryBookingRepository,
+  createInMemoryFlightRepository,
+  createInMemoryFlightStore,
+  createInMemoryHealthChecks,
+} from "./fakes/in-memory.js";
 
 const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
 
@@ -240,9 +242,9 @@ function createMemoryLogger(): Logger {
 }
 
 test("GET /api/whoami returns user from a valid JWT", async () => {
-  const database = openDatabase(":memory:");
-  const flightRepository = createSqliteFlightRepository(database);
-  const bookingRepository = createSqliteBookingRepository(database);
+  const flights = createInMemoryFlightStore();
+  const flightRepository = createInMemoryFlightRepository(flights);
+  const bookingRepository = createInMemoryBookingRepository({ flights });
 
   const app = createApp({
     flightRepository,
@@ -271,7 +273,7 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
-    healthChecks: createSqliteHealthChecks(database),
+    healthChecks: createInMemoryHealthChecks(),
     jwtSecret: TEST_JWT_SECRET,
   });
 
@@ -291,13 +293,11 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
     email: "whoami@example.com",
     role: "user",
   });
-
-  database.close();
 });
 
 test("GET /api/whoami returns 401 without a token", async () => {
-  const database = openDatabase(":memory:");
-  const flightRepository = createSqliteFlightRepository(database);
+  const flights = createInMemoryFlightStore();
+  const flightRepository = createInMemoryFlightRepository(flights);
 
   const app = createApp({
     flightRepository,
@@ -316,7 +316,7 @@ test("GET /api/whoami returns 401 without a token", async () => {
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
-    healthChecks: createSqliteHealthChecks(database),
+    healthChecks: createInMemoryHealthChecks(),
     jwtSecret: TEST_JWT_SECRET,
   });
 
@@ -324,6 +324,4 @@ test("GET /api/whoami returns 401 without a token", async () => {
 
   assert.equal(response.status, 401);
   assert.equal(response.body.error.code, "MISSING_TOKEN");
-
-  database.close();
 });

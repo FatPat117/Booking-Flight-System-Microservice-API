@@ -1,21 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { TestContext } from "node:test";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
 import type { AuditRecorder } from "../src/audit/audit-recorder.js";
-import { openDatabase } from "../src/database.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
-import { createSqliteBookingRepository } from "../src/bookings/sqlite-booking-repository.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createListFlights } from "../src/flights/list-flights.js";
-import { createSqliteFlightRepository } from "../src/flights/sqlite-flight-repository.js";
-import { createSqliteHealthChecks } from "../src/health/sqlite-health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
+import {
+  createInMemoryBookingRepository,
+  createInMemoryFlightRepository,
+  createInMemoryFlightStore,
+  createInMemoryHealthChecks,
+} from "./fakes/in-memory.js";
 
 
 function createNoopAuditRecorder(): AuditRecorder {
@@ -71,10 +72,10 @@ function createMemoryLogger() {
   };
 }
 
-function createTestContext(t: TestContext) {
-  const database = openDatabase(":memory:");
-  const flightRepository = createSqliteFlightRepository(database);
-  const bookingRepository = createSqliteBookingRepository(database);
+function createTestContext() {
+  const flights = createInMemoryFlightStore();
+  const flightRepository = createInMemoryFlightRepository(flights);
+  const bookingRepository = createInMemoryBookingRepository({ flights });
 
   const createFlight = createCreateFlight({
     flightRepository,
@@ -113,12 +114,8 @@ function createTestContext(t: TestContext) {
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     listFlights,
     logger,
-    healthChecks: createSqliteHealthChecks(database),
+    healthChecks: createInMemoryHealthChecks(),
     jwtSecret: "test-jwt-secret-at-least-32-chars!!",
-  });
-
-  t.after(() => {
-    database.close();
   });
 
   return {
@@ -127,8 +124,8 @@ function createTestContext(t: TestContext) {
   };
 }
 
-test("adds x-request-id when client does not provide one", async (t) => {
-  const { app } = createTestContext(t);
+test("adds x-request-id when client does not provide one", async () => {
+  const { app } = createTestContext();
 
   const response = await request(app).get("/health");
 
@@ -140,8 +137,8 @@ test("adds x-request-id when client does not provide one", async (t) => {
   assert.equal(response.headers["x-correlation-id"], requestId);
 });
 
-test("reuses client-provided x-request-id", async (t) => {
-  const { app } = createTestContext(t);
+test("reuses client-provided x-request-id", async () => {
+  const { app } = createTestContext();
 
   const response = await request(app)
     .get("/health")
@@ -152,8 +149,8 @@ test("reuses client-provided x-request-id", async (t) => {
   assert.equal(response.headers["x-correlation-id"], "client-req-123");
 });
 
-test("logs request started and finished events", async (t) => {
-  const { app, logs } = createTestContext(t);
+test("logs request started and finished events", async () => {
+  const { app, logs } = createTestContext();
 
   const response = await request(app).get("/api/flights");
 
@@ -212,8 +209,8 @@ test("logs unexpected errors with request id without leaking them to client", as
     },
   };
 
-  const database = openDatabase(":memory:");
-  const bookingRepository = createSqliteBookingRepository(database);
+  const flights = createInMemoryFlightStore();
+  const bookingRepository = createInMemoryBookingRepository({ flights });
 
   const createFlight = createCreateFlight({
     flightRepository: failingRepository,
@@ -288,6 +285,4 @@ test("logs unexpected errors with request id without leaking them to client", as
     errorLog.fields?.errorMessage,
     "sensitive database failure",
   );
-
-  database.close();
 });

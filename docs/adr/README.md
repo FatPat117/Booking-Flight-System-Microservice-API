@@ -26,5 +26,7 @@ ADRs do **not** describe how to implement the choice. That lives in code and day
 | [002](./002-copy-code-over-monorepo.md) | Copy Shared Types Instead of Monorepo Tooling | Superseded by [003](./003-npm-workspaces-shared-contracts.md) |
 | [003](./003-npm-workspaces-shared-contracts.md) | Adopt npm Workspaces for Shared Contracts | Accepted |
 | [004](./004-optimistic-concurrency-control.md) | Optimistic Concurrency Control via Conditional UPDATE | Accepted |
+| [005](./005-test-strategy-fakes-and-postgres-integration.md) | Unit Tests on In-Memory Fakes, Database Semantics on Real Postgres | Accepted |
+| [006](./006-sqlite-to-postgres-migration.md) | Move `api` Storage from SQLite to Postgres/TypeORM | Accepted |
 
 See also: [architecture overview](../architecture-overview.md) — current topology and gap vs the destination architecture.
