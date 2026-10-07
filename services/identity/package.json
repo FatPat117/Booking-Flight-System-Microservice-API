@@ -12,7 +12,8 @@
     "start": "node --env-file-if-exists=../../.env --env-file-if-exists=.env dist/index.js",
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json",
-    "test": "node --import tsx --test tests/**/*.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:integration": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx --test --test-concurrency=1 tests/integration/*.test.ts",
     "migration:run": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx ./src/run-migrations.ts",
     "migration:show": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx ./src/show-migrations.ts",
     "promote-to-admin": "node --env-file-if-exists=../../.env --env-file-if-exists=.env --import tsx ./src/promote-to-admin.ts"

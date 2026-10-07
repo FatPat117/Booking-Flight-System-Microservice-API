@@ -67,12 +67,22 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-identity}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-identity_dev_password}
-      POSTGRES_DB: ${POSTGRES_DB:-identity_db}
+      # Day 42: this used to be identity's own login (POSTGRES_USER/
+      # PASSWORD/DB), which made identity the cluster SUPERUSER by accident
+      # — the official image bootstraps its superuser from these exact
+      # names. Renamed to a neutral identity, used only by the init scripts
+      # below and never read by any application. No POSTGRES_DB: omitted,
+      # the image defaults it to POSTGRES_USER's value, i.e. the server's
+      # own maintenance database — neither identity_db nor booking_db is
+      # created through this bootstrap anymore, both are created explicitly
+      # by the init scripts with their own dedicated, non-superuser roles.
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-postgres_dev_password}
+      IDENTITY_POSTGRES_USER: ${IDENTITY_POSTGRES_USER:-identity}
+      IDENTITY_POSTGRES_PASSWORD: ${IDENTITY_POSTGRES_PASSWORD:-identity_dev_password}
       # Day 40: read by docker/postgres-init/01-create-booking-db.sh to
-      # create api's own role, separate from identity's POSTGRES_USER above
-      # — api's connection has no path to identity_db's tables.
+      # create api's own role, separate from identity's role above — api's
+      # connection has no path to identity_db's tables.
       BOOKING_POSTGRES_USER: ${BOOKING_POSTGRES_USER:-booking}
       BOOKING_POSTGRES_PASSWORD: ${BOOKING_POSTGRES_PASSWORD:-booking_dev_password}
     ports:

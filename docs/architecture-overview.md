@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Learning project status after Day 29 (messaging + correlation). Day 30 documents decisions; it does not change runtime topology. Storage lines updated on Day 41 (api moved SQLite → Postgres on Day 40, SQLite removed Day 41); the rest is still the Day 29 snapshot.
+Learning project status after Day 29 (messaging + correlation). Day 30 documents decisions; it does not change runtime topology. Storage lines updated on Day 41 (api moved SQLite → Postgres on Day 40, SQLite removed Day 41) and Day 42 (identity moved off the Postgres cluster superuser); the rest is still the Day 29 snapshot.
 
 ## Current topology
 
@@ -33,6 +33,17 @@ Learning project status after Day 29 (messaging + correlation). Day 30 documents
 ```
 
 **Local dev (see `Dev.md`):** RabbitMQ in Docker; `api` and `flight-notifier` via `npm run dev`.
+`identity` (Day 31+, not pictured above — still one API process, pre-dates this diagram) also
+runs via `npm run dev`, against the same Postgres container, its own `identity_db`.
+
+**Postgres roles (Day 42):** one container, two logical databases, two dedicated non-superuser
+roles — `identity` owns `identity_db`, `booking` owns `booking_db`. Neither can `CONNECT` to the
+other's database (`REVOKE CONNECT ... FROM PUBLIC`, `docker/postgres-init/`). The cluster
+superuser is a third, separate identity, used only by the init scripts at container bootstrap —
+no application ever authenticates as it. Before Day 42, `identity` *was* that superuser by
+accident (its env var names collided with the Postgres image's own bootstrap vars), which made
+the `booking_db` isolation above one-directional; both directions are now real and covered by an
+integration test per service (`tests/integration/not-superuser.integration.test.ts`).
 
 ## Decision highlights
 
@@ -68,9 +79,9 @@ Destination reference: sibling / target style of `meysamhadeli/booking-microserv
 
 ## Production-ready? (honest)
 
-**Have:** typed config, migrations, health/readiness, auth on writes, transactions, outbox, DLQ, Docker Compose, correlation headers/logs, automated tests.
+**Have:** typed config, migrations, health/readiness, auth on writes, transactions, outbox, DLQ, Docker Compose, correlation headers/logs, automated tests, least-privilege Postgres roles (Day 42).
 
-**Missing for real production:** secrets management & key rotation, multi-instance job/outbox safety, durable consumer idempotency, observability beyond console, stronger authz, Postgres operational practices, load/chaos testing, runbooks/alerts, zero-downtime migration story.
+**Missing for real production:** secrets management & key rotation, multi-instance job/outbox safety, durable consumer idempotency, observability beyond console, stronger authz, load/chaos testing, runbooks/alerts, zero-downtime migration story.
 
 We are **past “toy CRUD”** and **short of “ship to paying customers at scale.”** That gap is intentional — fill only when a real pressure appears.
 

@@ -1,36 +1,58 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 41
-**Current day:** Day 41 — SQLite removed from `api`, test strategy without SQLite decided
-**Status:** Closed (pending the user's final integration + e2e run before commit) — RabbitMQ publisher now reconnects in-process after a broker restart (verified on the real stack: no stuck outbox rows, app RestartCount 0, graceful stop still exit 0). `node:sqlite` fully removed (src, Dockerfile `/app/data`, `booking_data` volume, ignore files, docs). Unit/HTTP tests run on in-memory fakes; database semantics stay on Postgres integration tests (ADR-005); `BookingRepository` contract test runs on both tiers. SQLite → Postgres recorded as ADR-006; Day 41's deletion is the migration's point of no return.
+**Last completed day:** Day 42
+**Current day:** Day 42 — `identity` off the Postgres superuser, Group B closed
+**Status:** Closed — `identity` no longer connects as the cluster superuser (it was, by
+accident, since Day 31: `POSTGRES_USER`/`PASSWORD` collided with the Postgres image's own
+bootstrap vars). Both `identity` and `booking` are now dedicated `NOSUPERUSER` roles, each owning
+exactly one database; `REVOKE CONNECT` protects both directions for real (verified via `psql` and
+via a new `not-superuser.integration.test.ts` per service). `identity` has its first integration
+test tier (`npm run test:integration`), plus a bonus `TypeormUserRepository` test (create,
+duplicate email → `23505`). Verified end to end on the real stack: migrations + promote-to-admin
+run as the ordinary `identity` role, register/login/promote/login-again, flight/booking/cancel
+through `api`, `flight-notifier` consuming both events. `docs/architecture-overview.md` updated.
+Group B (Day 31 → 42) retrospective written.
 
-## Day 41 delivered
+## Day 42 delivered
 
 ```text
-Step 0: lazy in-process reconnect in rabbitmq-publisher.ts (no timer —
-  the outbox relay's interval is the retry cadence) + 4 unit tests with an
-  EventEmitter fake; flight-notifier keeps crash + restart recovery
-Step 1: every SQLite-touching test classified before deleting anything —
-  34 removed (23 had a Postgres equivalent, 11 no longer meaningful)
-Step 2: tests/fakes/in-memory.ts — fakes modeled on the Postgres
-  adapters' outcomes, always returning copies, no rollback simulation
-Step 3: tests/contracts/booking-repository.contract.ts — 7 cases run on
-  the fake (unit) and on Postgres (integration); proven to catch a
-  deliberately broken fake
-Step 4: group (a) moved to fakes; race tests deleted (Postgres race test
-  is now the only guard); added postgres-health-checks integration test
-Step 5: 10 SQLite src files + all infra/doc traces removed
-Step 6: ADR-005, ADR-006; npm test 186 -> 159 = exactly 186 - 34 + 7
+Step 0: 3 live npm run dev processes (api/identity/flight-notifier) found
+  and stopped before `docker compose down -v`, per the Day 40 lesson now
+  written into CLAUDE.md.
+Step 1: inventory confirmed the exact bug — docker-compose.yml's postgres
+  service and identity/src/config.ts both read POSTGRES_USER/PASSWORD/DB;
+  identity was rolsuper=t/rolcreaterole=t/rolcreatedb=t.
+Step 2: postgres service's bootstrap vars renamed to a neutral superuser
+  (POSTGRES_SUPERUSER); new docker/postgres-init/00-create-identity-db.sh
+  creates identity_db + a NOSUPERUSER identity role (mirrors booking's);
+  01-create-booking-db.sh's REVOKE CONNECT fixed to target booking_db (was
+  redundantly targeting identity_db) — this is the direction that used to
+  be meaningless, since identity bypassed every REVOKE as superuser.
+Step 3: identity/src/config.ts: IDENTITY_POSTGRES_USER/PASSWORD, fail-fast,
+  mirroring api's BOOKING_POSTGRES_USER/PASSWORD pattern exactly.
+Step 4: tests/integration/not-superuser.integration.test.ts added to both
+  identity and api (identity's is its first integration tier at all);
+  bonus typeorm-user-repository.integration.test.ts. Verified the test
+  actually catches the regression (pointed it at the superuser, watched it
+  fail, reverted).
+Step 5: full end-to-end pass on docker-compose + identity via npm run dev:
+  migration/promote-to-admin as ordinary identity, flight/booking/cancel
+  through api, flight-notifier consuming both events, cross-connect blocked
+  both directions, \du shows only the renamed superuser as Superuser.
+Step 6: docs/architecture-overview.md updated (Postgres roles section);
+  Group B retrospective (3 questions) written into DAY-42.md.
 ```
 
-## Previous day (Day 40) recap
+## Previous day (Day 41) recap
 
 ```text
-Cutover: bootstrap wires all Postgres repositories + transaction runner +
-health checks; dedicated `booking` role with REVOKE CONNECT on identity_db;
-verified end to end on docker-compose incl. an HTTP-level 20-vs-5-seat race.
+node:sqlite fully removed from api; unit/HTTP tests moved to in-memory
+fakes, database semantics stay on Postgres integration tests (ADR-005);
+BookingRepository contract test runs on both tiers; SQLite → Postgres
+migration recorded as ADR-006.
 ```
 
 ## Next
 
-Day 42 — Move `identity`'s routine connections off the Postgres superuser (Day 40 review point #1; today REVOKE CONNECT protects identity_db from `booking` but not the reverse), closing Group B before Group C (CQRS + Mediator).
+Day 43 — Start Group C. Like Day 35, an assessment day first: evaluate what real problem CQRS
+and Mediator would solve in the current codebase before introducing either.
