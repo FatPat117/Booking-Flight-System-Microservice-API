@@ -11,9 +11,12 @@ Natural product evolution:
 
 ```
 Single Express API → REST → Business Logic → Validation → Auth
-→ Persistence → Repository → DI → Background Jobs → RabbitMQ
-→ Microservices → EDA → CQRS → Saga → Monitoring → Production
+→ Persistence → Repository → DI → Background Jobs → RabbitMQ → EDA
+→ Complete Domain (monolith) → CQRS/Mediator → Microservices → Saga
+→ Monitoring → Production
 ```
+
+Detailed phases and why the order changed: `docs/roadmap.md` (single source) and ADR-007.
 
 Before introducing any technique, answer:
 

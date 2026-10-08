@@ -1,32 +1,7 @@
-# ROADMAP (Living Document)
+# ROADMAP — moved
 
-> Adjustable. Mentor may change order if a real problem appears earlier — always explain why.
+The roadmap now lives in **[`docs/roadmap.md`](../../docs/roadmap.md)**, the single source
+(Day 42B). This file is kept only so old links still resolve. Don't add content here.
 
-| Day | Theme | Why this order |
-|-----|--------|----------------|
-| 1 | Express + Flight CRUD in memory | Need a running API before architecture |
-| 2 | Runtime validation + business rules (manual) | Day 1 proved `{}` becomes invalid state |
-| 3 | Automated API tests + `createApp()` split | Manual matrix cannot protect refactors |
-| 4 | Consistent JSON errors + error middleware | Parser/unknown-route escape the JSON contract |
-| 5 | SQLite persistence (`node:sqlite`) | Data must survive process restart |
-| 6 | Repository Pattern (Flight) | SQL+HTTP in one file became real pressure |
-| 7 | CreateFlight Use Case | POST orchestration still lived in Express |
-| 8 | Typed config + env vars | Port/DB path hardcoded blocked multi-env runs |
-| 9 | Paginated ListFlights | findAll() unbounded after durable storage |
-| 10 | Request ID + structured logs | Multi-layer stack; 500s hard to correlate |
-| 11 | Liveness + readiness (SQLite) | /health only proved process was alive |
-| 12 | API key auth for POST /api/flights | Unprotected write endpoint |
-| 13 | Audit trail (FLIGHT_CREATED) | Who/when/requestId not persisted after write |
-| 14 | Transaction boundary | Flight + audit not atomic (Day 13 limitation) |
-| 15 | Database migrations | CREATE TABLE IF NOT EXISTS not enough for durable schema |
-| 16 | Composition Root / Manual DI | Object graph will explode before jobs / broker / Docker |
-| 17 | Background Jobs | Work that must not block HTTP request path |
-| 18 | Docker | Package a composed app for repeatable runtime |
-| 19+ | RabbitMQ / events | Async boundaries after jobs exist |
-
-Final destination (architecture level only):
-
-- Multiple services: Identity, Flight, Passenger, Booking
-- Express, Postgres/TypeORM, RabbitMQ, CQRS/MediatR-style, Passport JWT, OpenTelemetry, etc.
-
-**Do not implement these until the learning path reaches them.**
+The original Day 1–19 plan that used to be in this file is summarized in that document's
+"Roadmap history" table. The full original is in git history (`git log -- .cursor/progress/ROADMAP.md`).

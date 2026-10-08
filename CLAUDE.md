@@ -22,8 +22,8 @@ architecture — mirroring the target architecture in the sibling repo
 ## Start of session
 
 Read `.cursor/progress/CURRENT.md` first — it has the last completed day, status, and
-what's next. Treat it as ground truth over anything summarized below (that summary can
-go stale; `CURRENT.md` is updated every session).
+what's next. Treat it as ground truth. This file deliberately keeps no status snapshot of
+its own (the old one drifted to "Day 19" by Day 42).
 
 ## Role: Bootcamp Mentor
 
@@ -64,7 +64,8 @@ fix the code directly.
 
 - Write `.cursor/progress/DAY-XX.md` summarizing what was built and why.
 - Update `.cursor/progress/CURRENT.md` (last completed day, status, next day).
-- Update `.cursor/progress/ROADMAP.md` only if the plan genuinely changed — explain why.
+- Update `docs/roadmap.md` only if the plan genuinely changed — add a line to its
+  "Roadmap history" table explaining why, and write an ADR if the order of phases changed.
 
 ### Automation: progress check on `git push`
 
@@ -104,20 +105,24 @@ src/
   index.ts            entrypoint: parse config, build runtime, wire Express, handle shutdown
   app.ts              createApp(dependencies) — Express wiring only, routes stay thin
   config.ts           parseConfig(env) — untrusted env vars -> typed AppConfig, throws on invalid
-  database.ts         openDatabase() — node:sqlite connection
   http-errors.ts      sendApiError, notFoundHandler, createErrorHandler (central error middleware)
   types.ts            shared domain types used across features (Flight, ValidationResult, ApiError*)
   bootstrap/
     application.ts    Composition Root — the ONLY place that constructs infrastructure
-  <feature>/           one folder per feature: flights, audit, auth, health, jobs,
-                        migrations, observability, transactions
+  postgres/           DataSource, TypeORM migrations, transaction-context (AsyncLocalStorage)
+  <feature>/           one folder per feature: flights, bookings, audit, outbox, auth, health,
+                        jobs, messaging, observability, transactions
     <feature>.ts              interface/port (e.g. flight-repository.ts -> FlightRepository)
-    sqlite-<feature>.ts       concrete implementation (e.g. sqlite-flight-repository.ts)
+    postgres/                 Postgres adapter + TypeORM entity
+                              (e.g. postgres/postgres-flight-repository.ts, flight.entity.ts)
     <use-case>.ts             use case as a factory: createCreateFlight(), createListFlights()
     <feature>-validation.ts   manual validation -> ValidationResult<T> (no zod/joi yet)
 tests/
-  flat directory, one file per unit under test: <subject>.test.ts
-  *.api.test.ts uses supertest for HTTP-level tests
+  <subject>.test.ts   unit + HTTP tier, `npm test`, no infrastructure (runs on fakes)
+  *.api.test.ts       supertest against createApp()
+  fakes/in-memory.ts  in-memory implementations of every port
+  contracts/          <port>.contract.ts — one behavior spec run against fake AND Postgres
+  integration/        *.integration.test.ts, `npm run test:integration`, real Postgres
 ```
 
 Rules:
@@ -126,8 +131,9 @@ Rules:
   repositories) and wires it into use cases. Nothing else `new`s or opens infra directly.
 - **Interface/implementation pairs**: a feature folder defines a port (plain `interface`, e.g.
   `FlightRepository`) with a doc comment stating what it must NOT know about (Express, HTTP
-  status, SQLite types, snake_case rows). A separate `sqlite-*.ts` file implements it. Swapping
-  storage later means adding a new file, not touching the interface or its consumers.
+  status, database driver/TypeORM types, snake_case rows). The adapter lives in the feature's
+  `postgres/` folder. Swapping storage means adding an adapter, not touching the interface or
+  its consumers — Days 36–41 did exactly that (SQLite → Postgres) without changing a use case.
 - Routes in `app.ts` stay thin: call a use case / repository, switch on the result's discriminant,
   translate to an HTTP response. No business logic in route handlers.
 
@@ -135,7 +141,9 @@ Rules:
 
 - **Factory functions, not classes.** Every unit is `createX(dependencies): X` returning a plain
   object literal that satisfies an interface. Dependencies arrive as a single object, destructured
-  at the top of the function. There are no classes anywhere in `src/`.
+  at the top of the function. The only classes in `src/` are ones a library or the language
+  requires: TypeORM entities and migrations, and `Error` subclasses (e.g.
+  `NestedTransactionError`) so callers can `instanceof` them.
 - **Discriminated unions for expected outcomes — not exceptions.** Anything a caller must branch
   on (`created` / `duplicate` / `validation_failed`, `success: true/false`) is a return value with
   an `outcome` or `success` tag, e.g. `CreateFlightResult`, `ValidationResult<T>`. Reserve `throw`
@@ -153,9 +161,9 @@ Rules:
 - **Naming:** `camelCase` for functions/variables, `PascalCase` for types/interfaces, kebab-case
   for filenames, `SCREAMING_SNAKE_CASE` for module-level constants and API error `code` values
   (e.g. `VALIDATION_FAILED`, `FLIGHT_NOT_FOUND`).
-- **DB row mapping is explicit and local to the repository file:** a private `XRow` type mirrors
-  the snake_case columns, and a `mapXRow()` function converts it to the camelCase domain type
-  (`Flight`). Domain types and interfaces never see snake_case.
+- **Entity ↔ domain mapping is explicit and local to the adapter file:** the TypeORM entity
+  (`FlightEntity`, `Date` columns) is converted by a private `mapX()` function into the domain
+  type (`Flight`, ISO strings). Domain types and ports never see entities or snake_case.
 - **Comments are sparse and explain contracts/invariants, not mechanics** — e.g. "`totalItems` is
   the total in the collection, not the current page" or what a repository interface must *not*
   know about. Don't add comments that restate what the code already says.
@@ -181,28 +189,29 @@ Rules:
   production factory takes.
 - Test names read as full behavior sentences (`"repository duplicate becomes application
   duplicate"`), not `it("works")`.
-- `tests/` is flat — one `<subject>.test.ts` per unit, named after the `src/` file it exercises,
-  not nested to mirror `src/<feature>/` folders.
-- `*.api.test.ts` files use `supertest` against `createApp()` for HTTP-level/integration coverage;
-  everything else tests a use case or repository directly, in isolation, via injected fakes.
+- Two tiers (ADR-005): unit/HTTP tests run on the shared fakes in `tests/fakes/` and test
+  business logic; `tests/integration/` runs on real Postgres and tests database semantics
+  (transactions, constraints, OCC races). Never test a race on a fake — it cannot fail.
+- A port with both a fake and a Postgres adapter gets a contract test in `tests/contracts/`.
+- Unit test files are flat — one `<subject>.test.ts` per unit, named after the `src/` file it
+  exercises, not nested to mirror `src/<feature>/` folders.
+- `*.api.test.ts` files use `supertest` against `createApp()` for HTTP-level coverage.
+- When tests are removed, reconcile the count (`before − removed + added = after`).
 
-## Quick snapshot (may be stale — verify against `.cursor/progress/CURRENT.md`)
+## Roadmap
 
-- **Last completed:** Day 19 — docker-compose (`app` + `rabbitmq:3-management`,
-  `depends_on: service_healthy`, named volumes, no RabbitMQ client code in the app yet).
-- **Next:** Day 20 — first real RabbitMQ producer/consumer from app code.
-- **Stack so far:** Express + TypeScript, `node:sqlite`, manual DI via a Composition
-  Root (`createApplication()`), in-memory `JobScheduler`, Docker multi-stage build.
-- **Known, intentional limitations** (see README "Current limitations"): no DI
-  framework, no job persistence/retry, single shared API key (no JWT/OAuth/RBAC), no
-  distributed transactions/outbox, offset-only pagination, console-only logging.
+The detailed roadmap lives in **[`docs/roadmap.md`](docs/roadmap.md)** — the single source.
+Don't copy it here; this section only keeps what changes how you work day to day.
 
-## Roadmap (compressed — see `.cursor/progress/ROADMAP.md` for the full "why")
+- **Order:** finish the domain inside `api` (phase D) before CQRS/Mediator (E), service split
+  (F), observability (G), production + portfolio (H) — see ADR-007.
+- **Patterns need evidence:** introduce one only when the codebase shows the pain it solves, or
+  for an explicitly written-down non-technical reason.
+- **A feature is "complete"** when its business rules are written down, it has unit + integration
+  tests, a race test if it writes contested data, its events go through the outbox, and it is in
+  Postman and the docs.
+- **Standing disciplines:** async ports from the start, contract test per new port, database
+  semantics tested on Postgres, OCC for contested data, outbox for every event, ADR for big
+  decisions, reconciled test counts.
 
-Express CRUD → validation → tests → error middleware → SQLite → Repository →
-Use Cases → config → pagination → request IDs/logs → health checks → API key auth →
-audit trail → transactions → migrations → Composition Root/DI → background jobs →
-Docker → docker-compose → **RabbitMQ/events (Day 20+)** → eventually: multiple services
-(Identity, Flight, Passenger, Booking), Postgres/TypeORM, CQRS, JWT, OpenTelemetry.
-
-Do not implement destination-level architecture until the learning path reaches it.
+Do not implement a later phase's architecture before the roadmap reaches it.

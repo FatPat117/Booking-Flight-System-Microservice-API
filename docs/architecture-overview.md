@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Learning project status after Day 29 (messaging + correlation). Day 30 documents decisions; it does not change runtime topology. Storage lines updated on Day 41 (api moved SQLite → Postgres on Day 40, SQLite removed Day 41) and Day 42 (identity moved off the Postgres cluster superuser); the rest is still the Day 29 snapshot.
+Learning project status after Day 29 (messaging + correlation). Day 30 documents decisions; it does not change runtime topology. Storage lines updated on Day 41 (api moved SQLite → Postgres on Day 40, SQLite removed Day 41) and Day 42 (identity moved off the Postgres cluster superuser); the gap table was re-mapped to roadmap phases on Day 42B; the rest is still the Day 29 snapshot.
 
 ## Current topology
 
@@ -56,26 +56,27 @@ integration test per service (`tests/integration/not-superuser.integration.test.
 
 ## Gap vs destination architecture
 
-Destination reference: sibling / target style of `meysamhadeli/booking-microservices-expressjs` (Identity, Flight, Passenger, Booking, Postgres, CQRS, Saga, JWT, OpenTelemetry, etc.). This table is honest about **what we have**, not a to-do list to rush.
+Destination reference: sibling / target style of `meysamhadeli/booking-microservices-expressjs` (Identity, Flight, Passenger, Booking, Postgres, CQRS, Saga, JWT, OpenTelemetry, etc.). This table records **what we have** and **which roadmap phase closes each gap**. The phases are defined in [roadmap.md](./roadmap.md); this table does not repeat them.
 
-| Destination capability | Here now? | Why not yet (or how far) |
-|------------------------|-----------|---------------------------|
-| Single Express API | ✅ | Learning path started here |
-| REST + validation + auth | ✅ | Manual validation; single shared API key (not JWT/OAuth/RBAC) |
-| Persistence + Repository | ✅ | Postgres/TypeORM behind repository ports (Day 36–41; was `node:sqlite`) |
-| Dependency Injection | ✅ partial | Manual Composition Root only — graph still small; container DI not earned |
-| Background jobs | ✅ | In-process scheduler; no durable job store / multi-instance safety |
-| RabbitMQ + consumers | ✅ | Default exchange + per-queue DLX/DLQ; not a full broker topology/catalog |
-| Event-driven flow | ✅ | Outbox + fat events; no CDC |
-| Shared contracts package | ✅ | npm workspaces; not Nx |
-| Correlation across services | ✅ | Field + headers/logs; not W3C Trace / OpenTelemetry |
-| CQRS | ❌ | Read/write traffic and models still fit one path; no skew that forces separate models |
-| Saga (multi-service compensate) | ❌ | Cancel booking compensates **inside** one DB/service; no cross-service undo chain |
-| Consumer dedupe store | ❌ | `eventId` exists; durable idempotency store not built |
-| causationId / event chains | ❌ | Events are HTTP-rooted, not event-triggers-event |
-| Centralized metrics/alerting | ❌ | Console structured logs + `/live` `/ready`; no ELK/Prometheus/PagerDuty |
-| Multi-service domains (Identity, Passenger, …) | ❌ | Still one API process + one notifier; split when bounded contexts hurt |
-| Production-ready | **Partial** | See below |
+| Destination capability | Here now? | Current state | Phase |
+|------------------------|-----------|---------------|-------|
+| Single Express API | ✅ | Learning path started here | A |
+| REST + validation + auth | ✅ | Manual validation; JWT from Identity with an `admin` role (Day 34) | A/B; validation library in H |
+| Persistence + Repository | ✅ | Postgres/TypeORM behind repository ports (Day 36–41; was `node:sqlite`) | B |
+| Dependency Injection | ✅ partial | Manual Composition Root only | Container (tsyringe) in E |
+| Background jobs | ✅ | In-process scheduler; no durable job store / multi-instance safety | — (revisit when multiple instances run) |
+| RabbitMQ + consumers | ✅ | Default exchange + per-queue DLX/DLQ; not a full broker topology/catalog | F |
+| Event-driven flow | ✅ | Outbox + fat events; no CDC | — |
+| Shared contracts package | ✅ | npm workspaces; not Nx | — |
+| Correlation across services | ✅ | Field + headers/logs; not W3C Trace | G |
+| Complete booking domain | ❌ | Flights + single-passenger bookings only; no airports, aircraft, seat maps, payment | **D** |
+| CQRS + Mediator | ❌ | ~5 use cases share one model — assessed at the start of E, against the full domain | E |
+| Saga (multi-service compensate) | ❌ | Cancel booking compensates **inside** one DB/service | F |
+| Consumer dedupe store (Inbox) | ❌ | `eventId` exists; durable idempotency store not built | F |
+| causationId / event chains | ❌ | Events are HTTP-rooted, not event-triggers-event | F |
+| Multi-service domains (Passenger, Flight, Booking) | ❌ partial | Identity + notifier split; Flight/Booking still in `api` | F |
+| Centralized metrics/tracing | ❌ | Console structured logs + `/live` `/ready` | G |
+| Production-ready | **Partial** | See below | H |
 
 ## Production-ready? (honest)
 
@@ -87,4 +88,4 @@ We are **past “toy CRUD”** and **short of “ship to paying customers at sca
 
 ## Open question (keep asking)
 
-Looking at the “❌” rows: is there **real pressure today**, or are they still correctly deferred? Prefer solving demonstrated pain over closing the table for symmetry with a reference repo.
+Each “❌” row now has a phase, but a phase is not a license to build the pattern regardless. At the start of each phase, confirm there is **real pressure** (or an explicitly stated non-technical reason) before closing a row. See the principles in [roadmap.md](./roadmap.md).

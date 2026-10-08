@@ -1,58 +1,39 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 42
-**Current day:** Day 42 — `identity` off the Postgres superuser, Group B closed
-**Status:** Closed — `identity` no longer connects as the cluster superuser (it was, by
-accident, since Day 31: `POSTGRES_USER`/`PASSWORD` collided with the Postgres image's own
-bootstrap vars). Both `identity` and `booking` are now dedicated `NOSUPERUSER` roles, each owning
-exactly one database; `REVOKE CONNECT` protects both directions for real (verified via `psql` and
-via a new `not-superuser.integration.test.ts` per service). `identity` has its first integration
-test tier (`npm run test:integration`), plus a bonus `TypeormUserRepository` test (create,
-duplicate email → `23505`). Verified end to end on the real stack: migrations + promote-to-admin
-run as the ordinary `identity` role, register/login/promote/login-again, flight/booking/cancel
-through `api`, `flight-notifier` consuming both events. `docs/architecture-overview.md` updated.
-Group B (Day 31 → 42) retrospective written.
+**Last completed day:** Day 42B
+**Current day:** Day 42B — new roadmap locked in, docs synced to it (no code)
+**Status:** Closed — the roadmap now lives in one place, [`docs/roadmap.md`](../../docs/roadmap.md);
+`CLAUDE.md`, README, `docs/architecture-overview.md`, `.cursor/progress/ROADMAP.md` and
+`learning-philosophy.mdc` only summarize and link to it. The order change (domain first, CQRS
+later) is recorded as ADR-007. `CLAUDE.md`'s stale "Quick snapshot" (still Day 19) was removed
+and its Code organization / testing sections were corrected for Day 41 (no more `sqlite-*`).
 
-## Day 42 delivered
+**Roadmap change:** the old "Group C — CQRS + Mediator assessment on Day 43" is gone. Phase D
+(complete the domain inside `api`) comes first; the CQRS/Mediator assessment now opens phase E.
+
+## Day 42B delivered
 
 ```text
-Step 0: 3 live npm run dev processes (api/identity/flight-notifier) found
-  and stopped before `docker compose down -v`, per the Day 40 lesson now
-  written into CLAUDE.md.
-Step 1: inventory confirmed the exact bug — docker-compose.yml's postgres
-  service and identity/src/config.ts both read POSTGRES_USER/PASSWORD/DB;
-  identity was rolsuper=t/rolcreaterole=t/rolcreatedb=t.
-Step 2: postgres service's bootstrap vars renamed to a neutral superuser
-  (POSTGRES_SUPERUSER); new docker/postgres-init/00-create-identity-db.sh
-  creates identity_db + a NOSUPERUSER identity role (mirrors booking's);
-  01-create-booking-db.sh's REVOKE CONNECT fixed to target booking_db (was
-  redundantly targeting identity_db) — this is the direction that used to
-  be meaningless, since identity bypassed every REVOKE as superuser.
-Step 3: identity/src/config.ts: IDENTITY_POSTGRES_USER/PASSWORD, fail-fast,
-  mirroring api's BOOKING_POSTGRES_USER/PASSWORD pattern exactly.
-Step 4: tests/integration/not-superuser.integration.test.ts added to both
-  identity and api (identity's is its first integration tier at all);
-  bonus typeorm-user-repository.integration.test.ts. Verified the test
-  actually catches the regression (pointed it at the superuser, watched it
-  fail, reverted).
-Step 5: full end-to-end pass on docker-compose + identity via npm run dev:
-  migration/promote-to-admin as ordinary identity, flight/booking/cancel
-  through api, flight-notifier consuming both events, cross-connect blocked
-  both directions, \du shows only the renamed superuser as Superuser.
-Step 6: docs/architecture-overview.md updated (Postgres roles section);
-  Group B retrospective (3 questions) written into DAY-42.md.
+Step 1: grep inventory of every place describing the old roadmap (9
+  locations: 7 fixed, 2 left as historical day logs) — DAY-42B.md
+Step 2: docs/roadmap.md — goal, principles, definition of "complete",
+  standing disciplines, phases A/B (done) and D–H, deferred decisions,
+  roadmap history with the evidence behind each change
+Step 3: ADR-007 (domain before advanced patterns) with four real costs
+Step 4: CLAUDE.md, CURRENT.md, README, architecture overview,
+  ROADMAP.md, learning-philosophy.mdc turned into summaries + links;
+  no product code touched
 ```
 
-## Previous day (Day 41) recap
+## Previous day (Day 42) recap
 
 ```text
-node:sqlite fully removed from api; unit/HTTP tests moved to in-memory
-fakes, database semantics stay on Postgres integration tests (ADR-005);
-BookingRepository contract test runs on both tiers; SQLite → Postgres
-migration recorded as ADR-006.
+identity moved off the Postgres cluster superuser (dedicated NOSUPERUSER
+role, REVOKE CONNECT both directions, not-superuser integration test per
+service); Group B (Day 31 → 42) closed with a retrospective.
 ```
 
 ## Next
 
-Day 43 — Start Group C. Like Day 35, an assessment day first: evaluate what real problem CQRS
-and Mediator would solve in the current codebase before introducing either.
+Day 43 — Define the product scope and the domain model (no code): the first day of phase D in
+[`docs/roadmap.md`](../../docs/roadmap.md).

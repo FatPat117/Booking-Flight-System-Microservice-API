@@ -2,6 +2,20 @@
 
 Learning project: grow a booking backend from a single Express API toward microservices — without copying the final architecture early.
 
+## Roadmap
+
+Done so far: **A** foundations → messaging (Day 1–30), **B** Identity + Postgres (Day 31–42). Ahead:
+
+| Phase | Focus |
+|---|---|
+| **D** | Complete booking domain inside `api` — airports, aircraft, schedules, seat maps and holds, multi-passenger bookings, payment, cancellations |
+| **E** | CQRS + Mediator + Vertical Slice + DI container |
+| **F** | Split into Passenger / Flight / Booking services — REST + events, Saga, Inbox |
+| **G** | Observability — OpenTelemetry, Jaeger, Prometheus, Grafana |
+| **H** | Production-ready + portfolio — validation lib, OpenAPI, testcontainers, CI, rate limiting, deploy |
+
+Details, principles and why the order is what it is: [docs/roadmap.md](docs/roadmap.md) · [ADR-007](docs/adr/007-domain-before-advanced-patterns.md).
+
 ## Architecture (Day 27)
 
 ```text
