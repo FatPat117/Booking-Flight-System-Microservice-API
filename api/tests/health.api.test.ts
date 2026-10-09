@@ -17,6 +17,7 @@ import {
   createInMemoryFlightRepository,
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
+  createUnusedBookingReads,
 } from "./fakes/in-memory.js";
 
 
@@ -87,6 +88,7 @@ function createTestContext() {
     createFlight,
     createBooking: createTestCreateBooking(bookingRepository),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
+    ...createUnusedBookingReads(),
     listFlights,
     logger: createMemoryLogger(),
     healthChecks,
@@ -177,6 +179,7 @@ test("GET /ready returns 503 when database is unavailable", async () => {
     createFlight,
     createBooking: createTestCreateBooking(bookingRepository),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
+    ...createUnusedBookingReads(),
     listFlights,
     logger: createMemoryLogger(),
     healthChecks: unhealthyHealthChecks,

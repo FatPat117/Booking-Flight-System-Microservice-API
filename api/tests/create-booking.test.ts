@@ -5,9 +5,10 @@ import type {
   AuditRecordInput,
   AuditRecorder,
 } from "../src/audit/audit-recorder.js";
+import type { BookingRepository } from "../src/bookings/booking-repository.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
 import type { OutboxEntry, OutboxRepository } from "../src/outbox/outbox-repository.js";
-import type { Flight } from "../src/types.js";
+import type { Actor, Flight } from "../src/types.js";
 import {
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
@@ -16,10 +17,14 @@ import {
 } from "./fakes/in-memory.js";
 
 const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
+const FLIGHT_ID = "f1f1f1f1-0000-4000-8000-000000000001";
+const BOOKING_ID = "b0b0b0b0-0000-4000-8000-000000000001";
+const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
+const ACTOR_A: Actor = { accountId: ACCOUNT_A };
 
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
   return {
-    id: "flight-1",
+    id: FLIGHT_ID,
     flightNumber: "VN123",
     origin: "SGN",
     destination: "HAN",
@@ -86,16 +91,18 @@ test("creates booking with audit and outbox when seat is available", async () =>
     auditRecorder,
     outboxRepository,
     transactionRunner,
-    generateId: () => "fixed-booking-id",
+    generateId: () => BOOKING_ID,
     generateAuditId: () => "fixed-audit-id",
     generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createBooking("flight-1", {
-    passengerName: " Alice ",
-  });
+  const result = await createBooking(
+    FLIGHT_ID,
+    { passengerName: " Alice " },
+    ACTOR_A,
+  );
 
   assert.equal(result.outcome, "created");
   if (result.outcome !== "created") {
@@ -103,6 +110,7 @@ test("creates booking with audit and outbox when seat is available", async () =>
   }
 
   assert.equal(result.booking.passengerName, "Alice");
+  assert.equal(result.booking.ownerAccountId, ACCOUNT_A);
   assert.equal(entries.length, 1);
   assert.equal(entries[0]?.eventType, "booking-created");
   assert.deepEqual(entries[0]?.payload, {
@@ -122,12 +130,12 @@ test("creates booking with audit and outbox when seat is available", async () =>
     {
       id: "fixed-audit-id",
       action: "BOOKING_CREATED",
-      actor: { type: "passenger", id: "anonymous" },
-      target: { type: "booking", id: "fixed-booking-id" },
+      actor: { type: "account", id: ACCOUNT_A },
+      target: { type: "booking", id: BOOKING_ID },
       requestId: "fixed-request-id",
       occurredAt: "2026-07-20T00:00:00.000Z",
       metadata: {
-        flightId: "flight-1",
+        flightId: FLIGHT_ID,
         passengerName: "Alice",
         correlationId: "fixed-request-id",
       },
@@ -146,14 +154,14 @@ test("booking outbox correlationId falls back to eventId when requestId is missi
     auditRecorder,
     outboxRepository,
     transactionRunner,
-    generateId: () => "fixed-booking-id",
+    generateId: () => BOOKING_ID,
     generateAuditId: () => "fixed-audit-id",
     generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => undefined,
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createBooking("flight-1", { passengerName: "Alice" });
+  const result = await createBooking(FLIGHT_ID, { passengerName: "Alice" }, ACTOR_A);
   assert.equal(result.outcome, "created");
   assert.equal(
     (entries[0]?.payload as { correlationId: string }).correlationId,
@@ -172,22 +180,22 @@ test("returns sold-out without outbox when no seats remain", async () => {
     auditRecorder,
     outboxRepository,
     transactionRunner,
-    generateId: () => "fixed-booking-id",
+    generateId: () => BOOKING_ID,
     generateAuditId: () => "fixed-audit-id",
     generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => undefined,
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const first = await createBooking("flight-1", { passengerName: "Alice" });
-  const second = await createBooking("flight-1", { passengerName: "Bob" });
+  const first = await createBooking(FLIGHT_ID, { passengerName: "Alice" }, ACTOR_A);
+  const second = await createBooking(FLIGHT_ID, { passengerName: "Bob" }, ACTOR_A);
 
   assert.equal(first.outcome, "created");
   assert.equal(second.outcome, "sold-out");
   assert.equal(entries.length, 1);
   assert.equal(records.length, 1);
   assert.equal(
-    (await flightRepository.findById("flight-1"))?.availableSeats,
+    (await flightRepository.findById(FLIGHT_ID))?.availableSeats,
     0,
   );
 });
@@ -203,18 +211,68 @@ test("returns flight-not-found without outbox for missing flight", async () => {
     auditRecorder,
     outboxRepository,
     transactionRunner,
-    generateId: () => "fixed-booking-id",
+    generateId: () => BOOKING_ID,
     generateAuditId: () => "fixed-audit-id",
     generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => undefined,
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createBooking("missing-flight", {
-    passengerName: "Alice",
-  });
+  const result = await createBooking(
+    "c0ffee00-0000-4000-8000-000000000000",
+    { passengerName: "Alice" },
+    ACTOR_A,
+  );
 
   assert.equal(result.outcome, "flight-not-found");
   assert.equal(entries.length, 0);
   assert.equal(records.length, 0);
+});
+
+test("a malformed flight id is flight-not-found, never sent to the repository", async () => {
+  const { transactionRunner } = await createTestRuntime();
+  const { auditRecorder } = createCapturingAuditRecorder();
+  const { outboxRepository } = createCapturingOutboxRepository();
+  let repositoryCalls = 0;
+  const bookingRepository: BookingRepository = {
+    async reserveSeat() {
+      repositoryCalls += 1;
+      return { outcome: "reserved" };
+    },
+    async create() {
+      repositoryCalls += 1;
+    },
+    async findById() {
+      repositoryCalls += 1;
+      return undefined;
+    },
+    async findPage() {
+      repositoryCalls += 1;
+      return { items: [], totalItems: 0 };
+    },
+    async cancel() {
+      repositoryCalls += 1;
+      return { outcome: "not-found" };
+    },
+    async releaseSeat() {
+      repositoryCalls += 1;
+    },
+  };
+
+  const createBooking = createCreateBooking({
+    bookingRepository,
+    auditRecorder,
+    outboxRepository,
+    transactionRunner,
+    generateId: () => BOOKING_ID,
+    generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
+    getRequestId: () => undefined,
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const result = await createBooking("not-a-uuid", { passengerName: "Alice" }, ACTOR_A);
+
+  assert.deepEqual(result, { outcome: "flight-not-found" });
+  assert.equal(repositoryCalls, 0);
 });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
 import type { DataSource } from "typeorm";
 
+import type { BookingAccessScope } from "../../src/bookings/booking-repository.js";
 import { createPostgresBookingRepository } from "../../src/bookings/postgres/postgres-booking-repository.js";
 import { createPostgresFlightRepository } from "../../src/flights/postgres/postgres-flight-repository.js";
 import { parsePostgresConfig } from "../../src/postgres/config.js";
@@ -32,10 +33,14 @@ function makeFlight(overrides: Partial<Flight> = {}): Flight {
   };
 }
 
+const OWNER_ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
+const OWNER: BookingAccessScope = { kind: "owner", accountId: OWNER_ACCOUNT_ID };
+
 function makeBooking(flightId: string, overrides: Record<string, unknown> = {}) {
   return {
     id: crypto.randomUUID(),
     flightId,
+    ownerAccountId: OWNER_ACCOUNT_ID,
     passengerName: "Alice",
     createdAt: "2026-07-20T00:00:00.000Z",
     status: "active" as const,
@@ -89,17 +94,17 @@ test("cancel: cancelled with flightId via RETURNING, then already-cancelled", as
   const booking = makeBooking(flight.id);
   await bookingRepository.create(booking);
 
-  const first = await bookingRepository.cancel(booking.id);
+  const first = await bookingRepository.cancel(booking.id, OWNER);
   assert.deepEqual(first, { outcome: "cancelled", flightId: flight.id });
 
-  const second = await bookingRepository.cancel(booking.id);
+  const second = await bookingRepository.cancel(booking.id, OWNER);
   assert.deepEqual(second, { outcome: "already-cancelled" });
 });
 
 test("cancel: not-found for an unknown booking id", async () => {
   const bookingRepository = createPostgresBookingRepository(dataSource);
 
-  const result = await bookingRepository.cancel(crypto.randomUUID());
+  const result = await bookingRepository.cancel(crypto.randomUUID(), OWNER);
   assert.deepEqual(result, { outcome: "not-found" });
 });
 

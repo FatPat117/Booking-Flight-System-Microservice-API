@@ -3,7 +3,7 @@ import type { AuditRecorder } from "../audit/audit-recorder.js";
 import type { OutboxRepository } from "../outbox/outbox-repository.js";
 import { resolveCorrelationId } from "../outbox/resolve-correlation-id.js";
 import type { TransactionRunner } from "../transactions/transaction-runner.js";
-import type { Flight, ValidationIssue } from "../types.js";
+import type { Actor, Flight, ValidationIssue } from "../types.js";
 import type { FlightRepository } from "./flight-repository.js";
 import { validateCreateFlightInput } from "./flight-validation.js";
 
@@ -14,7 +14,10 @@ export type CreateFlightResult =
   | { outcome: "validation_failed"; issues: ValidationIssue[] }
   | { outcome: "duplicate" };
 
-export type CreateFlight = (input: unknown) => Promise<CreateFlightResult>;
+export type CreateFlight = (
+  input: unknown,
+  actor: Actor,
+) => Promise<CreateFlightResult>;
 
 type CreateFlightDependencies = {
   flightRepository: FlightRepository;
@@ -50,7 +53,7 @@ export function createCreateFlight(
     getCurrentTime,
   } = dependencies;
 
-  return async (input: unknown): Promise<CreateFlightResult> => {
+  return async (input: unknown, actor: Actor): Promise<CreateFlightResult> => {
     const validation = validateCreateFlightInput(input);
 
     if (!validation.success) {
@@ -90,8 +93,8 @@ export function createCreateFlight(
         id: generateAuditId(),
         action: "FLIGHT_CREATED",
         actor: {
-          type: "admin_api_key",
-          id: "admin",
+          type: "account",
+          id: actor.accountId,
         },
         target: {
           type: "flight",

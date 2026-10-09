@@ -4,8 +4,11 @@ import type {
 } from "../../src/audit/audit-recorder.js";
 import type {
   Booking,
+  BookingAccessScope,
   BookingRepository,
 } from "../../src/bookings/booking-repository.js";
+import type { GetBooking } from "../../src/bookings/get-booking.js";
+import type { ListBookings } from "../../src/bookings/list-bookings.js";
 import type { FlightRepository } from "../../src/flights/flight-repository.js";
 import type {
   HealthChecks,
@@ -93,8 +96,13 @@ export function createInMemoryFlightRepository(
 
 export type InMemoryBookingRepository = BookingRepository &
   Readonly<{
-    findById(id: string): Booking | undefined;
+    /** Test-only read that bypasses scopes — for asserting stored state. */
+    peek(id: string): Booking | undefined;
   }>;
+
+function isInScope(booking: Booking, scope: BookingAccessScope): boolean {
+  return scope.kind === "admin" || booking.ownerAccountId === scope.accountId;
+}
 
 export function createInMemoryBookingRepository(deps: {
   flights: InMemoryFlightStore;
@@ -130,10 +138,35 @@ export function createInMemoryBookingRepository(deps: {
       bookings.set(booking.id, structuredClone(booking));
     },
 
-    async cancel(bookingId) {
+    async findById(bookingId, scope) {
+      const booking = bookings.get(bookingId);
+      return booking === undefined || !isInScope(booking, scope)
+        ? undefined
+        : structuredClone(booking);
+    },
+
+    async findPage(scope, request) {
+      const visible = [...bookings.values()]
+        .filter((booking) => isInScope(booking, scope))
+        .sort(
+          (a, b) =>
+            toInstant(b.createdAt) - toInstant(a.createdAt) ||
+            (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+        );
+
+      return {
+        items: visible
+          .slice(request.offset, request.offset + request.limit)
+          .map((booking) => structuredClone(booking)),
+        totalItems: visible.length,
+      };
+    },
+
+    async cancel(bookingId, scope) {
       const booking = bookings.get(bookingId);
 
-      if (booking === undefined) {
+      // Out of scope is not-found, never already-cancelled (BR-AUTH-02).
+      if (booking === undefined || !isInScope(booking, scope)) {
         return { outcome: "not-found" };
       }
       if (booking.status === "cancelled") {
@@ -152,7 +185,7 @@ export function createInMemoryBookingRepository(deps: {
       }
     },
 
-    findById(id) {
+    peek(id) {
       const booking = bookings.get(id);
       return booking === undefined ? undefined : structuredClone(booking);
     },
@@ -230,5 +263,24 @@ export function createInMemoryHealthChecks(
     async checkReadiness() {
       return { status, checks: { database: { status } } };
     },
+  };
+}
+
+/**
+ * For HTTP tests that build createApp() but never exercise the booking read
+ * routes (health, observability, JWT, flights). Booking behavior itself is
+ * tested in bookings.api.test.ts with the real use cases.
+ */
+export function createUnusedBookingReads(): {
+  getBooking: GetBooking;
+  listBookings: ListBookings;
+} {
+  return {
+    getBooking: async () => ({ outcome: "not-found" }),
+    listBookings: async () => ({
+      outcome: "success",
+      items: [],
+      pagination: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
+    }),
   };
 }

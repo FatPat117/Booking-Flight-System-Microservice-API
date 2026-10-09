@@ -33,6 +33,10 @@ import type { Flight } from "../../src/types.js";
  * simultaneous BEGINs."
  */
 
+const OWNER_ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
+const OWNER_SCOPE = { kind: "owner", accountId: OWNER_ACCOUNT_ID } as const;
+const OWNER_ACTOR = { accountId: OWNER_ACCOUNT_ID };
+
 let dataSource: DataSource;
 
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
@@ -102,7 +106,7 @@ test("Test A — 20 concurrent createBooking calls on a 5-seat flight yield exac
 
   const results = await Promise.all(
     Array.from({ length: 20 }, (_, i) =>
-      createBooking(flight.id, { passengerName: `Passenger ${i}` }),
+      createBooking(flight.id, { passengerName: `Passenger ${i}` }, OWNER_ACTOR),
     ),
   );
 
@@ -129,6 +133,7 @@ test("Test B — 10 concurrent cancelBooking calls on the same active booking yi
   const booking = {
     id: crypto.randomUUID(),
     flightId: flight.id,
+    ownerAccountId: OWNER_ACCOUNT_ID,
     passengerName: "Alice",
     createdAt: "2026-07-20T00:00:00.000Z",
     status: "active" as const,
@@ -138,7 +143,7 @@ test("Test B — 10 concurrent cancelBooking calls on the same active booking yi
   const cancelBooking = createCancelBookingUseCase();
 
   const results = await Promise.all(
-    Array.from({ length: 10 }, () => cancelBooking(booking.id)),
+    Array.from({ length: 10 }, () => cancelBooking(booking.id, OWNER_SCOPE, OWNER_ACTOR)),
   );
 
   const cancelled = results.filter((r) => r.outcome === "cancelled");

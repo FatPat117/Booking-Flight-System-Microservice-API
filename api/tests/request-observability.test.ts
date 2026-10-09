@@ -16,6 +16,7 @@ import {
   createInMemoryFlightRepository,
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
+  createUnusedBookingReads,
 } from "./fakes/in-memory.js";
 
 
@@ -112,6 +113,7 @@ function createTestContext() {
     createFlight,
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
+    ...createUnusedBookingReads(),
     listFlights,
     logger,
     healthChecks: createInMemoryHealthChecks(),
@@ -247,6 +249,7 @@ test("logs unexpected errors with request id without leaking them to client", as
     createFlight,
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
+    ...createUnusedBookingReads(),
     listFlights,
     logger,
     healthChecks: {

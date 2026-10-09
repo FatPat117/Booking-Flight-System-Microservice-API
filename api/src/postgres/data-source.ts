@@ -11,6 +11,8 @@ import { CreateFlights1790424994000 } from "./migrations/1790424994000-CreateFli
 import { CreateOutbox1790428672000 } from "./migrations/1790428672000-CreateOutbox.js";
 import { CreateAuditLogs1790432350000 } from "./migrations/1790432350000-CreateAuditLogs.js";
 import { CreateBookings1790436000000 } from "./migrations/1790436000000-CreateBookings.js";
+import { AddBookingOwner1790440000000 } from "./migrations/1790440000000-AddBookingOwner.js";
+import { RequireBookingOwner1790443600000 } from "./migrations/1790443600000-RequireBookingOwner.js";
 
 /**
  * Day 36+ — dev-complete only. Entities/migrations are added per Strangler
@@ -34,6 +36,8 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
       CreateOutbox1790428672000,
       CreateAuditLogs1790432350000,
       CreateBookings1790436000000,
+      AddBookingOwner1790440000000,
+      RequireBookingOwner1790443600000,
     ],
   });
 }

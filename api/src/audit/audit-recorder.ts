@@ -1,12 +1,13 @@
-export type AuditActor =
-  | {
-      type: "admin_api_key";
-      id: "admin";
-    }
-  | {
-      type: "passenger";
-      id: "anonymous";
-    };
+/**
+ * Who performed the action: the Identity account (JWT `sub`), user or admin.
+ * Rows written before Day 44 still carry the legacy `admin_api_key/admin`
+ * and `passenger/anonymous` actors — the log is append-only, so they stay
+ * as written; no code writes them any more.
+ */
+export type AuditActor = {
+  type: "account";
+  id: string;
+};
 
 export type AuditTarget =
   | {

@@ -1,24 +1,18 @@
+import {
+  parsePageQuery,
+  toPagination,
+  type Pagination,
+  type RawPageQuery,
+} from "../pagination.js";
 import type { Flight, ValidationIssue } from "../types.js";
 import type { FlightRepository } from "./flight-repository.js";
 
-const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
-
-export type RawListFlightsQuery = {
-  page?: unknown;
-  pageSize?: unknown;
-};
+export type RawListFlightsQuery = RawPageQuery;
 
 export type ListFlightsSuccessResult = {
   outcome: "success";
   items: Flight[];
-  pagination: {
-    page: number;
-    pageSize: number;
-    totalItems: number;
-    totalPages: number;
-  };
+  pagination: Pagination;
 };
 
 export type ListFlightsValidationFailure = {
@@ -34,85 +28,6 @@ export type ListFlights = (
   query: RawListFlightsQuery,
 ) => Promise<ListFlightsResult>;
 
-type ParsePaginationValueResult =
-  | {
-      success: true;
-      value: number;
-    }
-  | {
-      success: false;
-      issue: ValidationIssue;
-    };
-
-function createPaginationIssue(
-  field: "page" | "pageSize",
-): ValidationIssue {
-  if (field === "page") {
-    return {
-      field: "page",
-      code: "INVALID_PAGE",
-      message: "page must be a positive integer",
-    };
-  }
-
-  return {
-    field: "pageSize",
-    code: "INVALID_PAGE_SIZE",
-    message: "pageSize must be an integer between 1 and 100",
-  };
-}
-
-function parsePaginationValue(
-  field: "page" | "pageSize",
-  rawValue: unknown,
-  defaultValue: number,
-  maximum?: number,
-): ParsePaginationValueResult {
-  if (rawValue === undefined) {
-    return {
-      success: true,
-      value: defaultValue,
-    };
-  }
-
-  if (typeof rawValue !== "string") {
-    return {
-      success: false,
-      issue: createPaginationIssue(field),
-    };
-  }
-
-  const trimmed = rawValue.trim();
-
-  if (trimmed === "" || !/^\d+$/.test(trimmed)) {
-    return {
-      success: false,
-      issue: createPaginationIssue(field),
-    };
-  }
-
-  const value = Number(trimmed);
-
-  if (!Number.isSafeInteger(value) || value < 1) {
-    return {
-      success: false,
-      issue: createPaginationIssue(field),
-    };
-  }
-
-  if (maximum !== undefined && value > maximum) {
-    return {
-      success: false,
-      issue: createPaginationIssue(field),
-    };
-  }
-
-  return {
-    success: true,
-    value,
-  };
-}
-
 type ListFlightsDependencies = {
   flightRepository: FlightRepository;
 };
@@ -125,73 +40,21 @@ export function createListFlights(
   return async function listFlights(
     rawQuery: RawListFlightsQuery,
   ): Promise<ListFlightsResult> {
-    const pageResult = parsePaginationValue(
-      "page",
-      rawQuery.page,
-      DEFAULT_PAGE,
-    );
+    const pageQuery = parsePageQuery(rawQuery);
 
-    const pageSizeResult = parsePaginationValue(
-      "pageSize",
-      rawQuery.pageSize,
-      DEFAULT_PAGE_SIZE,
-      MAX_PAGE_SIZE,
-    );
-
-    const issues: ValidationIssue[] = [];
-
-    if (!pageResult.success) {
-      issues.push(pageResult.issue);
-    }
-
-    if (!pageSizeResult.success) {
-      issues.push(pageSizeResult.issue);
-    }
-
-    if (issues.length > 0) {
-      return {
-        outcome: "validation_failed",
-        issues,
-      };
-    }
-
-    // After validation both branches succeeded; narrow for TypeScript.
-    if (!pageResult.success || !pageSizeResult.success) {
-      return {
-        outcome: "validation_failed",
-        issues,
-      };
-    }
-
-    const page = pageResult.value;
-    const pageSize = pageSizeResult.value;
-    const offset = (page - 1) * pageSize;
-
-    if (!Number.isSafeInteger(offset)) {
-      return {
-        outcome: "validation_failed",
-        issues: [createPaginationIssue("page")],
-      };
+    if (!pageQuery.success) {
+      return { outcome: "validation_failed", issues: pageQuery.issues };
     }
 
     const repositoryResult = await flightRepository.findPage({
-      limit: pageSize,
-      offset,
+      limit: pageQuery.value.limit,
+      offset: pageQuery.value.offset,
     });
-
-    const totalPages = Math.ceil(
-      repositoryResult.totalItems / pageSize,
-    );
 
     return {
       outcome: "success",
       items: repositoryResult.items,
-      pagination: {
-        page,
-        pageSize,
-        totalItems: repositoryResult.totalItems,
-        totalPages,
-      },
+      pagination: toPagination(pageQuery.value, repositoryResult.totalItems),
     };
   };
 }

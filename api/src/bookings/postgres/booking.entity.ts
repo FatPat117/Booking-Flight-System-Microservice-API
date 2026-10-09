@@ -21,6 +21,9 @@ export class BookingEntity {
   @Column({ type: "uuid", name: "flight_id" })
   flightId!: string;
 
+  @Column({ type: "uuid", name: "owner_account_id" })
+  ownerAccountId!: string;
+
   @Column({ type: "varchar", name: "passenger_name" })
   passengerName!: string;
 

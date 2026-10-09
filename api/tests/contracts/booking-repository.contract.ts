@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type {
   Booking,
+  BookingAccessScope,
   BookingRepository,
 } from "../../src/bookings/booking-repository.js";
 import type { Flight } from "../../src/types.js";
@@ -16,6 +17,10 @@ import type { Flight } from "../../src/types.js";
  * Sequential behavior only. Concurrency (OCC under real parallel writers) is
  * not part of this contract — a single-threaded fake cannot fail it, so it
  * lives in postgres-booking-race.integration.test.ts alone.
+ *
+ * Object-level authorization (Day 44) is part of the contract: a fake that
+ * filters by owner while the Postgres adapter forgets to (e.g. in cancel()'s
+ * follow-up read) would keep every use-case test green and ship a BOLA hole.
  *
  * Not a *.test.ts file: it registers tests only when a runner file calls it.
  */
@@ -42,12 +47,25 @@ function makeFlight(availableSeats: number): Flight {
   };
 }
 
-function makeBooking(flightId: string): Booking {
+const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
+const ACCOUNT_B = "22222222-2222-4222-8222-222222222222";
+const ADMIN: BookingAccessScope = { kind: "admin" };
+
+function ownerScope(accountId: string): BookingAccessScope {
+  return { kind: "owner", accountId };
+}
+
+function makeBooking(
+  flightId: string,
+  ownerAccountId: string = ACCOUNT_A,
+  createdAt = "2026-07-20T00:00:00.000Z",
+): Booking {
   return {
     id: crypto.randomUUID(),
     flightId,
+    ownerAccountId,
     passengerName: "Alice",
-    createdAt: "2026-07-20T00:00:00.000Z",
+    createdAt,
     status: "active",
   };
 }
@@ -70,10 +88,12 @@ export function runBookingRepositoryContract(
 
   async function seedActiveBooking(
     subject: BookingRepositoryContractSubject,
+    ownerAccountId: string = ACCOUNT_A,
+    createdAt?: string,
   ): Promise<Booking> {
     const flight = await seedFlight(subject, 1);
     await subject.repository.reserveSeat(flight.id);
-    const booking = makeBooking(flight.id);
+    const booking = makeBooking(flight.id, ownerAccountId, createdAt);
     await subject.repository.create(booking);
     return booking;
   }
@@ -110,7 +130,7 @@ export function runBookingRepositoryContract(
     const subject = await setup();
     const booking = await seedActiveBooking(subject);
 
-    assert.deepEqual(await subject.repository.cancel(booking.id), {
+    assert.deepEqual(await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A)), {
       outcome: "cancelled",
       flightId: booking.flightId,
     });
@@ -119,9 +139,9 @@ export function runBookingRepositoryContract(
   test(name("cancelling the same booking twice returns already-cancelled"), async () => {
     const subject = await setup();
     const booking = await seedActiveBooking(subject);
-    await subject.repository.cancel(booking.id);
+    await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A));
 
-    assert.deepEqual(await subject.repository.cancel(booking.id), {
+    assert.deepEqual(await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A)), {
       outcome: "already-cancelled",
     });
   });
@@ -129,7 +149,7 @@ export function runBookingRepositoryContract(
   test(name("cancel on an unknown booking returns not-found"), async () => {
     const subject = await setup();
 
-    assert.deepEqual(await subject.repository.cancel(crypto.randomUUID()), {
+    assert.deepEqual(await subject.repository.cancel(crypto.randomUUID(), ADMIN), {
       outcome: "not-found",
     });
   });
@@ -140,5 +160,81 @@ export function runBookingRepositoryContract(
     await assert.rejects(() =>
       subject.repository.create(makeBooking(crypto.randomUUID())),
     );
+  });
+
+  test(name("findById returns the stored booking to its owner"), async () => {
+    const subject = await setup();
+    const booking = await seedActiveBooking(subject, ACCOUNT_A);
+
+    assert.deepEqual(await subject.repository.findById(booking.id, ownerScope(ACCOUNT_A)), booking);
+  });
+
+  test(name("findById hides another account's booking (BR-AUTH-02)"), async () => {
+    const subject = await setup();
+    const bookingOfB = await seedActiveBooking(subject, ACCOUNT_B);
+
+    assert.equal(await subject.repository.findById(bookingOfB.id, ownerScope(ACCOUNT_A)), undefined);
+  });
+
+  test(name("findById with the admin scope sees any account's booking"), async () => {
+    const subject = await setup();
+    const bookingOfB = await seedActiveBooking(subject, ACCOUNT_B);
+
+    assert.deepEqual(await subject.repository.findById(bookingOfB.id, ADMIN), bookingOfB);
+  });
+
+  test(name("cancel of another account's active booking is not-found and leaves it active"), async () => {
+    const subject = await setup();
+    const bookingOfB = await seedActiveBooking(subject, ACCOUNT_B);
+
+    assert.deepEqual(await subject.repository.cancel(bookingOfB.id, ownerScope(ACCOUNT_A)), {
+      outcome: "not-found",
+    });
+    assert.equal((await subject.repository.findById(bookingOfB.id, ADMIN))?.status, "active");
+  });
+
+  test(name("cancel of another account's already-cancelled booking is not-found, not already-cancelled"), async () => {
+    const subject = await setup();
+    const bookingOfB = await seedActiveBooking(subject, ACCOUNT_B);
+    await subject.repository.cancel(bookingOfB.id, ownerScope(ACCOUNT_B));
+
+    assert.deepEqual(await subject.repository.cancel(bookingOfB.id, ownerScope(ACCOUNT_A)), {
+      outcome: "not-found",
+    });
+  });
+
+  test(name("findPage with an owner scope returns only that account's bookings, newest first"), async () => {
+    const subject = await setup();
+    const olderOfA = await seedActiveBooking(subject, ACCOUNT_A, "2026-07-20T00:00:00.000Z");
+    await seedActiveBooking(subject, ACCOUNT_B, "2026-07-21T00:00:00.000Z");
+    const newerOfA = await seedActiveBooking(subject, ACCOUNT_A, "2026-07-22T00:00:00.000Z");
+
+    const page = await subject.repository.findPage(ownerScope(ACCOUNT_A), { limit: 10, offset: 0 });
+
+    assert.deepEqual(page.items.map((b) => b.id), [newerOfA.id, olderOfA.id]);
+    assert.equal(page.totalItems, 2);
+  });
+
+  test(name("findPage applies limit/offset after the scope; totalItems counts the whole scope"), async () => {
+    const subject = await setup();
+    await seedActiveBooking(subject, ACCOUNT_A, "2026-07-20T00:00:00.000Z");
+    const middle = await seedActiveBooking(subject, ACCOUNT_A, "2026-07-21T00:00:00.000Z");
+    await seedActiveBooking(subject, ACCOUNT_A, "2026-07-22T00:00:00.000Z");
+    await seedActiveBooking(subject, ACCOUNT_B, "2026-07-23T00:00:00.000Z");
+
+    const page = await subject.repository.findPage(ownerScope(ACCOUNT_A), { limit: 1, offset: 1 });
+
+    assert.deepEqual(page.items.map((b) => b.id), [middle.id]);
+    assert.equal(page.totalItems, 3);
+  });
+
+  test(name("findPage with the admin scope returns every account's bookings"), async () => {
+    const subject = await setup();
+    await seedActiveBooking(subject, ACCOUNT_A, "2026-07-20T00:00:00.000Z");
+    await seedActiveBooking(subject, ACCOUNT_B, "2026-07-21T00:00:00.000Z");
+
+    const page = await subject.repository.findPage(ADMIN, { limit: 10, offset: 0 });
+
+    assert.equal(page.totalItems, 2);
   });
 }

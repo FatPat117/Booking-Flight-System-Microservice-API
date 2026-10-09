@@ -2,20 +2,27 @@ import type { AuditRecorder } from "../audit/audit-recorder.js";
 import type { OutboxRepository } from "../outbox/outbox-repository.js";
 import { resolveCorrelationId } from "../outbox/resolve-correlation-id.js";
 import type { TransactionRunner } from "../transactions/transaction-runner.js";
-import type { ValidationIssue } from "../types.js";
-import { validateBookingIdParam } from "./booking-validation.js";
-import type { BookingRepository } from "./booking-repository.js";
+import { isUuid, type Actor } from "../types.js";
+import type {
+  BookingAccessScope,
+  BookingRepository,
+} from "./booking-repository.js";
 
 export const BOOKING_CANCELLED_QUEUE = "booking-cancelled";
 
 export type CancelBookingResult =
   | { outcome: "cancelled"; bookingId: string; flightId: string }
-  | { outcome: "validation_failed"; issues: ValidationIssue[] }
   | { outcome: "already-cancelled" }
   | { outcome: "not-found" };
 
+/**
+ * `scope` decides which bookings the caller can reach (out of scope →
+ * not-found, BR-AUTH-02); `actor` is who gets recorded in the audit log.
+ */
 export type CancelBooking = (
   bookingId: string,
+  scope: BookingAccessScope,
+  actor: Actor,
 ) => Promise<CancelBookingResult>;
 
 type CancelBookingDependencies = {
@@ -49,20 +56,17 @@ export function createCancelBooking(
     getCurrentTime,
   } = dependencies;
 
-  return async (bookingIdParam: string): Promise<CancelBookingResult> => {
-    const bookingIdValidation = validateBookingIdParam(bookingIdParam);
-
-    if (!bookingIdValidation.success) {
-      return {
-        outcome: "validation_failed",
-        issues: bookingIdValidation.issues,
-      };
+  return async (
+    bookingId: string,
+    scope: BookingAccessScope,
+    actor: Actor,
+  ): Promise<CancelBookingResult> => {
+    if (!isUuid(bookingId)) {
+      return { outcome: "not-found" };
     }
 
-    const bookingId = bookingIdValidation.value;
-
     return transactionRunner.run(async () => {
-      const cancelResult = await bookingRepository.cancel(bookingId);
+      const cancelResult = await bookingRepository.cancel(bookingId, scope);
 
       if (cancelResult.outcome === "not-found") {
         return { outcome: "not-found" } as const;
@@ -84,8 +88,8 @@ export function createCancelBooking(
         id: generateAuditId(),
         action: "BOOKING_CANCELLED",
         actor: {
-          type: "passenger",
-          id: "anonymous",
+          type: "account",
+          id: actor.accountId,
         },
         target: {
           type: "booking",

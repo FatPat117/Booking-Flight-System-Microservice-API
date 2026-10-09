@@ -17,7 +17,7 @@ function makeInput(overrides: Partial<AuditRecordInput> = {}): AuditRecordInput 
   return {
     id: crypto.randomUUID(),
     action: "FLIGHT_CREATED",
-    actor: { type: "admin_api_key", id: "admin" },
+    actor: { type: "account", id: "aaaaaaaa-0000-4000-8000-000000000001" },
     target: { type: "flight", id: "flight-1" },
     requestId: "request-1",
     occurredAt: "2026-07-20T00:00:00.000Z",
@@ -56,7 +56,7 @@ test("record() inside a transaction inserts a row with metadata as an object", a
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0]?.["action"], "FLIGHT_CREATED");
-  assert.equal(rows[0]?.["actor_type"], "admin_api_key");
+  assert.equal(rows[0]?.["actor_type"], "account");
   assert.equal(rows[0]?.["target_id"], "flight-1");
   assert.equal(typeof rows[0]?.["metadata"], "object");
   assert.deepEqual(rows[0]?.["metadata"], { flightNumber: "VN123" });

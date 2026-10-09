@@ -18,6 +18,7 @@ Personal notes on techniques and mechanisms this project actually uses — writt
 | [outbox-and-relay.md](./outbox-and-relay.md) | Atomic write + async delivery, at-least-once, ordering |
 | [lazy-reconnect-publisher.md](./lazy-reconnect-publisher.md) | RabbitMQ publisher recovering after a broker restart |
 | [domain-model-and-aggregates.md](./domain-model-and-aggregates.md) | Ubiquitous language, entity vs value object, aggregates as consistency boundaries, lifecycles |
+| [object-level-authorization.md](./object-level-authorization.md) | BOLA, ownership scoped inside queries, 404 vs 403, expand → contract for a required column |
 
 Add a row here whenever you add a note.
 

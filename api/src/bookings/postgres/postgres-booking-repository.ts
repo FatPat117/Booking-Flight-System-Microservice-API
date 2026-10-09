@@ -4,11 +4,39 @@ import { FlightEntity } from "../../flights/postgres/flight.entity.js";
 import { resolveEntityManager } from "../../postgres/transaction-context.js";
 import type {
   Booking,
+  BookingAccessScope,
+  BookingPage,
+  BookingPageRequest,
   BookingRepository,
+  BookingStatus,
   CancelBookingRepositoryResult,
   ReserveSeatResult,
 } from "../booking-repository.js";
 import { BookingEntity } from "./booking.entity.js";
+
+/**
+ * Scope as a find-options filter. Every booking read goes through this —
+ * including cancel()'s follow-up read, which would otherwise answer
+ * already-cancelled for another account's booking and confirm it exists
+ * (BR-AUTH-02). cancel()'s UPDATE applies the same scope as an explicit
+ * andWhere, since query-builder conditions are SQL, not find options.
+ */
+function scopeFilter(
+  scope: BookingAccessScope,
+): { ownerAccountId: string } | Record<string, never> {
+  return scope.kind === "owner" ? { ownerAccountId: scope.accountId } : {};
+}
+
+function mapBooking(entity: BookingEntity): Booking {
+  return {
+    id: entity.id,
+    flightId: entity.flightId,
+    ownerAccountId: entity.ownerAccountId,
+    passengerName: entity.passengerName,
+    createdAt: entity.createdAt.toISOString(),
+    status: entity.status as BookingStatus,
+  };
+}
 
 export function createPostgresBookingRepository(
   dataSource: DataSource,
@@ -50,6 +78,7 @@ export function createPostgresBookingRepository(
       const entity = repository.create({
         id: booking.id,
         flightId: booking.flightId,
+        ownerAccountId: booking.ownerAccountId,
         passengerName: booking.passengerName,
         createdAt: new Date(booking.createdAt),
         status: booking.status,
@@ -58,16 +87,52 @@ export function createPostgresBookingRepository(
       await repository.insert(entity);
     },
 
-    async cancel(bookingId: string): Promise<CancelBookingRepositoryResult> {
+    async findById(
+      bookingId: string,
+      scope: BookingAccessScope,
+    ): Promise<Booking | undefined> {
+      const entity = await resolveEntityManager(dataSource)
+        .getRepository(BookingEntity)
+        .findOneBy({ id: bookingId, ...scopeFilter(scope) });
+
+      return entity === null ? undefined : mapBooking(entity);
+    },
+
+    async findPage(
+      scope: BookingAccessScope,
+      request: BookingPageRequest,
+    ): Promise<BookingPage> {
+      const [entities, totalItems] = await resolveEntityManager(dataSource)
+        .getRepository(BookingEntity)
+        .findAndCount({
+          where: scopeFilter(scope),
+          order: { createdAt: "DESC", id: "DESC" },
+          take: request.limit,
+          skip: request.offset,
+        });
+
+      return { items: entities.map(mapBooking), totalItems };
+    },
+
+    async cancel(
+      bookingId: string,
+      scope: BookingAccessScope,
+    ): Promise<CancelBookingRepositoryResult> {
       const manager = resolveEntityManager(dataSource);
 
-      const result = await manager
+      const update = manager
         .createQueryBuilder()
         .update(BookingEntity)
         .set({ status: "cancelled" })
-        .where("id = :id AND status = 'active'", { id: bookingId })
-        .returning(["flightId"])
-        .execute();
+        .where("id = :id AND status = 'active'", { id: bookingId });
+
+      if (scope.kind === "owner") {
+        update.andWhere("owner_account_id = :accountId", {
+          accountId: scope.accountId,
+        });
+      }
+
+      const result = await update.returning(["flightId"]).execute();
 
       if (result.affected === 1) {
         const row = result.raw[0] as { flight_id: string };
@@ -76,6 +141,7 @@ export function createPostgresBookingRepository(
 
       const booking = await manager.getRepository(BookingEntity).findOneBy({
         id: bookingId,
+        ...scopeFilter(scope),
       });
 
       if (booking === null) {

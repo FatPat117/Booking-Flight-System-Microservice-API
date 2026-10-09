@@ -20,6 +20,7 @@ import {
   createInMemoryFlightRepository,
   createInMemoryFlightStore,
   createInMemoryTransactionRunner,
+  createUnusedBookingReads,
   type InMemoryAuditRecorder,
   type InMemoryFlightStore,
 } from "./fakes/in-memory.js";
@@ -160,6 +161,7 @@ function createAppWithRepository(
     createFlight,
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
+    ...createUnusedBookingReads(),
     listFlights,
     logger,
     healthChecks,
@@ -779,7 +781,7 @@ test("POST /api/flights records an audit log when created", async () => {
   const record = records[0];
   assert.ok(record);
   assert.equal(record.action, "FLIGHT_CREATED");
-  assert.deepEqual(record.actor, { type: "admin_api_key", id: "admin" });
+  assert.deepEqual(record.actor, { type: "account", id: "test-user-id" });
   assert.deepEqual(record.target, { type: "flight", id: createdFlightId });
   assert.equal(record.requestId, "audit-request-1");
   assert.deepEqual(record.metadata, {

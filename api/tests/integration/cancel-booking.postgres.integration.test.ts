@@ -17,6 +17,10 @@ import type { Flight } from "../../src/types.js";
  * adapter, same pattern as create-booking.postgres.integration.test.ts.
  */
 
+const OWNER_ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
+const OWNER_SCOPE = { kind: "owner", accountId: OWNER_ACCOUNT_ID } as const;
+const OWNER_ACTOR = { accountId: OWNER_ACCOUNT_ID };
+
 let dataSource: DataSource;
 
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
@@ -71,6 +75,7 @@ test("cancelled then already-cancelled: seat count increases by exactly 1, no ex
   const booking = {
     id: crypto.randomUUID(),
     flightId: flight.id,
+    ownerAccountId: OWNER_ACCOUNT_ID,
     passengerName: "Alice",
     createdAt: "2026-07-20T00:00:00.000Z",
     status: "active" as const,
@@ -79,7 +84,7 @@ test("cancelled then already-cancelled: seat count increases by exactly 1, no ex
 
   const cancelBooking = createUseCase();
 
-  const first = await cancelBooking(booking.id);
+  const first = await cancelBooking(booking.id, OWNER_SCOPE, OWNER_ACTOR);
   assert.deepEqual(first, {
     outcome: "cancelled",
     bookingId: booking.id,
@@ -89,7 +94,7 @@ test("cancelled then already-cancelled: seat count increases by exactly 1, no ex
   const afterFirst = await flightRepository.findById(flight.id);
   assert.equal(afterFirst?.availableSeats, 1);
 
-  const second = await cancelBooking(booking.id);
+  const second = await cancelBooking(booking.id, OWNER_SCOPE, OWNER_ACTOR);
   assert.equal(second.outcome, "already-cancelled");
 
   const afterSecond = await flightRepository.findById(flight.id);
@@ -107,6 +112,6 @@ test("cancelled then already-cancelled: seat count increases by exactly 1, no ex
 test("not-found: resolves not-found for an unknown booking id", async () => {
   const cancelBooking = createUseCase();
 
-  const result = await cancelBooking(crypto.randomUUID());
+  const result = await cancelBooking(crypto.randomUUID(), OWNER_SCOPE, OWNER_ACTOR);
   assert.equal(result.outcome, "not-found");
 });

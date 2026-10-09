@@ -8,6 +8,14 @@ import {
   createCreateBooking,
   type CreateBooking,
 } from "../bookings/create-booking.js";
+import {
+  createGetBooking,
+  type GetBooking,
+} from "../bookings/get-booking.js";
+import {
+  createListBookings,
+  type ListBookings,
+} from "../bookings/list-bookings.js";
 import { createPostgresBookingRepository } from "../bookings/postgres/postgres-booking-repository.js";
 import type { BookingRepository } from "../bookings/booking-repository.js";
 import {
@@ -53,6 +61,8 @@ export type Application = Readonly<{
   createFlight: CreateFlight;
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
+  getBooking: GetBooking;
+  listBookings: ListBookings;
   listFlights: ListFlights;
   healthChecks: HealthChecks;
   close(): Promise<void>;
@@ -142,6 +152,9 @@ export async function createApplication(
     getCurrentTime: () => new Date(),
   });
 
+  const getBooking = createGetBooking({ bookingRepository });
+  const listBookings = createListBookings({ bookingRepository });
+
   const listFlights = createListFlights({
     flightRepository,
   });
@@ -172,6 +185,8 @@ export async function createApplication(
     createFlight,
     createBooking,
     cancelBooking,
+    getBooking,
+    listBookings,
     listFlights,
     healthChecks,
     async close() {

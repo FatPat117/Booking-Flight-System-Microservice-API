@@ -19,6 +19,8 @@ import type { Flight } from "../../src/types.js";
  * one use case that also contends for a shared row (available_seats).
  */
 
+const OWNER_ACTOR = { accountId: "11111111-1111-4111-8111-111111111111" };
+
 let dataSource: DataSource;
 
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
@@ -70,7 +72,7 @@ test("created: writes one booking row, decrements the seat, one audit row, one o
   await flightRepository.create(flight);
 
   const createBooking = createUseCase();
-  const result = await createBooking(flight.id, { passengerName: "Alice" });
+  const result = await createBooking(flight.id, { passengerName: "Alice" }, OWNER_ACTOR);
 
   assert.equal(result.outcome, "created");
   if (result.outcome !== "created") {
@@ -78,8 +80,13 @@ test("created: writes one booking row, decrements the seat, one audit row, one o
   }
 
   const bookingRows = (await dataSource.query(
-    `SELECT id, flight_id, status FROM bookings`,
-  )) as Array<{ id: string; flight_id: string; status: string }>;
+    `SELECT id, flight_id, owner_account_id, status FROM bookings`,
+  )) as Array<{
+    id: string;
+    flight_id: string;
+    owner_account_id: string;
+    status: string;
+  }>;
   const auditRows = await dataSource.query(`SELECT id, target_id FROM audit_logs`);
   const outboxRows = (await dataSource.query(
     `SELECT id, event_type FROM outbox`,
@@ -88,6 +95,7 @@ test("created: writes one booking row, decrements the seat, one audit row, one o
   assert.equal(bookingRows.length, 1);
   assert.equal(bookingRows[0]?.id, result.booking.id);
   assert.equal(bookingRows[0]?.flight_id, flight.id);
+  assert.equal(bookingRows[0]?.owner_account_id, OWNER_ACTOR.accountId);
   assert.equal(bookingRows[0]?.status, "active");
 
   assert.equal(auditRows.length, 1);
@@ -104,7 +112,7 @@ test("sold-out: no booking, audit, or outbox row is written, and the seat count 
   await flightRepository.create(flight);
 
   const createBooking = createUseCase();
-  const result = await createBooking(flight.id, { passengerName: "Alice" });
+  const result = await createBooking(flight.id, { passengerName: "Alice" }, OWNER_ACTOR);
 
   assert.equal(result.outcome, "sold-out");
 
@@ -123,9 +131,11 @@ test("sold-out: no booking, audit, or outbox row is written, and the seat count 
 test("flight-not-found: resolves flight-not-found for an unknown flight id", async () => {
   const createBooking = createUseCase();
 
-  const result = await createBooking(crypto.randomUUID(), {
-    passengerName: "Alice",
-  });
+  const result = await createBooking(
+    crypto.randomUUID(),
+    { passengerName: "Alice" },
+    OWNER_ACTOR,
+  );
 
   assert.equal(result.outcome, "flight-not-found");
 });

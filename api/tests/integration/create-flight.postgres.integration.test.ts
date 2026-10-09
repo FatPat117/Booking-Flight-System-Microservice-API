@@ -25,6 +25,8 @@ import { createPostgresTransactionRunner } from "../../src/transactions/postgres
  * that sequence surfaces here first.
  */
 
+const ADMIN_ACTOR = { accountId: "aaaaaaaa-0000-4000-8000-000000000001" };
+
 let dataSource: DataSource;
 
 function makeRawInput(overrides: Record<string, unknown> = {}) {
@@ -76,7 +78,7 @@ after(async () => {
 test("created: writes exactly one row each to flights, audit_logs, and outbox", async () => {
   const createFlight = createUseCase();
 
-  const result = await createFlight(makeRawInput());
+  const result = await createFlight(makeRawInput(), ADMIN_ACTOR);
 
   assert.equal(result.outcome, "created");
   if (result.outcome !== "created") {
@@ -107,10 +109,10 @@ test("duplicate: second create with the same flightNumber+departureAt resolves d
   const createFlight = createUseCase();
   const input = makeRawInput();
 
-  const first = await createFlight(input);
+  const first = await createFlight(input, ADMIN_ACTOR);
   assert.equal(first.outcome, "created");
 
-  const second = await createFlight(input);
+  const second = await createFlight(input, ADMIN_ACTOR);
   assert.equal(second.outcome, "duplicate");
 
   const flightRows = await dataSource.query(`SELECT id FROM flights`);
@@ -134,7 +136,7 @@ test("mid-transaction failure: an error after the audit write rolls back flights
   const createFlight = createUseCase(throwingAuditRecorder);
 
   await assert.rejects(
-    () => createFlight(makeRawInput()),
+    () => createFlight(makeRawInput(), ADMIN_ACTOR),
     /boom after audit write/,
   );
 

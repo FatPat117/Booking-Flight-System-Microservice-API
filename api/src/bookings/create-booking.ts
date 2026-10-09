@@ -3,11 +3,8 @@ import type { AuditRecorder } from "../audit/audit-recorder.js";
 import type { OutboxRepository } from "../outbox/outbox-repository.js";
 import { resolveCorrelationId } from "../outbox/resolve-correlation-id.js";
 import type { TransactionRunner } from "../transactions/transaction-runner.js";
-import type { ValidationIssue } from "../types.js";
-import {
-  validateCreateBookingInput,
-  validateFlightIdParam,
-} from "./booking-validation.js";
+import { isUuid, type Actor, type ValidationIssue } from "../types.js";
+import { validateCreateBookingInput } from "./booking-validation.js";
 import type { Booking, BookingRepository } from "./booking-repository.js";
 
 export const BOOKING_CREATED_QUEUE = "booking-created";
@@ -18,9 +15,11 @@ export type CreateBookingResult =
   | { outcome: "sold-out" }
   | { outcome: "flight-not-found" };
 
+/** The actor becomes the booking's owner (BR-AUTH-01). */
 export type CreateBooking = (
   flightId: string,
   input: unknown,
+  actor: Actor,
 ) => Promise<CreateBookingResult>;
 
 type CreateBookingDependencies = {
@@ -51,16 +50,12 @@ export function createCreateBooking(
   } = dependencies;
 
   return async (
-    flightIdParam: string,
+    flightId: string,
     input: unknown,
+    actor: Actor,
   ): Promise<CreateBookingResult> => {
-    const flightIdValidation = validateFlightIdParam(flightIdParam);
-
-    if (!flightIdValidation.success) {
-      return {
-        outcome: "validation_failed",
-        issues: flightIdValidation.issues,
-      };
+    if (!isUuid(flightId)) {
+      return { outcome: "flight-not-found" };
     }
 
     const validation = validateCreateBookingInput(input);
@@ -72,7 +67,6 @@ export function createCreateBooking(
       };
     }
 
-    const flightId = flightIdValidation.value;
     const { passengerName } = validation.value;
 
     return transactionRunner.run(async () => {
@@ -90,6 +84,7 @@ export function createCreateBooking(
       const booking: Booking = {
         id: generateId(),
         flightId,
+        ownerAccountId: actor.accountId,
         passengerName,
         createdAt: occurredAt,
         status: "active",
@@ -105,8 +100,8 @@ export function createCreateBooking(
         id: generateAuditId(),
         action: "BOOKING_CREATED",
         actor: {
-          type: "passenger",
-          id: "anonymous",
+          type: "account",
+          id: actor.accountId,
         },
         target: {
           type: "booking",

@@ -82,12 +82,14 @@ Identity (`services/identity`, port `3001`) issues JWTs: `POST /api/identity/reg
 | `GET /api/flights`, `GET /api/flights/:id` | none |
 | `GET /api/whoami` | any valid JWT |
 | `POST /api/flights` | JWT with `role=admin` |
-| `POST /api/flights/:flightId/bookings` | **none — known gap** |
-| `DELETE /api/bookings/:id` | **none — known gap** |
+| `POST /api/flights/:flightId/bookings` | JWT with `role=user` (an admin gets `403`); the booking's owner is the token's `sub` |
+| `GET /api/bookings` | any valid JWT — a user sees their own bookings, an admin sees all |
+| `GET /api/bookings/:id` | any valid JWT — owner or admin |
+| `DELETE /api/bookings/:id` | JWT with `role=user`, owner only |
 
 Promote an account to admin once with `npm run promote-to-admin -- <email>` in the identity workspace, then log in again to get a token carrying the new role.
 
-> **Known gap:** booking endpoints are unauthenticated and bookings have no owner, so anyone who knows a booking id can cancel it. Closing this is the first feature of phase D (see [docs/product/domain-model.md](docs/product/domain-model.md)).
+**Object-level authorization (Day 44).** Checking the role is not enough: a booking id must also belong to the caller. Ownership is enforced inside the repository queries through a `BookingAccessScope` (`owner` or `admin`), on every query of a flow, including the follow-up read that only picks an error. Another account's booking therefore answers exactly like one that does not exist: `404 BOOKING_NOT_FOUND`, never `403` or `409`, so its existence is not revealed (BR-AUTH-02 in [docs/product/domain-model.md](docs/product/domain-model.md)). A malformed id is also `404`.
 
 Booking request:
 
@@ -98,7 +100,7 @@ Content-Type: application/json
 { "passengerName": "Nguyen Van A" }
 ```
 
-Responses: `201` created, `409` sold out, `404` flight not found, `422` validation error. `DELETE /api/bookings/:id` returns `204`, then `409` on a second cancel, `404` for an unknown id.
+Responses: `201` created with `Location: /api/bookings/:id`, `409` sold out, `404` flight not found, `422` validation error. `DELETE /api/bookings/:id` returns `204`, then `409` on the owner's second cancel, `404` for an unknown id or another account's booking. `GET /api/bookings` uses the same `page`/`pageSize` rules as flights, newest first.
 
 Missing/invalid/expired JWT on protected routes returns `401 Unauthorized` with `WWW-Authenticate: Bearer`. A valid JWT with the wrong role returns `403 Forbidden`.
 
@@ -108,13 +110,13 @@ Every successful write records an audit entry in the `audit_logs` table, in the 
 
 | Action | Trigger | Actor recorded today |
 |---|---|---|
-| `FLIGHT_CREATED` | `POST /api/flights` | `admin_api_key` / `admin` (legacy label, see limitations) |
-| `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `passenger` / `anonymous` |
-| `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `passenger` / `anonymous` |
+| `FLIGHT_CREATED` | `POST /api/flights` | `account` / admin's JWT `sub` |
+| `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` |
+| `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` |
 
 Stored fields: audit id, action, actor type and id, target type and id, request id, occurred timestamp, metadata (jsonb).
 
-The actor does not yet identify the individual account: the JWT's `sub` is not recorded, and booking writes have no authenticated user at all.
+Rows written before Day 44 keep their original `admin_api_key/admin` and `passenger/anonymous` actors — the log is append-only.
 
 ## Composition Root (manual DI)
 
@@ -300,8 +302,8 @@ If a critical dependency is unavailable, returns `503 Service Unavailable`.
 Request
   → observability middleware (requestId + logs)
   → express.json / routes
-  → JWT verify + role check (POST /api/flights only)
-  → CreateFlight | ListFlights | findById | CreateBooking | CancelBooking
+  → JWT verify + role check (flight writes, every booking route)
+  → CreateFlight | ListFlights | findById | CreateBooking | CancelBooking | GetBooking | ListBookings
   → TransactionRunner (every write)
       ├── FlightRepository / BookingRepository → Postgres
       ├── AuditRecorder → Postgres audit_logs
@@ -354,9 +356,8 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 
 ## Current limitations
 
-- Booking endpoints are unauthenticated and bookings have no owner (first fix of phase D)
-- `POST .../bookings` returns a `Location` header for a route that does not exist yet (no `GET` for a single booking)
-- Audit actor does not identify the individual account (`admin_api_key` / `passenger anonymous` labels; JWT `sub` not recorded)
+- `owner_account_id` has no foreign key to Identity's accounts (different database by design) — deleting an account does not touch its bookings
+- `GET /api/flights/:id` with a malformed id still reaches Postgres and returns `500` (booking routes were fixed on Day 44)
 - Roles are a single `user` | `admin` claim — no permission tables, no refresh tokens
 - Manual DI only (no DI container)
 - In-process jobs only — duplicate execution if multiple instances run; job intervals hardcoded in the Composition Root; no job timeout

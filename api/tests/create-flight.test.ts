@@ -13,9 +13,11 @@ import {
   type Logger,
 } from "../src/observability/logger.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
-import type { Flight } from "../src/types.js";
+import type { Actor, Flight } from "../src/types.js";
 
 const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
+const ADMIN_ACCOUNT_ID = "aaaaaaaa-0000-4000-8000-000000000001";
+const ADMIN_ACTOR: Actor = { accountId: ADMIN_ACCOUNT_ID };
 
 function createPassthroughTransactionRunner(): TransactionRunner {
   return {
@@ -117,7 +119,7 @@ test("valid input creates a normalized flight via repository", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createFlight(makeValidRawInput());
+  const result = await createFlight(makeValidRawInput(), ADMIN_ACTOR);
 
   assert.equal(result.outcome, "created");
   if (result.outcome !== "created") {
@@ -167,7 +169,7 @@ test("invalid input does not generate ID or call repository", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createFlight({});
+  const result = await createFlight({}, ADMIN_ACTOR);
 
   assert.equal(result.outcome, "validation_failed");
   if (result.outcome !== "validation_failed") {
@@ -194,7 +196,7 @@ test("repository duplicate becomes application duplicate", async () => {
   const { outboxRepository, entries } = createCapturingOutboxRepository();
   const createFlight = createUseCase(repository, auditRecorder, outboxRepository);
 
-  const result = await createFlight(makeValidRawInput());
+  const result = await createFlight(makeValidRawInput(), ADMIN_ACTOR);
   assert.equal(result.outcome, "duplicate");
   assert.deepEqual(records, []);
   assert.deepEqual(entries, []);
@@ -214,7 +216,7 @@ test("ID generator value is passed to repository", async () => {
 
   const createFlight = createUseCase(repository);
 
-  await createFlight(makeValidRawInput());
+  await createFlight(makeValidRawInput(), ADMIN_ACTOR);
   assert.equal(persistedId, "fixed-flight-id");
 });
 
@@ -230,7 +232,7 @@ test("unexpected repository failure is not swallowed", async () => {
   const createFlight = createUseCase(repository);
 
   await assert.rejects(
-    () => createFlight(makeValidRawInput()),
+    () => createFlight(makeValidRawInput(), ADMIN_ACTOR),
     (error: unknown) =>
       error instanceof Error && error.message === "database failure",
   );
@@ -259,7 +261,7 @@ test("records audit log when flight is created", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createFlight(makeValidRawInput());
+  const result = await createFlight(makeValidRawInput(), ADMIN_ACTOR);
 
   assert.equal(result.outcome, "created");
 
@@ -268,8 +270,8 @@ test("records audit log when flight is created", async () => {
       id: "fixed-audit-id",
       action: "FLIGHT_CREATED",
       actor: {
-        type: "admin_api_key",
-        id: "admin",
+        type: "account",
+        id: ADMIN_ACCOUNT_ID,
       },
       target: {
         type: "flight",
@@ -313,7 +315,7 @@ test("does not record audit when validation fails", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createFlight({});
+  const result = await createFlight({}, ADMIN_ACTOR);
 
   assert.equal(result.outcome, "validation_failed");
   assert.equal(repositoryCreateCalls, 0);
@@ -343,7 +345,7 @@ test("does not record audit when flight is duplicate", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createFlight(makeValidRawInput());
+  const result = await createFlight(makeValidRawInput(), ADMIN_ACTOR);
 
   assert.equal(result.outcome, "duplicate");
   assert.deepEqual(records, []);
@@ -377,7 +379,7 @@ test("propagates audit recorder failures", async () => {
   });
 
   await assert.rejects(
-    () => createFlight(makeValidRawInput()),
+    () => createFlight(makeValidRawInput(), ADMIN_ACTOR),
     /audit database failure/,
   );
 });
@@ -414,7 +416,7 @@ test("does not open transaction when validation fails", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createFlight({});
+  const result = await createFlight({}, ADMIN_ACTOR);
 
   assert.equal(result.outcome, "validation_failed");
   assert.equal(transactionCalls, 0);
@@ -452,7 +454,7 @@ test("runs successful create inside a transaction", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createFlight(makeValidRawInput());
+  const result = await createFlight(makeValidRawInput(), ADMIN_ACTOR);
 
   assert.equal(result.outcome, "created");
   assert.equal(transactionCalls, 1);
@@ -474,7 +476,7 @@ test("enqueues flight-created outbox row after successful create", async () => {
     outboxRepository,
   );
 
-  const result = await createFlight(makeValidRawInput());
+  const result = await createFlight(makeValidRawInput(), ADMIN_ACTOR);
   assert.equal(result.outcome, "created");
   assert.equal(entries.length, 1);
   assert.equal(entries[0]?.id, "fixed-outbox-id");
@@ -521,7 +523,7 @@ test("outbox correlationId falls back to eventId when requestId is missing", asy
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const result = await createFlight(makeValidRawInput());
+  const result = await createFlight(makeValidRawInput(), ADMIN_ACTOR);
   assert.equal(result.outcome, "created");
   assert.equal(
     (entries[0]?.payload as { correlationId: string }).correlationId,
@@ -545,7 +547,7 @@ test("does not enqueue outbox row when create is duplicate", async () => {
     outboxRepository,
   );
 
-  const result = await createFlight(makeValidRawInput());
+  const result = await createFlight(makeValidRawInput(), ADMIN_ACTOR);
   assert.equal(result.outcome, "duplicate");
   assert.equal(entries.length, 0);
 });
@@ -566,7 +568,7 @@ test("does not enqueue outbox row when validation fails", async () => {
     outboxRepository,
   );
 
-  const result = await createFlight({});
+  const result = await createFlight({}, ADMIN_ACTOR);
   assert.equal(result.outcome, "validation_failed");
   assert.equal(entries.length, 0);
 });
@@ -597,7 +599,7 @@ test("outbox enqueue failure rolls back with the transaction", async () => {
   );
 
   await assert.rejects(
-    () => createFlight(makeValidRawInput()),
+    () => createFlight(makeValidRawInput(), ADMIN_ACTOR),
     /outbox write failed/,
   );
 });

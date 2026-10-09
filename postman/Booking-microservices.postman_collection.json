@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Booking Microservices (Day 40)",
-    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31–34: Identity JWT + role; POST /api/flights requires admin JWT\n- Day 35–40: api + identity run on Postgres (booking_db / identity_db); /ready checks Postgres\n\nImport together with Booking-microservices.local.postman_environment.json.\nServices: api http://localhost:3000, identity http://localhost:3001.\nFlow: register -> promote-to-admin (CLI) -> login (sets accessToken, role=admin) -> create flight -> booking.",
+    "name": "Booking Microservices (Day 44)",
+    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31–34: Identity JWT + role; POST /api/flights requires admin JWT\n- Day 35–40: api + identity run on Postgres (booking_db / identity_db); /ready checks Postgres\n\nImport together with Booking-microservices.local.postman_environment.json.\nServices: api http://localhost:3000, identity http://localhost:3001.\nFlow: register -> promote-to-admin (CLI) -> login (sets accessToken, role=admin) -> create flight -> booking.\n- Day 44: booking ownership — JWT on every booking route, GET /api/bookings(/:id), BOLA folder",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -27,6 +27,10 @@
     },
     {
       "key": "userAccessToken",
+      "value": ""
+    },
+    {
+      "key": "userBAccessToken",
       "value": ""
     }
   ],
@@ -282,7 +286,7 @@
     },
     {
       "name": "Bookings",
-      "description": "Public (no JWT). Day 26 create booking, Day 28 cancel. Day 29: x-request-id -> correlationId on booking.created.\nDay 39–40: seat reserve/release is atomic in Postgres (no overselling under concurrency).",
+      "description": "Day 44: every booking route needs a JWT. Create/cancel need role=user (admins get 403); the booking's owner is the token's sub. Another account's booking answers 404 exactly like a missing one.\nRun Identity → login bob first (saves userAccessToken). Day 29: x-request-id -> correlationId on booking.created.",
       "item": [
         {
           "name": "POST /api/flights/:flightId/bookings",
@@ -311,6 +315,11 @@
             "method": "POST",
             "header": [
               {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}",
+                "description": "Day 44: booking routes need a role=user JWT (bob)"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               },
@@ -325,7 +334,7 @@
               "raw": "{\n  \"passengerName\": \"Alice Nguyen\"\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
-            "description": "Public (no admin key).\n201 created | 409 sold-out | 404 flight-not-found | 422 validation.\nSaves {{bookingId}}. Wait ~5s → booking_created_consumed with same correlationId."
+            "description": "role=user JWT (bob). Owner = token sub.\n201 created (Location: /api/bookings/:id) | 409 sold-out | 404 flight-not-found | 422 validation | 401 no token | 403 admin token.\nSaves {{bookingId}}. Wait ~5s → booking_created_consumed with same correlationId."
           },
           "response": []
         },
@@ -334,6 +343,11 @@
           "request": {
             "method": "POST",
             "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}",
+                "description": "Day 44: booking routes need a role=user JWT (bob)"
+              },
               {
                 "key": "Content-Type",
                 "value": "application/json"
@@ -358,6 +372,11 @@
             "method": "POST",
             "header": [
               {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}",
+                "description": "Day 44: booking routes need a role=user JWT (bob)"
+              },
+              {
                 "key": "Content-Type",
                 "value": "application/json"
               },
@@ -376,10 +395,45 @@
           "response": []
         },
         {
+          "name": "GET /api/bookings (my bookings)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings?page=1&pageSize=20",
+            "description": "Day 44: the caller's own bookings, newest first, same pagination as flights. An admin token lists every account's bookings."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/bookings/:id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
+            "description": "Day 44: 200 for the owner (or an admin). Another account or an unknown/malformed id → 404 BOOKING_NOT_FOUND."
+          },
+          "response": []
+        },
+        {
           "name": "DELETE /api/bookings/:id",
           "request": {
             "method": "DELETE",
             "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}",
+                "description": "Day 44: booking routes need a role=user JWT (bob)"
+              },
               {
                 "key": "x-request-id",
                 "value": "{{requestId}}"
@@ -396,6 +450,11 @@
             "method": "DELETE",
             "header": [
               {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}",
+                "description": "Day 44: booking routes need a role=user JWT (bob)"
+              },
+              {
                 "key": "x-request-id",
                 "value": "{{requestId}}-cancel-again"
               }
@@ -404,6 +463,202 @@
             "description": "Run after a successful DELETE. Expect 409 BOOKING_ALREADY_CANCELLED."
           },
           "response": []
+        }
+      ]
+    },
+    {
+      "name": "Day 44 — Booking ownership (BOLA)",
+      "description": "Prerequisites: login bob (userAccessToken) and carol (userBAccessToken), an admin accessToken, create a flight, then POST a booking as bob (saves bookingId).\nEvery request below must be refused without revealing whether bob's booking exists.",
+      "item": [
+        {
+          "name": "GET bob's booking as carol → 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userBAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
+            "description": "Same 404 body as an unknown id (BR-AUTH-02)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));",
+                  "pm.test('BOOKING_NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('BOOKING_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE bob's booking as carol → 404",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userBAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
+            "description": "Bob's booking stays active. Also 404 (never 409) after bob has cancelled it."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));",
+                  "pm.test('BOOKING_NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('BOOKING_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/bookings as carol → none of bob's",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userBAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings",
+            "description": "Only carol's own bookings."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET bob's booking as admin → 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
+            "description": "Admins read every booking (BR-AUTH-03)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking as admin → 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
+            "description": "Admins do not book on someone's behalf (BR-AUTH-03).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengerName\": \"Alice Nguyen\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));",
+                  "pm.test('FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE booking as admin → 403",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
+            "description": "Admins cancel only through flight cancellation."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));",
+                  "pm.test('FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/bookings without token → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/bookings",
+            "description": "Every booking route requires a JWT."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));",
+                  "pm.test('MISSING_TOKEN', () => pm.expect(pm.response.json().error.code).to.eql('MISSING_TOKEN'));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -497,6 +752,11 @@
           "request": {
             "method": "POST",
             "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}",
+                "description": "Day 44: booking routes need a role=user JWT (bob)"
+              },
               {
                 "key": "Content-Type",
                 "value": "application/json"
@@ -714,6 +974,60 @@
               }
             }
           ]
+        },
+        {
+          "name": "POST /api/identity/register (second user: carol)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"carol@example.com\",\n  \"password\": \"secret123\"\n}"
+            },
+            "description": "Day 44: a second role=user account, used to show one user cannot see or cancel another's booking."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/identity/login (second user: carol)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"carol@example.com\",\n  \"password\": \"secret123\"\n}"
+            },
+            "description": "Saves userBAccessToken (role=user)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  if (body.accessToken) {",
+                  "    pm.environment.set('userBAccessToken', body.accessToken);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -831,11 +1145,16 @@
             "method": "DELETE",
             "header": [
               {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
                 "key": "x-request-id",
                 "value": "{{requestId}}-missing-booking"
               }
             ],
-            "url": "{{baseUrl}}/api/bookings/missing-booking-id"
+            "url": "{{baseUrl}}/api/bookings/missing-booking-id",
+            "description": "Day 44: malformed id → 404 BOOKING_NOT_FOUND (not a Postgres 500)."
           },
           "response": []
         },

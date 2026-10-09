@@ -85,7 +85,7 @@ When Flight and Booking become separate services with separate databases, "hold 
 |---|---|---|---|---|
 | — | `SCHEDULED` | Admin (US-FLT-01) | BR-FLT-01/02/03/04 | One FlightSeat per Seat, all `AVAILABLE`; `flight-created` |
 | `SCHEDULED` | `OPEN` | Admin (US-FLT-02) | Departure more than 1 h away | Bookable |
-| `OPEN` | `CLOSED` | System job (US-OPS-02) | Now ≥ departure − 1 h (BR-FLT-06) | No new holds; existing holds may still be paid until they expire |
+| `OPEN` | `CLOSED` | System job (US-OPS-02) | Now ≥ departure − 1 h (BR-FLT-06) | No new holds; existing holds may still be paid until they expire (BR-PAY-06) |
 | `CLOSED` | `DEPARTED` | System job | Now ≥ departure | Remaining `HELD` bookings expire |
 | `SCHEDULED` / `OPEN` / `CLOSED` | `CANCELLED` | Admin (US-OPS-01) | Not departed | Every `HELD`/`CONFIRMED` booking → `CANCELLED` (reason `FLIGHT_CANCELLED`, ignores BR-BOOK-06); one `booking-cancelled` per booking; `flight-cancelled` |
 
@@ -113,7 +113,7 @@ When Flight and Booking become separate services with separate databases, "hold 
 | From | To | Triggered by | Condition | Side effects |
 |---|---|---|---|---|
 | — | `HELD` | User (US-BOOK-01) | BR-BOOK-01/02, BR-FLT-06, BR-SEAT-02 | Seats `HELD`; `holdExpiresAt` = now + 15 min; `booking-created` |
-| `HELD` | `CONFIRMED` | Payment succeeds (US-PAY-01) | `status = 'HELD'` **and** `holdExpiresAt > now` | Seats `BOOKED`; `booking-confirmed` |
+| `HELD` | `CONFIRMED` | Payment succeeds (US-PAY-01) | `status = 'HELD'` **and** `holdExpiresAt > now`; flight `OPEN` or `CLOSED` (BR-PAY-06) | Seats `BOOKED`; `booking-confirmed` |
 | `HELD` | `EXPIRED` | System job (US-SEAT-02) | `status = 'HELD'` **and** `holdExpiresAt ≤ now` | Seats `AVAILABLE`; `booking-expired` |
 | `HELD` | `CANCELLED` | Owner (US-BOOK-05) or flight cancellation | — | Seats `AVAILABLE`; `booking-cancelled` |
 | `CONFIRMED` | `CANCELLED` | Owner (US-BOOK-05) | Departure more than 24 h away (BR-BOOK-06) | Seats `AVAILABLE`; `booking-cancelled` |
@@ -169,9 +169,12 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 | **BR-PAY-03** | The payment amount and currency must equal the booking total. | — |
 | **BR-PAY-04** | Only a `HELD` booking whose hold has not expired can be paid. | — |
 | **BR-PAY-05** | A booking has at most one `SUCCEEDED` payment. | — |
-| **BR-AUTH-01** | Creating a booking requires a `user` JWT; the booking's owner is the token's `sub`. | — (no auth today) |
-| **BR-AUTH-02** | A booking that exists but belongs to another account is answered exactly like one that does not exist: `404 BOOKING_NOT_FOUND`. | — |
-| **BR-AUTH-03** | Admins can read every booking and the manifest, but do not create or pay bookings on someone's behalf. | — |
+| **BR-PAY-06** | A hold that is still valid can be paid after sales close (flight `CLOSED`), until the hold expires. Sales closing stops **new** holds only. | — |
+| **BR-AUTH-01** | Creating a booking requires a `user` JWT; the booking's owner is the token's `sub`. | ✅ Day 44 |
+| **BR-AUTH-02** | A booking that exists but belongs to another account is answered exactly like one that does not exist: `404 BOOKING_NOT_FOUND`. | ✅ Day 44 — scope in every query |
+| **BR-AUTH-03** | Admins can read every booking and the manifest, but do not create or pay bookings on someone's behalf. | ✅ Day 44 (bookings; manifest later) |
+
+**Why paying after sales close is allowed (BR-PAY-06).** The customer held the seats while the flight was still open, so refusing payment minutes later would take away seats they were promised. The risk is bounded: a hold lasts at most 15 minutes and sales close 1 hour before departure, so every payable hold ends at least 45 minutes before take-off. Cancelling a `HELD` booking is likewise never time-restricted (BR-BOOK-06 applies to `CONFIRMED` only), because nothing has been paid and releasing seats early only helps other customers.
 
 **Why `404`, not `403`, for someone else's booking (BR-AUTH-02).** `403` confirms that the id exists. Combined with guessable references, that lets anyone probe which bookings exist. This is the same enumeration problem Day 32 avoided by giving one error for "no such email" and "wrong password". `404` costs nothing: the owner never sees it, and to everyone else the booking does not exist.
 
@@ -194,7 +197,7 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 
 | Area | Today | Target | Breaking? |
 |---|---|---|---|
-| Booking ownership | No owner; `POST …/bookings` and `DELETE /api/bookings/:id` need no token | `ownerAccountId` from JWT `sub`; owner-only access with `404` | **Yes**: API now requires a token; existing rows have no owner |
+| Booking ownership | ✅ Done on Day 44: `owner_account_id`, owner-scoped queries, `404` for other accounts | — | — |
 | Passengers | `bookings.passenger_name` free text, one per booking | `BookingPassenger` rows, 1–9 per booking, first/last name | **Yes**: column replaced by a table; request body changes |
 | Seat inventory | `flights.available_seats` counter; `reserveSeat`/`releaseSeat` | `FlightSeat` rows; availability derived (Decision 3) | **Yes**: counter removed; `BookingRepository` port changes |
 | Airports / aircraft | `origin`/`destination` free 3-letter text; no aircraft | FK to `airports`; `aircraft_id` FK; layouts | **Yes**: new required columns on `flights` |
@@ -203,8 +206,8 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 | Price | One `price_in_cents` per flight; `VND` or `USD` | `Money` per fare class; `VND` only; snapshot on booking | **Yes**: column rename/split; `USD` dropped |
 | Booking reference | None (UUID only) | 6-char unique reference | No (additive) |
 | Payment | None | `payments` table, Idempotency-Key | No (additive) |
-| Audit actor | `admin_api_key/admin`, `passenger/anonymous` | `account/<sub>` with role | No (new values; old rows stay as written) |
-| `Location` after booking | Points to a route that does not exist | `GET /api/bookings/:id` exists | No (fix) |
+| Audit actor | ✅ Done on Day 44: `account/<sub>` for flight and booking writes | — | — |
+| `Location` after booking | ✅ Fixed on Day 44 (`GET /api/bookings/:id`) | — | — |
 
 **Existing data.** As decided on Day 35 for the Postgres migration, dev data is disposable: phase-D migrations may reset `booking_db` and new tables start empty. For a real system with live bookings, every **Breaking** row above would instead be an expand → backfill → contract migration:
 - add the new column or table alongside the old one;
