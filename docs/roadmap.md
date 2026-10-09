@@ -52,18 +52,12 @@ These carry over unchanged into every phase:
 
 **D. Complete domain inside `api`** (Day 43 → around Day 65)
 
-- Day 43: define the product scope and the domain model (no code).
-- Airports and aircraft.
-- Flight schedule, flight status lifecycle, flight search.
-- Seat map, seat selection, time-limited seat holds.
-- Bookings:
-  - multi-passenger bookings with a PNR code
-  - booking lifecycle and ownership rules
-  - cancellation policy
-  - seat change
-- Simulated payment with `Idempotency-Key`.
-- Cascading cancellation when a flight is cancelled.
-- Admin operations.
+Turn the thin flight/booking CRUD into a real booking system: airports and aircraft with seat layouts, a flight lifecycle, per-flight seat inventory with time-limited holds, multi-passenger bookings with owners and references, simulated payment with `Idempotency-Key`, cancellation policy, flight search, cascading flight cancellation, admin reports.
+
+Defined on Day 43 — this roadmap does not repeat it:
+
+- What is in and out of scope (stories, [Won't](./product/scope.md#wont)): [product/scope.md](./product/scope.md)
+- Model, rules, permissions, and the **step-by-step order of phase D** with the reason for each position: [product/domain-model.md](./product/domain-model.md#phase-d-order)
 
 **E. CQRS + Mediator + Vertical Slice + DI container (tsyringe)**
 

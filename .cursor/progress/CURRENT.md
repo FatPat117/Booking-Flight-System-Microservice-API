@@ -1,39 +1,38 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 42B
-**Current day:** Day 42B — new roadmap locked in, docs synced to it (no code)
-**Status:** Closed — the roadmap now lives in one place, [`docs/roadmap.md`](../../docs/roadmap.md);
-`CLAUDE.md`, README, `docs/architecture-overview.md`, `.cursor/progress/ROADMAP.md` and
-`learning-philosophy.mdc` only summarize and link to it. The order change (domain first, CQRS
-later) is recorded as ADR-007. `CLAUDE.md`'s stale "Quick snapshot" (still Day 19) was removed
-and its Code organization / testing sections were corrected for Day 41 (no more `sqlite-*`).
+**Last completed day:** Day 43
+**Current day:** Day 43 — product scope + domain model for phase D (no code)
+**Status:** Closed — [`docs/product/scope.md`](../../docs/product/scope.md) (actors, glossary,
+22 user stories, Won't) and [`docs/product/domain-model.md`](../../docs/product/domain-model.md)
+(aggregates, lifecycles, 30 coded business rules, permissions, gap vs current code, phase-D
+order) written. README cleaned of day-stamped headings and stale content. Roadmap phase D
+links to both files. No product code touched.
 
-**Roadmap change:** the old "Group C — CQRS + Mediator assessment on Day 43" is gone. Phase D
-(complete the domain inside `api`) comes first; the CQRS/Mediator assessment now opens phase E.
-
-## Day 42B delivered
+## Day 43 delivered
 
 ```text
-Step 1: grep inventory of every place describing the old roadmap (9
-  locations: 7 fixed, 2 left as historical day logs) — DAY-42B.md
-Step 2: docs/roadmap.md — goal, principles, definition of "complete",
-  standing disciplines, phases A/B (done) and D–H, deferred decisions,
-  roadmap history with the evidence behind each change
-Step 3: ADR-007 (domain before advanced patterns) with four real costs
-Step 4: CLAUDE.md, CURRENT.md, README, architecture overview,
-  ROADMAP.md, learning-philosophy.mdc turned into summaries + links;
-  no product code touched
+Step 0: README — headings without days; auth/audit/compose/messaging/
+  limitations corrected against app.ts; booking endpoints flagged as an
+  unauthenticated known gap; broken Location header noted
+Steps 1–2, 7: scope.md — actors, glossary (Seat vs FlightSeat, Account vs
+  Passenger), 22 stories with MoSCoW and failure criteria, 12 Won't items
+Steps 3–6: domain-model.md — seat inventory on the Flight side,
+  all-or-nothing holds, derived availability, price snapshots, VND only,
+  404 for other accounts' bookings, payment-vs-expiry race, 7 breaking
+  changes listed, 10-step phase-D order
 ```
 
-## Previous day (Day 42) recap
+## Previous day (Day 42B) recap
 
 ```text
-identity moved off the Postgres cluster superuser (dedicated NOSUPERUSER
-role, REVOKE CONNECT both directions, not-superuser integration test per
-service); Group B (Day 31 → 42) closed with a retrospective.
+Roadmap moved to a single source (docs/roadmap.md); ADR-007 records domain
+before CQRS/Mediator; CLAUDE.md, README, overview, ROADMAP.md and the
+learning-philosophy rule turned into summaries + links.
 ```
 
 ## Next
 
-Day 43 — Define the product scope and the domain model (no code): the first day of phase D in
-[`docs/roadmap.md`](../../docs/roadmap.md).
+Day 44 — Booking ownership (phase D step 1): booking endpoints require a `user` JWT, the
+booking's owner is the token's `sub`, owners list/view only their own bookings, and another
+account's booking answers `404` (BR-AUTH-01/02, US-BOOK-02/03 in
+[`docs/product/domain-model.md`](../../docs/product/domain-model.md#phase-d-order)).

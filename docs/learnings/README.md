@@ -17,6 +17,7 @@ Personal notes on techniques and mechanisms this project actually uses — writt
 | [request-tracing-with-async-local-storage.md](./request-tracing-with-async-local-storage.md) | `requestId`, `AsyncLocalStorage`, `correlationId` across services |
 | [outbox-and-relay.md](./outbox-and-relay.md) | Atomic write + async delivery, at-least-once, ordering |
 | [lazy-reconnect-publisher.md](./lazy-reconnect-publisher.md) | RabbitMQ publisher recovering after a broker restart |
+| [domain-model-and-aggregates.md](./domain-model-and-aggregates.md) | Ubiquitous language, entity vs value object, aggregates as consistency boundaries, lifecycles |
 
 Add a row here whenever you add a note.
 
