@@ -8,6 +8,7 @@ import { createCreateBooking } from "../src/bookings/create-booking.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
+import { createGetFlight } from "../src/flights/get-flight.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
@@ -17,6 +18,7 @@ import {
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
+  createUnusedReferenceData,
 } from "./fakes/in-memory.js";
 
 
@@ -109,11 +111,12 @@ function createTestContext() {
   const { logger, entries } = createMemoryLogger();
 
   const app = createApp({
-    flightRepository,
+    getFlight: createGetFlight({ flightRepository }),
     createFlight,
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
+    ...createUnusedReferenceData(),
     listFlights,
     logger,
     healthChecks: createInMemoryHealthChecks(),
@@ -245,11 +248,12 @@ test("logs unexpected errors with request id without leaking them to client", as
   const { logger, entries } = createMemoryLogger();
 
   const app = createApp({
-    flightRepository: failingRepository,
+    getFlight: createGetFlight({ flightRepository: failingRepository }),
     createFlight,
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
+    ...createUnusedReferenceData(),
     listFlights,
     logger,
     healthChecks: {

@@ -18,10 +18,10 @@ This document describes the **target** model for phase D, not what the code does
 
 | Entity | Key attributes |
 |---|---|
-| `Airport` | `code` (IATA, natural key), `name`, `city` |
+| `Airport` | `id`, `code` (IATA, unique), `name`, `city`, `timeZone` (IANA name) |
 | `Aircraft` | `id`, `registration`, `model` |
 | `Seat` | `aircraftId`, `position: SeatPosition`, `fareClass` |
-| `Flight` | `id`, `flightNumber`, `originCode`, `destinationCode`, `aircraftId`, `departureAt`, `arrivalAt`, `status`, `fares: { ECONOMY: Money, BUSINESS: Money }` |
+| `Flight` | `id`, `flightNumber`, `originAirportId`, `destinationAirportId`, `aircraftId`, `departureAt`, `arrivalAt`, `status`, `fares: { ECONOMY: Money, BUSINESS: Money }` |
 | `FlightSeat` | `id`, `flightId`, `position`, `fareClass`, `status`, `bookingId?` (no version column: `status` itself is the OCC guard, ADR-004) |
 | `Booking` | `id`, `reference`, `flightId`, `ownerAccountId`, `status`, `total: Money`, `holdExpiresAt`, `createdAt` |
 | `BookingPassenger` | `bookingId`, `firstName`, `lastName`, `flightSeatId`, `fareClass`, `price: Money` (snapshot) |
@@ -50,8 +50,8 @@ An aggregate is the set of data that must be consistent **together, immediately*
 
 | Aggregate (root) | Contains | Invariants it protects |
 |---|---|---|
-| **Airport** | Airport | Code is 3 uppercase letters and unique (BR-REF-01) |
-| **Aircraft** | Aircraft + its Seats | Registration unique (BR-REF-02); seat positions unique, every seat has a fare class (BR-REF-03) |
+| **Airport** | Airport | Code is 3 uppercase letters and unique (BR-REF-01); time zone is a valid IANA name (BR-REF-04) |
+| **Aircraft** | Aircraft + its Seats | Registration unique (BR-REF-02); seat positions unique, every seat has a fare class (BR-REF-03); layout is bounded (BR-REF-06) |
 | **Flight** | Flight + its FlightSeats (seat inventory) | Arrival after departure, origin ≠ destination (BR-FLT-01/02); status follows the lifecycle (BR-FLT-05); **a FlightSeat is held or booked by at most one active Booking** (BR-SEAT-01); a multi-seat hold is all-or-nothing (BR-SEAT-02) |
 | **Booking** | Booking + BookingPassengers | Owned by exactly one account (BR-AUTH-01); 1–9 passengers, one distinct seat each (BR-BOOK-01/02); prices are a snapshot taken at hold time (BR-BOOK-03); status follows the lifecycle |
 | **Payment** | Payment | One idempotency key ⇒ one payment (BR-PAY-01/02); amount equals the booking total (BR-PAY-03) |
@@ -72,6 +72,15 @@ Today `flights.available_seats` is the inventory. Once FlightSeats exist, a stor
 
 **5. One currency (VND), stored as integer minor units.**
 VND has no subunit in practice, so `amountMinor` is whole đồng. `Money` still carries `currency`, so a second currency later means new data plus conversion rules, not a schema redesign. Multiple currencies are in [Won't](./scope.md#wont).
+
+**6. Airports get a surrogate key; the IATA code is a unique business identifier (Day 45).**
+IATA codes are short and readable, but they are reassigned when an airport closes and occasionally changed. As a primary key referenced by every flight, a changed code would mean rewriting those references. A `uuid` key never changes; `code` stays unique and is how people and the API refer to an airport. Flights reference `originAirportId`/`destinationAirportId` from phase D step 3.
+
+**7. An airport stores an IANA time-zone name, never an offset (Day 45).**
+`+07:00` is an offset at one moment; `Europe/London` is `+00:00` in winter and `+01:00` in summer. Instants stay in UTC (`timestamptz`); local times are computed from the zone when needed (e.g. "flights on 2026-11-10" in search means the origin's local date). The name is validated on **write** only: stored rows are never re-validated on read, so a Node upgrade that renames or aliases a zone cannot turn existing data invalid.
+
+**8. A seat layout is a template; flights snapshot it (Day 45).**
+Seats belong to the aircraft and have no status. When a flight is scheduled it gets its own FlightSeats copied from the layout (BR-SEAT-03), so a later layout change cannot alter seats already sold, the same reasoning as price snapshots (Decision 4). Seats are stored one row each (`seats`, primary key `aircraft_id, row, letter`) so the database itself rejects a duplicate position (BR-REF-03) and step 4 can generate FlightSeats with one `INSERT … SELECT`.
 
 ### What happens to these boundaries in phase F
 
@@ -143,9 +152,12 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 | ID | Rule | Existing |
 |---|---|---|
 | **BR-MONEY-01** | Amounts are integers in minor units with a currency code; the only accepted currency is `VND`. | Partly — `priceInCents` integer; `VND`/`USD` both accepted |
-| **BR-REF-01** | An airport code is exactly 3 uppercase letters and unique. | Format only (`flights.origin` text) |
-| **BR-REF-02** | An aircraft registration is unique. | — |
-| **BR-REF-03** | Seat positions are unique within a layout, and every seat has a fare class. | — |
+| **BR-REF-01** | An airport code is exactly 3 uppercase letters and unique. | ✅ Day 45: normalized + validation, `UQ_airports_code` + `CHECK` |
+| **BR-REF-02** | An aircraft registration is unique. | ✅ Day 45: normalized, `UQ_aircraft_registration` |
+| **BR-REF-03** | Seat positions are unique within a layout, and every seat has a fare class. | ✅ Day 45: `expandSeatLayout` + `PK_seats`, fare class `CHECK` |
+| **BR-REF-04** | An airport's time zone is a valid IANA name (`Asia/Ho_Chi_Minh`), never an offset. Checked when written, not when read. | ✅ Day 45: `isIanaTimeZone` on write |
+| **BR-REF-05** | A seat layout has no edit endpoint. If one is added, it may only change an aircraft no flight references yet; flights already scheduled keep their FlightSeats (BR-SEAT-03). | ✅ Day 45: no edit route exists |
+| **BR-REF-06** | A layout has 1–10 cabins, rows 1–99, 1–10 distinct letters `A`–`K` per cabin, no row in two cabins, and at most 900 seats (the A380 is certified for 853). The total is computed from the input **before** seats are generated. | ✅ Day 45: `expandSeatLayout`, row/letter `CHECK` |
 | **BR-FLT-01** | Arrival is after departure. | ✅ validation + `CHECK` |
 | **BR-FLT-02** | Origin and destination differ. | ✅ validation + `CHECK` |
 | **BR-FLT-03** | An aircraft never operates two flights whose `[departureAt, arrivalAt)` windows overlap. | — (concurrent admins can race; needs a DB-level guard, e.g. an exclusion constraint) |
@@ -200,7 +212,7 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 | Booking ownership | ✅ Done on Day 44: `owner_account_id`, owner-scoped queries, `404` for other accounts | — | — |
 | Passengers | `bookings.passenger_name` free text, one per booking | `BookingPassenger` rows, 1–9 per booking, first/last name | **Yes**: column replaced by a table; request body changes |
 | Seat inventory | `flights.available_seats` counter; `reserveSeat`/`releaseSeat` | `FlightSeat` rows; availability derived (Decision 3) | **Yes**: counter removed; `BookingRepository` port changes |
-| Airports / aircraft | `origin`/`destination` free 3-letter text; no aircraft | FK to `airports`; `aircraft_id` FK; layouts | **Yes**: new required columns on `flights` |
+| Airports / aircraft | Day 45: `airports`, `aircraft`, `seats` exist (US-REF-01/02/03). Flights still use free 3-letter `origin`/`destination` and no aircraft | `flights` reference `airports` and `aircraft` (step 3) | **Yes**: new required columns on `flights` |
 | Flight status | None (every flight is bookable) | `SCHEDULED/OPEN/CLOSED/DEPARTED/CANCELLED` | **Yes**: new column; existing flights need a status |
 | Booking status | `active` / `cancelled` (lowercase) | `HELD/CONFIRMED/EXPIRED/CANCELLED` | **Yes**: value set and `CHECK` change; `active` ≈ `CONFIRMED` |
 | Price | One `price_in_cents` per flight; `VND` or `USD` | `Money` per fare class; `VND` only; snapshot on booking | **Yes**: column rename/split; `USD` dropped |

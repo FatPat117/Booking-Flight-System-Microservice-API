@@ -7,6 +7,7 @@ import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
+import { createGetFlight } from "../src/flights/get-flight.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import type { BookingRepository } from "../src/bookings/booking-repository.js";
 import type { HealthChecks } from "../src/health/health-checks.js";
@@ -18,6 +19,7 @@ import {
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
+  createUnusedReferenceData,
 } from "./fakes/in-memory.js";
 
 
@@ -84,11 +86,12 @@ function createTestContext() {
   const healthChecks = createInMemoryHealthChecks();
 
   const app = createApp({
-    flightRepository,
+    getFlight: createGetFlight({ flightRepository }),
     createFlight,
     createBooking: createTestCreateBooking(bookingRepository),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
+    ...createUnusedReferenceData(),
     listFlights,
     logger: createMemoryLogger(),
     healthChecks,
@@ -175,11 +178,12 @@ test("GET /ready returns 503 when database is unavailable", async () => {
   };
 
   const app = createApp({
-    flightRepository,
+    getFlight: createGetFlight({ flightRepository }),
     createFlight,
     createBooking: createTestCreateBooking(bookingRepository),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
+    ...createUnusedReferenceData(),
     listFlights,
     logger: createMemoryLogger(),
     healthChecks: unhealthyHealthChecks,

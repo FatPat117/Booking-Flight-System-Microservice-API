@@ -2,6 +2,9 @@ import "reflect-metadata";
 
 import { DataSource } from "typeorm";
 
+import { AircraftEntity } from "../aircraft/postgres/aircraft.entity.js";
+import { SeatEntity } from "../aircraft/postgres/seat.entity.js";
+import { AirportEntity } from "../airports/postgres/airport.entity.js";
 import { AuditEntity } from "../audit/postgres/audit.entity.js";
 import { BookingEntity } from "../bookings/postgres/booking.entity.js";
 import { FlightEntity } from "../flights/postgres/flight.entity.js";
@@ -13,6 +16,7 @@ import { CreateAuditLogs1790432350000 } from "./migrations/1790432350000-CreateA
 import { CreateBookings1790436000000 } from "./migrations/1790436000000-CreateBookings.js";
 import { AddBookingOwner1790440000000 } from "./migrations/1790440000000-AddBookingOwner.js";
 import { RequireBookingOwner1790443600000 } from "./migrations/1790443600000-RequireBookingOwner.js";
+import { CreateAirportsAndAircraft1790447200000 } from "./migrations/1790447200000-CreateAirportsAndAircraft.js";
 
 /**
  * Day 36+ — dev-complete only. Entities/migrations are added per Strangler
@@ -30,7 +34,15 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
     database: config.database,
     // Never true outside throwaway local experiments — migrations own schema.
     synchronize: false,
-    entities: [FlightEntity, OutboxEntity, AuditEntity, BookingEntity],
+    entities: [
+      FlightEntity,
+      OutboxEntity,
+      AuditEntity,
+      BookingEntity,
+      AirportEntity,
+      AircraftEntity,
+      SeatEntity,
+    ],
     migrations: [
       CreateFlights1790424994000,
       CreateOutbox1790428672000,
@@ -38,6 +50,7 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
       CreateBookings1790436000000,
       AddBookingOwner1790440000000,
       RequireBookingOwner1790443600000,
+      CreateAirportsAndAircraft1790447200000,
     ],
   });
 }

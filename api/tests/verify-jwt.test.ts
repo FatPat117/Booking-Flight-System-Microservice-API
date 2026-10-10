@@ -9,6 +9,7 @@ import { createVerifyJwtMiddleware } from "../src/auth/verify-jwt.js";
 import type { AuditRecorder } from "../src/audit/audit-recorder.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
+import { createGetFlight } from "../src/flights/get-flight.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import type { Logger } from "../src/observability/logger.js";
 import {
@@ -23,6 +24,7 @@ import {
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
+  createUnusedReferenceData,
 } from "./fakes/in-memory.js";
 
 const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
@@ -248,7 +250,7 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
   const bookingRepository = createInMemoryBookingRepository({ flights });
 
   const app = createApp({
-    flightRepository,
+    getFlight: createGetFlight({ flightRepository }),
     createFlight: createCreateFlight({
       flightRepository,
       auditRecorder: createNoopAuditRecorder(),
@@ -273,6 +275,7 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
     }),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
+    ...createUnusedReferenceData(),
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
     healthChecks: createInMemoryHealthChecks(),
@@ -302,7 +305,7 @@ test("GET /api/whoami returns 401 without a token", async () => {
   const flightRepository = createInMemoryFlightRepository(flights);
 
   const app = createApp({
-    flightRepository,
+    getFlight: createGetFlight({ flightRepository }),
     createFlight: createCreateFlight({
       flightRepository,
       auditRecorder: createNoopAuditRecorder(),
@@ -317,6 +320,7 @@ test("GET /api/whoami returns 401 without a token", async () => {
     createBooking: async () => ({ outcome: "flight-not-found" as const }),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
+    ...createUnusedReferenceData(),
     listFlights: createListFlights({ flightRepository }),
     logger: createMemoryLogger(),
     healthChecks: createInMemoryHealthChecks(),

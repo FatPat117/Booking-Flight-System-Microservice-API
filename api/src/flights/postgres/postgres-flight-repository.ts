@@ -1,5 +1,6 @@
 import type { DataSource } from "typeorm";
 
+import { isUniqueViolation } from "../../postgres/postgres-errors.js";
 import { resolveEntityManager } from "../../postgres/transaction-context.js";
 import type { Flight } from "../../types.js";
 import type {
@@ -9,16 +10,6 @@ import type {
   FlightRepository,
 } from "../flight-repository.js";
 import { FlightEntity } from "./flight.entity.js";
-
-const UNIQUE_VIOLATION = "23505";
-
-function isUniqueViolation(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) {
-    return false;
-  }
-
-  return (error as { code?: string }).code === UNIQUE_VIOLATION;
-}
 
 /**
  * FlightEntity uses Date (TIMESTAMPTZ); the domain Flight type uses ISO

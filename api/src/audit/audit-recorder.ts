@@ -17,12 +17,26 @@ export type AuditTarget =
   | {
       type: "booking";
       id: string;
+    }
+  | {
+      type: "airport";
+      id: string;
+    }
+  | {
+      type: "aircraft";
+      id: string;
     };
 
+/**
+ * New actions need no migration: audit_logs' CHECK constraints are
+ * deliberately loose (Day 38).
+ */
 export type AuditAction =
   | "FLIGHT_CREATED"
   | "BOOKING_CREATED"
-  | "BOOKING_CANCELLED";
+  | "BOOKING_CANCELLED"
+  | "AIRPORT_REGISTERED"
+  | "AIRCRAFT_REGISTERED";
 
 export type AuditMetadata = Record<
   string,

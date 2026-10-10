@@ -1,16 +1,9 @@
 import type { ValidationIssue, ValidationResult } from "../types.js";
+import { isNonEmptyString, isPlainObject } from "../validation.js";
 
 export type CreateBookingInput = {
   passengerName: string;
 };
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim() !== "";
-}
 
 export function validateCreateBookingInput(
   input: unknown,

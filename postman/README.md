@@ -50,8 +50,9 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 8. Folder **Day 44 — Booking ownership (BOLA)** → carol and admin are refused without learning whether bob's booking exists
 9. **Bookings** → `DELETE /api/bookings/:id` twice as bob → `204` then `409`
 10. Folder **Day 29 — Correlation investigate** → auto-generates a fresh `requestId` for log grep
+11. Folder **Day 45 — Reference data** → register an airport and an aircraft as admin; run it on a fresh database (the first requests answer `409` on a second run). `npm run seed:reference --workspace=@booking-flight-system/api` adds 25 airports (12 in Vietnam, 13 abroad incl. DST zones) and 8 aircraft (A320neo to A350, plus an ATR 72) and can run any number of times
 
-## Coverage (through Day 44)
+## Coverage (through Day 45)
 
 - Health: `/live`, `/health`, `/ready` (booking api `:3000`; `/ready` checks Postgres)
 - Flights / bookings / cancel / correlation probes
@@ -59,3 +60,4 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 - **Admin write**: `POST /api/flights` with admin JWT; `GET /api/whoami`
 - **Error examples**: 401 (no token), 403 (non-admin: register + login `bob`, **don't** promote), 404 (flight / booking / route), 409, 422
 - **Booking ownership (Day 44)**: my bookings list, get by id, BOLA checks (404 for another account, 403 for admin create/cancel, 401 without token)
+- **Reference data (Day 45)**: `POST /api/airports` (code normalized, 409, IANA time zone 422, 403 for users), public `GET /api/airports`, `POST /api/aircraft` (seat counts, overlapping cabins 422 naming the seat, size limit 422); `GET /api/flights/not-a-uuid` → 404

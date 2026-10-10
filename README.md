@@ -80,8 +80,10 @@ Identity (`services/identity`, port `3001`) issues JWTs: `POST /api/identity/reg
 |---|---|
 | `GET /live`, `GET /health`, `GET /ready` | none |
 | `GET /api/flights`, `GET /api/flights/:id` | none |
+| `GET /api/airports` | none |
 | `GET /api/whoami` | any valid JWT |
 | `POST /api/flights` | JWT with `role=admin` |
+| `POST /api/airports`, `POST /api/aircraft` | JWT with `role=admin` |
 | `POST /api/flights/:flightId/bookings` | JWT with `role=user` (an admin gets `403`); the booking's owner is the token's `sub` |
 | `GET /api/bookings` | any valid JWT — a user sees their own bookings, an admin sees all |
 | `GET /api/bookings/:id` | any valid JWT — owner or admin |
@@ -104,6 +106,29 @@ Responses: `201` created with `Location: /api/bookings/:id`, `409` sold out, `40
 
 Missing/invalid/expired JWT on protected routes returns `401 Unauthorized` with `WWW-Authenticate: Bearer`. A valid JWT with the wrong role returns `403 Forbidden`.
 
+## Reference data: airports and aircraft (Day 45)
+
+```http
+POST /api/airports
+{ "code": "dad", "name": "Da Nang International", "city": "Da Nang", "timeZone": "Asia/Ho_Chi_Minh" }
+
+POST /api/aircraft
+{ "registration": "VN-A321", "model": "Airbus A321",
+  "seatLayout": { "cabins": [
+    { "fareClass": "BUSINESS", "fromRow": 1, "toRow": 2, "seatLetters": "ACDF" },
+    { "fareClass": "ECONOMY",  "fromRow": 3, "toRow": 7, "seatLetters": "ABCDEF" } ] } }
+```
+
+- Airport codes and registrations are upper-cased before saving, so `dad` and `DAD` collide (`409 AIRPORT_ALREADY_EXISTS` / `409 AIRCRAFT_ALREADY_EXISTS`).
+- `timeZone` is an IANA name, never an offset (`+07:00` → `422`). It is validated on write only and stored as given.
+- The layout is sent compactly and expanded into one `seats` row per position (primary key `aircraft_id, row, letter`). Overlapping cabins → `422` naming the duplicated seat (e.g. `12A`). Size limits (rows 1–99, ≤ 10 letters from `A`–`K`, ≤ 10 cabins, ≤ 900 seats) are checked **before** expansion. The aircraft and its seats are written atomically.
+- `POST /api/aircraft` answers seat counts per fare class, not the expanded seats. Neither write sets `Location`: there is no GET-by-id route yet.
+- `GET /api/airports` is public, ordered by code, with the same pagination as flights.
+- Flights do not reference airports or aircraft yet (phase D step 3). No events are published for reference data, since nothing consumes them.
+- Dev seed: `npm run seed:reference --workspace=@booking-flight-system/api` adds 25 airports (12 Vietnamese, 13 international including DST zones such as `Europe/London` and `Australia/Sydney`) and 8 aircraft (single- and two-class layouts, one with no row 13). It skips anything that already exists and writes no audit rows.
+
+Rules: BR-REF-01..06 in [docs/product/domain-model.md](docs/product/domain-model.md).
+
 ## Audit trail
 
 Every successful write records an audit entry in the `audit_logs` table, in the same Postgres transaction as the write itself. If the audit insert fails, the whole write rolls back.
@@ -113,6 +138,8 @@ Every successful write records an audit entry in the `audit_logs` table, in the 
 | `FLIGHT_CREATED` | `POST /api/flights` | `account` / admin's JWT `sub` |
 | `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` |
 | `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` |
+| `AIRPORT_REGISTERED` | `POST /api/airports` | `account` / admin's JWT `sub` |
+| `AIRCRAFT_REGISTERED` | `POST /api/aircraft` | `account` / admin's JWT `sub` (metadata: seats per fare class) |
 
 Stored fields: audit id, action, actor type and id, target type and id, request id, occurred timestamp, metadata (jsonb).
 
@@ -258,6 +285,8 @@ The application runs TypeORM migrations (`api/src/postgres/migrations/`) on star
 | `CreateOutbox` | `outbox` (jsonb payload, partial index on unpublished rows) |
 | `CreateAuditLogs` | `audit_logs` |
 | `CreateBookings` | `bookings` (FK to `flights`, status CHECK) |
+| `AddBookingOwner` / `RequireBookingOwner` | `bookings.owner_account_id` (expand, then contract to `NOT NULL`) |
+| `CreateAirportsAndAircraft` | `airports` (unique code), `aircraft` (unique registration), `seats` (PK `aircraft_id, row, letter`) |
 
 Run them without starting the app: `npm run postgres:migration:run --workspace=@booking-flight-system/api`.
 
@@ -302,10 +331,11 @@ If a critical dependency is unavailable, returns `503 Service Unavailable`.
 Request
   → observability middleware (requestId + logs)
   → express.json / routes
-  → JWT verify + role check (flight writes, every booking route)
-  → CreateFlight | ListFlights | findById | CreateBooking | CancelBooking | GetBooking | ListBookings
+  → JWT verify + role check (flight and reference-data writes, every booking route)
+  → CreateFlight | ListFlights | GetFlight | CreateBooking | CancelBooking | GetBooking | ListBookings
+    | RegisterAirport | ListAirports | RegisterAircraft
   → TransactionRunner (every write)
-      ├── FlightRepository / BookingRepository → Postgres
+      ├── Flight / Booking / Airport / Aircraft repositories → Postgres
       ├── AuditRecorder → Postgres audit_logs
       └── OutboxRepository → Postgres outbox (booking-created | flight-created)
 ```
@@ -346,6 +376,7 @@ npm run typecheck:test
 npm run build
 npm test                                                          # unit + HTTP tier, no infrastructure
 npm run test:integration --workspace=@booking-flight-system/api   # needs Postgres; TRUNCATEs booking_db tables
+npm run seed:reference --workspace=@booking-flight-system/api     # dev airports + aircraft; safe to re-run
 npm run dev --workspace=@booking-flight-system/api
 npm start --workspace=@booking-flight-system/api
 ```
@@ -357,8 +388,10 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 ## Current limitations
 
 - `owner_account_id` has no foreign key to Identity's accounts (different database by design) — deleting an account does not touch its bookings
-- `GET /api/flights/:id` with a malformed id still reaches Postgres and returns `500` (booking routes were fixed on Day 44)
+- Flights still store `origin`/`destination` as free 3-letter text and have no aircraft — airports and aircraft exist (Day 45) but nothing references them until phase D step 3
+- Seat layouts cannot be edited (BR-REF-05); there are no read routes for a single airport or aircraft
 - Roles are a single `user` | `admin` claim — no permission tables, no refresh tokens
+- A role change takes effect only at the next login: a token keeps the role it was issued with until it expires, both after promotion (still `403`) and after demotion (still admin)
 - Manual DI only (no DI container)
 - In-process jobs only — duplicate execution if multiple instances run; job intervals hardcoded in the Composition Root; no job timeout
 - Outbox relay polls every 5s; duplicate delivery possible if `markPublished` fails after a successful publish

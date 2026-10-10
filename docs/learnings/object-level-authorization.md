@@ -65,6 +65,8 @@ Routes read the JWT and pass `scope` / `actor` into use cases as plain arguments
 
 The contract migration **never deletes** rows. A migration that fails loudly on unexpected data is the safe habit; one that quietly `DELETE`s is how production data gets lost.
 
+Here both migrations shipped together because dev data is disposable. In production they are **separate deploys**: deploy 1 runs the expand migration and code that writes the new column; then the backfill runs while old instances are still serving; deploy 2, only once no `NULL` remains and no running version still writes rows without an owner, runs the contract migration. Shipping both at once would fail (or lock the table) on the first live row that the old code inserted between the two steps.
+
 ## Trade-offs / when NOT to use
 
 - **No foreign key to the owner.** Accounts live in `identity_db`; Postgres can't reference across databases, and that separation is intentional. Deleting an account leaves its bookings. If that ever matters, it becomes an event (`account-deleted`), not a constraint.

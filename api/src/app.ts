@@ -1,5 +1,9 @@
 import express, { type Request } from "express";
 
+import type { RegisterAircraft } from "./aircraft/register-aircraft.js";
+import { countSeatsByFareClass } from "./aircraft/seat-layout.js";
+import type { ListAirports } from "./airports/list-airports.js";
+import type { RegisterAirport } from "./airports/register-airport.js";
 import { toActor, toBookingAccessScope } from "./auth/booking-access.js";
 import { requireRole } from "./auth/require-role.js";
 import { createVerifyJwtMiddleware } from "./auth/verify-jwt.js";
@@ -8,7 +12,7 @@ import type { CreateBooking } from "./bookings/create-booking.js";
 import type { GetBooking } from "./bookings/get-booking.js";
 import type { ListBookings } from "./bookings/list-bookings.js";
 import type { CreateFlight } from "./flights/create-flight.js";
-import type { FlightRepository } from "./flights/flight-repository.js";
+import type { GetFlight } from "./flights/get-flight.js";
 import type { ListFlights } from "./flights/list-flights.js";
 import type { HealthChecks } from "./health/health-checks.js";
 import {
@@ -24,13 +28,16 @@ import {
 import { createRequestObservabilityMiddleware } from "./observability/request-observability.js";
 
 export type AppDependencies = {
-  flightRepository: FlightRepository;
+  getFlight: GetFlight;
   createFlight: CreateFlight;
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
   getBooking: GetBooking;
   listBookings: ListBookings;
   listFlights: ListFlights;
+  registerAirport: RegisterAirport;
+  listAirports: ListAirports;
+  registerAircraft: RegisterAircraft;
   logger: Logger;
   healthChecks: HealthChecks;
   jwtSecret: string;
@@ -58,13 +65,16 @@ const BOOKING_NOT_FOUND = {
 
 export function createApp(dependencies: AppDependencies) {
   const {
-    flightRepository,
+    getFlight,
     createFlight,
     createBooking,
     cancelBooking,
     getBooking,
     listBookings,
     listFlights,
+    registerAirport,
+    listAirports,
+    registerAircraft,
     logger,
     healthChecks,
     jwtSecret,
@@ -126,17 +136,16 @@ export function createApp(dependencies: AppDependencies) {
   });
 
   app.get("/api/flights/:id", async (req, res) => {
-    const { id } = req.params;
-    const flight = await flightRepository.findById(id);
+    const result = await getFlight(req.params.id);
 
-    if (!flight) {
+    if (result.outcome === "not-found") {
       return sendApiError(res, 404, {
         code: "FLIGHT_NOT_FOUND",
         message: "Flight was not found",
       });
     }
 
-    return res.status(200).json(flight);
+    return res.status(200).json(result.flight);
   });
 
   app.post(
@@ -272,6 +281,91 @@ export function createApp(dependencies: AppDependencies) {
       }
 
       return res.status(204).send();
+    },
+  );
+
+  // Reference data (Day 45). No Location header: there is no GET-by-id
+  // route for an airport or aircraft (no user story asks for one).
+  app.get("/api/airports", async (req, res) => {
+    const result = await listAirports({
+      page: req.query.page,
+      pageSize: req.query.pageSize,
+    });
+
+    if (result.outcome === "validation_failed") {
+      return sendApiError(res, 422, {
+        code: "VALIDATION_FAILED",
+        message: "Request contains invalid pagination parameters",
+        details: result.issues,
+      });
+    }
+
+    return res.status(200).json({
+      items: result.items,
+      pagination: result.pagination,
+    });
+  });
+
+  app.post(
+    "/api/airports",
+    requireJwt,
+    requireRole("admin"),
+    async (req, res) => {
+      const result = await registerAirport(req.body, toActor(currentUser()));
+
+      if (result.outcome === "validation_failed") {
+        return sendApiError(res, 422, {
+          code: "VALIDATION_FAILED",
+          message: "Request contains invalid airport data",
+          details: result.issues,
+        });
+      }
+
+      if (result.outcome === "duplicate") {
+        return sendApiError(res, 409, {
+          code: "AIRPORT_ALREADY_EXISTS",
+          message: "An airport with this code already exists",
+        });
+      }
+
+      return res.status(201).json(result.airport);
+    },
+  );
+
+  app.post(
+    "/api/aircraft",
+    requireJwt,
+    requireRole("admin"),
+    async (req, res) => {
+      const result = await registerAircraft(req.body, toActor(currentUser()));
+
+      if (result.outcome === "validation_failed") {
+        return sendApiError(res, 422, {
+          code: "VALIDATION_FAILED",
+          message: "Request contains invalid aircraft data",
+          details: result.issues,
+        });
+      }
+
+      if (result.outcome === "duplicate") {
+        return sendApiError(res, 409, {
+          code: "AIRCRAFT_ALREADY_EXISTS",
+          message: "An aircraft with this registration already exists",
+        });
+      }
+
+      const { id, registration, model, createdAt, seats } = result.aircraft;
+
+      // Seat counts, not the expanded seats: the client sent the compact
+      // layout and the seat map belongs to flights (US-SEAT-01).
+      return res.status(201).json({
+        id,
+        registration,
+        model,
+        createdAt,
+        seatCount: seats.length,
+        seatsByFareClass: countSeatsByFareClass(seats),
+      });
     },
   );
 

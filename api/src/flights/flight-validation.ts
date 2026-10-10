@@ -3,19 +3,12 @@ import type {
   ValidationIssue,
   ValidationResult,
 } from "../types.js";
+import { isNonEmptyString, isPlainObject } from "../validation.js";
 
 const SUPPORTED_CURRENCIES = new Set(["VND", "USD"]);
 
 const ISO_DATETIME_WITH_TZ =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim() !== "";
-}
 
 function isAirportCode(value: string): boolean {
   return /^[A-Z]{3}$/.test(value);

@@ -1,3 +1,17 @@
+import { createPostgresAircraftRepository } from "../aircraft/postgres/postgres-aircraft-repository.js";
+import {
+  createRegisterAircraft,
+  type RegisterAircraft,
+} from "../aircraft/register-aircraft.js";
+import {
+  createListAirports,
+  type ListAirports,
+} from "../airports/list-airports.js";
+import { createPostgresAirportRepository } from "../airports/postgres/postgres-airport-repository.js";
+import {
+  createRegisterAirport,
+  type RegisterAirport,
+} from "../airports/register-airport.js";
 import { createPostgresAuditRecorder } from "../audit/postgres/postgres-audit-recorder.js";
 import type { AppConfig } from "../config.js";
 import {
@@ -23,6 +37,7 @@ import {
   type CreateFlight,
 } from "../flights/create-flight.js";
 import type { FlightRepository } from "../flights/flight-repository.js";
+import { createGetFlight, type GetFlight } from "../flights/get-flight.js";
 import {
   createListFlights,
   type ListFlights,
@@ -63,7 +78,11 @@ export type Application = Readonly<{
   cancelBooking: CancelBooking;
   getBooking: GetBooking;
   listBookings: ListBookings;
+  getFlight: GetFlight;
   listFlights: ListFlights;
+  registerAirport: RegisterAirport;
+  listAirports: ListAirports;
+  registerAircraft: RegisterAircraft;
   healthChecks: HealthChecks;
   close(): Promise<void>;
 }>;
@@ -105,6 +124,8 @@ export async function createApplication(
 
   const flightRepository = createPostgresFlightRepository(dataSource);
   const bookingRepository = createPostgresBookingRepository(dataSource);
+  const airportRepository = createPostgresAirportRepository(dataSource);
+  const aircraftRepository = createPostgresAircraftRepository(dataSource);
   const auditRecorder = createPostgresAuditRecorder(dataSource);
   const outboxRepository = createPostgresOutboxRepository(dataSource);
   const transactionRunner = createPostgresTransactionRunner(dataSource);
@@ -155,8 +176,30 @@ export async function createApplication(
   const getBooking = createGetBooking({ bookingRepository });
   const listBookings = createListBookings({ bookingRepository });
 
+  const getFlight = createGetFlight({ flightRepository });
   const listFlights = createListFlights({
     flightRepository,
+  });
+
+  const registerAirport = createRegisterAirport({
+    airportRepository,
+    auditRecorder,
+    transactionRunner,
+    generateId: () => crypto.randomUUID(),
+    generateAuditId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
+  });
+  const listAirports = createListAirports({ airportRepository });
+
+  const registerAircraft = createRegisterAircraft({
+    aircraftRepository,
+    auditRecorder,
+    transactionRunner,
+    generateId: () => crypto.randomUUID(),
+    generateAuditId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
   });
 
   const jobScheduler = createInMemoryJobScheduler(logger);
@@ -187,7 +230,11 @@ export async function createApplication(
     cancelBooking,
     getBooking,
     listBookings,
+    getFlight,
     listFlights,
+    registerAirport,
+    listAirports,
+    registerAircraft,
     healthChecks,
     async close() {
       // Same order as before (Day 17): stop the job before closing what it

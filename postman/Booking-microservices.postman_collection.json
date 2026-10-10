@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Booking Microservices (Day 44)",
-    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31–34: Identity JWT + role; POST /api/flights requires admin JWT\n- Day 35–40: api + identity run on Postgres (booking_db / identity_db); /ready checks Postgres\n\nImport together with Booking-microservices.local.postman_environment.json.\nServices: api http://localhost:3000, identity http://localhost:3001.\nFlow: register -> promote-to-admin (CLI) -> login (sets accessToken, role=admin) -> create flight -> booking.\n- Day 44: booking ownership — JWT on every booking route, GET /api/bookings(/:id), BOLA folder",
+    "name": "Booking Microservices (Day 45)",
+    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31–34: Identity JWT + role; POST /api/flights requires admin JWT\n- Day 35–40: api + identity run on Postgres (booking_db / identity_db); /ready checks Postgres\n\nImport together with Booking-microservices.local.postman_environment.json.\nServices: api http://localhost:3000, identity http://localhost:3001.\nFlow: register -> promote-to-admin (CLI) -> login (sets accessToken, role=admin) -> create flight -> booking.\n- Day 44: booking ownership — JWT on every booking route, GET /api/bookings(/:id), BOLA folder\n- Day 45: airports + aircraft with seat layouts (reference data folder)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -655,6 +655,294 @@
                 "exec": [
                   "pm.test('401', () => pm.response.to.have.status(401));",
                   "pm.test('MISSING_TOKEN', () => pm.expect(pm.response.json().error.code).to.eql('MISSING_TOKEN'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Day 45 — Reference data (airports, aircraft)",
+      "description": "Writes need an admin accessToken; GET /api/airports is public.\nOptional: `npm run seed:reference --workspace=@booking-flight-system/api` adds 25 airports and 8 aircraft (idempotent).\nThe first two requests expect a fresh database: CXR / VN-A322 answer 409 on a second run.",
+      "item": [
+        {
+          "name": "POST /api/airports (cxr → CXR, 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"cxr\",\n  \"name\": \"Cam Ranh International\",\n  \"city\": \"Nha Trang\",\n  \"timeZone\": \"Asia/Ho_Chi_Minh\"\n}"
+            },
+            "url": "{{baseUrl}}/api/airports",
+            "description": "US-REF-01. The code is upper-cased before saving. No Location header (no GET-by-code route)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('code normalized to CXR', () => pm.expect(pm.response.json().code).to.eql('CXR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/airports (same code → 409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"CXR\",\n  \"name\": \"Cam Ranh International\",\n  \"city\": \"Nha Trang\",\n  \"timeZone\": \"Asia/Ho_Chi_Minh\"\n}"
+            },
+            "url": "{{baseUrl}}/api/airports"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409', () => pm.response.to.have.status(409));",
+                  "pm.test('AIRPORT_ALREADY_EXISTS', () => pm.expect(pm.response.json().error.code).to.eql('AIRPORT_ALREADY_EXISTS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/airports (unknown time zone → 422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"PQC\",\n  \"name\": \"Phu Quoc International\",\n  \"city\": \"Phu Quoc\",\n  \"timeZone\": \"Asia/Not_A_Zone\"\n}"
+            },
+            "url": "{{baseUrl}}/api/airports",
+            "description": "BR-REF-04: an IANA name, never an offset like +07:00."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));",
+                  "pm.test('INVALID_TIME_ZONE', () => pm.expect(pm.response.json().error.details[0].code).to.eql('INVALID_TIME_ZONE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/airports (user token → 403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"VII\",\n  \"name\": \"Vinh International\",\n  \"city\": \"Vinh\",\n  \"timeZone\": \"Asia/Ho_Chi_Minh\"\n}"
+            },
+            "url": "{{baseUrl}}/api/airports"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/airports (public)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/airports?page=1&pageSize=20",
+            "description": "US-REF-03. Ordered by code, same pagination as flights."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/aircraft (two-class layout, 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"registration\": \"vn-a322\",\n  \"model\": \"Airbus A321neo\",\n  \"seatLayout\": {\n    \"cabins\": [\n      { \"fareClass\": \"BUSINESS\", \"fromRow\": 1, \"toRow\": 2, \"seatLetters\": \"ACDF\" },\n      { \"fareClass\": \"ECONOMY\", \"fromRow\": 3, \"toRow\": 7, \"seatLetters\": \"ABCDEF\" }\n    ]\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/aircraft",
+            "description": "US-REF-02. Answers seat counts per fare class, not the expanded seats."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('38 seats: 8 business, 30 economy', () => pm.expect(pm.response.json().seatsByFareClass).to.eql({ ECONOMY: 30, BUSINESS: 8 }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/aircraft (overlapping cabins → 422 naming 12A)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"registration\": \"VN-A399\",\n  \"model\": \"Airbus A321\",\n  \"seatLayout\": {\n    \"cabins\": [\n      { \"fareClass\": \"BUSINESS\", \"fromRow\": 1, \"toRow\": 12, \"seatLetters\": \"ACDF\" },\n      { \"fareClass\": \"ECONOMY\", \"fromRow\": 12, \"toRow\": 30, \"seatLetters\": \"ABCDEF\" }\n    ]\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/aircraft"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));",
+                  "pm.test('names 12A', () => pm.expect(pm.response.json().error.details[0].message).to.include('12A'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/aircraft (a billion rows → 422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"registration\": \"VN-A398\",\n  \"model\": \"Airbus A321\",\n  \"seatLayout\": {\n    \"cabins\": [\n      { \"fareClass\": \"ECONOMY\", \"fromRow\": 1, \"toRow\": 1000000000, \"seatLetters\": \"ABCDEF\" }\n    ]\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/aircraft",
+            "description": "BR-REF-06: limits are checked before any seat is generated (input amplification)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/not-a-uuid → 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/not-a-uuid",
+            "description": "Day 45: a malformed id is 404, no longer a Postgres 500."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
                 ]
               }
             }

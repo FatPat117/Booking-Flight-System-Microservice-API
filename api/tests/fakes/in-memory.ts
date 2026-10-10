@@ -1,4 +1,16 @@
 import type {
+  Aircraft,
+  AircraftRepository,
+} from "../../src/aircraft/aircraft-repository.js";
+import type { RegisterAircraft } from "../../src/aircraft/register-aircraft.js";
+import { formatSeatPosition } from "../../src/aircraft/seat-position.js";
+import type {
+  Airport,
+  AirportRepository,
+} from "../../src/airports/airport-repository.js";
+import type { ListAirports } from "../../src/airports/list-airports.js";
+import type { RegisterAirport } from "../../src/airports/register-airport.js";
+import type {
   AuditRecorder,
   AuditRecordInput,
 } from "../../src/audit/audit-recorder.js";
@@ -192,6 +204,78 @@ export function createInMemoryBookingRepository(deps: {
   };
 }
 
+export function createInMemoryAirportRepository(): AirportRepository {
+  const airports = new Map<string, Airport>();
+
+  return {
+    async create(airport) {
+      if ([...airports.values()].some((stored) => stored.code === airport.code)) {
+        return { outcome: "duplicate" };
+      }
+
+      airports.set(airport.id, structuredClone(airport));
+      return { outcome: "created" };
+    },
+
+    async findPage({ limit, offset }) {
+      const ordered = [...airports.values()].sort((a, b) =>
+        a.code.localeCompare(b.code),
+      );
+
+      return {
+        items: ordered
+          .slice(offset, offset + limit)
+          .map((airport) => structuredClone(airport)),
+        totalItems: ordered.length,
+      };
+    },
+  };
+}
+
+export function createInMemoryAircraftRepository(): AircraftRepository {
+  const aircraftById = new Map<string, Aircraft>();
+
+  return {
+    async create(aircraft) {
+      const registered = [...aircraftById.values()].some(
+        (stored) => stored.registration === aircraft.registration,
+      );
+
+      if (registered) {
+        return { outcome: "duplicate" };
+      }
+
+      // Postgres rejects this with PK_seats and stores nothing — a thrown
+      // error, not an outcome, because expandSeatLayout already prevents it.
+      const positions = aircraft.seats.map((seat) =>
+        formatSeatPosition(seat.position),
+      );
+      if (new Set(positions).size !== positions.length) {
+        throw new Error("duplicate seat position in layout");
+      }
+
+      aircraftById.set(aircraft.id, structuredClone(aircraft));
+      return { outcome: "created" };
+    },
+
+    async findById(id) {
+      const aircraft = aircraftById.get(id);
+
+      if (aircraft === undefined) {
+        return undefined;
+      }
+
+      const seats = [...aircraft.seats].sort(
+        (a, b) =>
+          a.position.row - b.position.row ||
+          a.position.letter.localeCompare(b.position.letter),
+      );
+
+      return structuredClone({ ...aircraft, seats });
+    },
+  };
+}
+
 export type InMemoryAuditRecorder = AuditRecorder &
   Readonly<{
     readonly records: readonly AuditRecordInput[];
@@ -263,6 +347,27 @@ export function createInMemoryHealthChecks(
     async checkReadiness() {
       return { status, checks: { database: { status } } };
     },
+  };
+}
+
+/**
+ * For HTTP tests that build createApp() but never exercise the airport and
+ * aircraft routes. Reference data itself is tested in
+ * reference-data.api.test.ts with the real use cases.
+ */
+export function createUnusedReferenceData(): {
+  registerAirport: RegisterAirport;
+  listAirports: ListAirports;
+  registerAircraft: RegisterAircraft;
+} {
+  return {
+    registerAirport: async () => ({ outcome: "duplicate" }),
+    listAirports: async () => ({
+      outcome: "success",
+      items: [],
+      pagination: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
+    }),
+    registerAircraft: async () => ({ outcome: "duplicate" }),
   };
 }
 

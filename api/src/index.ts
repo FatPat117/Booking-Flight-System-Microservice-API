@@ -6,13 +6,16 @@ const config = parseConfig(process.env);
 const runtime = await createApplication({ config });
 
 const expressApp = createApp({
-  flightRepository: runtime.flightRepository,
+  getFlight: runtime.getFlight,
   createFlight: runtime.createFlight,
   createBooking: runtime.createBooking,
   cancelBooking: runtime.cancelBooking,
   getBooking: runtime.getBooking,
   listBookings: runtime.listBookings,
   listFlights: runtime.listFlights,
+  registerAirport: runtime.registerAirport,
+  listAirports: runtime.listAirports,
+  registerAircraft: runtime.registerAircraft,
   logger: runtime.logger,
   healthChecks: runtime.healthChecks,
   jwtSecret: runtime.config.jwtSecret,

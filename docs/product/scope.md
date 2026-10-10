@@ -51,14 +51,17 @@ Priority uses MoSCoW: **Must** (minimum complete system), **Should**, **Could**.
 
 **US-REF-01 (Must): Register an airport**
 As an admin, I want to register airports so flights can be scheduled between them.
-- Given no airport `DAD` exists, when I register `DAD` "Da Nang International", then it is created (`201`).
+- Given no airport `DAD` exists, when I register `dad` "Da Nang International" in Da Nang, time zone `Asia/Ho_Chi_Minh`, then it is created as `DAD` (`201`).
 - Given `DAD` already exists, when I register `DAD` again, then I get `409 AIRPORT_ALREADY_EXISTS`.
 - Given the code `DA1`, when I register it, then I get `422`, because a code is exactly 3 letters (BR-REF-01).
+- Given the time zone `Asia/Not_A_Zone` or `+07:00`, when I register it, then I get `422` (BR-REF-04).
 
 **US-REF-02 (Must): Register an aircraft with its seat layout**
 As an admin, I want to register an aircraft together with its seat layout so flights it operates get a seat map.
-- Given registration `VN-A321` is unused, when I register it with 30 economy and 8 business seats, then it is created with 38 Seats.
-- Given a layout listing `12A` twice, when I register it, then I get `422` naming `12A` (BR-REF-03).
+- The layout is sent compactly as cabins, each a fare class, a row range and the seat letters of each row: `{ "fareClass": "BUSINESS", "fromRow": 1, "toRow": 2, "seatLetters": "ACDF" }`. The server expands it into Seats.
+- Given registration `VN-A321` is unused, when I register it with business rows 1–2 `ACDF` and economy rows 3–7 `ABCDEF`, then it is created with 38 Seats (8 business, 30 economy).
+- Given two cabins that both contain row 12, when I register the layout, then I get `422` naming the duplicated position (e.g. `12A`) (BR-REF-03).
+- Given a cabin with rows 1–1,000,000, when I register it, then I get `422` without the server generating those seats (BR-REF-06).
 - Given `VN-A321` already exists, when I register it again, then I get `409 AIRCRAFT_ALREADY_EXISTS`.
 
 **US-REF-03 (Should): List airports.** As a guest, I want to list airports so I can pick an origin and a destination.

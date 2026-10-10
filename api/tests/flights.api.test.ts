@@ -10,6 +10,7 @@ import { createCreateBooking } from "../src/bookings/create-booking.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
+import { createGetFlight } from "../src/flights/get-flight.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import type { HealthChecks } from "../src/health/health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
@@ -21,6 +22,7 @@ import {
   createInMemoryFlightStore,
   createInMemoryTransactionRunner,
   createUnusedBookingReads,
+  createUnusedReferenceData,
   type InMemoryAuditRecorder,
   type InMemoryFlightStore,
 } from "./fakes/in-memory.js";
@@ -157,11 +159,12 @@ function createAppWithRepository(
   const { logger } = createMemoryLogger();
 
   return createApp({
-    flightRepository,
+    getFlight: createGetFlight({ flightRepository }),
     createFlight,
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
+    ...createUnusedReferenceData(),
     listFlights,
     logger,
     healthChecks,
@@ -257,7 +260,29 @@ test("GET /api/flights returns an empty paginated collection", async () => {
 
 test("GET /api/flights/:id returns 404 for missing flight", async () => {
   const { app } = createTestContext();
-  const response = await request(app).get("/api/flights/not-found-id");
+  const response = await request(app).get(
+    "/api/flights/c0ffee00-0000-4000-8000-000000000000",
+  );
+
+  assert.equal(response.status, 404);
+  assert.equal(response.body.error.code, "FLIGHT_NOT_FOUND");
+});
+
+test("GET /api/flights/:id with a malformed id is 404 and never reaches the repository", async () => {
+  const flights = createInMemoryFlightStore();
+  const repository = createInMemoryFlightRepository(flights);
+  // Stands in for Postgres rejecting a non-uuid with 22P02 (→ 500 before Day 45).
+  const app = createAppWithRepository(
+    {
+      ...repository,
+      async findById() {
+        throw new Error('invalid input syntax for type uuid: "not-a-uuid"');
+      },
+    },
+    { flights, auditRecorder: createInMemoryAuditRecorder() },
+  );
+
+  const response = await request(app).get("/api/flights/not-a-uuid");
 
   assert.equal(response.status, 404);
   assert.equal(response.body.error.code, "FLIGHT_NOT_FOUND");

@@ -10,6 +10,7 @@ import { createCreateBooking } from "../src/bookings/create-booking.js";
 import { createGetBooking } from "../src/bookings/get-booking.js";
 import { createListBookings } from "../src/bookings/list-bookings.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
+import { createGetFlight } from "../src/flights/get-flight.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { Logger } from "../src/observability/logger.js";
@@ -20,6 +21,7 @@ import {
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createInMemoryTransactionRunner,
+  createUnusedReferenceData,
   type InMemoryAuditRecorder,
 } from "./fakes/in-memory.js";
 
@@ -68,7 +70,7 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
   };
 
   const app = createApp({
-    flightRepository,
+    getFlight: createGetFlight({ flightRepository }),
     createFlight: createCreateFlight({
       ...common,
       flightRepository,
@@ -83,6 +85,7 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
     getBooking: createGetBooking({ bookingRepository }),
     listBookings: createListBookings({ bookingRepository }),
     listFlights: createListFlights({ flightRepository }),
+    ...createUnusedReferenceData(),
     logger: createMemoryLogger(),
     healthChecks: createInMemoryHealthChecks(),
     jwtSecret: TEST_JWT_SECRET,

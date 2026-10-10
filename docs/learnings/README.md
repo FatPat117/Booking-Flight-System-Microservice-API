@@ -19,6 +19,7 @@ Personal notes on techniques and mechanisms this project actually uses — writt
 | [lazy-reconnect-publisher.md](./lazy-reconnect-publisher.md) | RabbitMQ publisher recovering after a broker restart |
 | [domain-model-and-aggregates.md](./domain-model-and-aggregates.md) | Ubiquitous language, entity vs value object, aggregates as consistency boundaries, lifecycles |
 | [object-level-authorization.md](./object-level-authorization.md) | BOLA, ownership scoped inside queries, 404 vs 403, expand → contract for a required column |
+| [reference-data-and-seat-layouts.md](./reference-data-and-seat-layouts.md) | Natural vs surrogate keys, IANA time zones (validate on write), layout snapshot, input amplification |
 
 Add a row here whenever you add a note.
 

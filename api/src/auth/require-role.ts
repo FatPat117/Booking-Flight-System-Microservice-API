@@ -12,7 +12,7 @@ import {
  */
 export function requireRole(role: AuthenticatedUser["role"]) {
   return function (_request: Request, response: Response, next: NextFunction) {
-    const user = getAuthenticatedUser();
+  const user = getAuthenticatedUser();  
 
     if (user === undefined) {
       return sendApiError(response, 401, {
