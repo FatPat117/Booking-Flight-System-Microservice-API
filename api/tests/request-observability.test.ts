@@ -13,11 +13,14 @@ import { createListFlights } from "../src/flights/list-flights.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 import {
+  createInMemoryAircraftRepository,
+  createInMemoryAirportRepository,
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
+  createUnusedOpenFlight,
   createUnusedReferenceData,
 } from "./fakes/in-memory.js";
 
@@ -82,6 +85,8 @@ function createTestContext() {
 
   const createFlight = createCreateFlight({
     flightRepository,
+    airportRepository: createInMemoryAirportRepository(),
+    aircraftRepository: createInMemoryAircraftRepository(),
     auditRecorder: createNoopAuditRecorder(),
     outboxRepository: createNoopOutboxRepository(),
     transactionRunner: createPassthroughTransactionRunner(),
@@ -106,13 +111,18 @@ function createTestContext() {
 
   const listFlights = createListFlights({
     flightRepository,
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
   });
 
   const { logger, entries } = createMemoryLogger();
 
   const app = createApp({
-    getFlight: createGetFlight({ flightRepository }),
+    getFlight: createGetFlight({
+      flightRepository,
+      getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+    }),
     createFlight,
+    ...createUnusedOpenFlight(),
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
@@ -207,6 +217,9 @@ test("logs unexpected errors with request id without leaking them to client", as
     async findById() {
       return undefined;
     },
+    async changeStatus() {
+      return { outcome: "not-found" };
+    },
     async create() {
       return {
         outcome: "created",
@@ -219,6 +232,8 @@ test("logs unexpected errors with request id without leaking them to client", as
 
   const createFlight = createCreateFlight({
     flightRepository: failingRepository,
+    airportRepository: createInMemoryAirportRepository(),
+    aircraftRepository: createInMemoryAircraftRepository(),
     auditRecorder: createNoopAuditRecorder(),
     outboxRepository: createNoopOutboxRepository(),
     transactionRunner: createPassthroughTransactionRunner(),
@@ -231,6 +246,7 @@ test("logs unexpected errors with request id without leaking them to client", as
 
   const listFlights = createListFlights({
     flightRepository: failingRepository,
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
   });
 
   const createBooking = createCreateBooking({
@@ -248,8 +264,12 @@ test("logs unexpected errors with request id without leaking them to client", as
   const { logger, entries } = createMemoryLogger();
 
   const app = createApp({
-    getFlight: createGetFlight({ flightRepository: failingRepository }),
+    getFlight: createGetFlight({
+      flightRepository: failingRepository,
+      getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+    }),
     createFlight,
+    ...createUnusedOpenFlight(),
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),

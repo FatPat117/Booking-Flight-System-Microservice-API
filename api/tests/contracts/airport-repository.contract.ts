@@ -55,6 +55,15 @@ export function runAirportRepositoryContract(
     assert.deepEqual(page.items, [first]);
   });
 
+  test(name("findByCode returns the airport with that exact code, or undefined"), async () => {
+    const repository = await setup();
+    const airport = makeAirport("SGN");
+    await repository.create(airport);
+
+    assert.deepEqual(await repository.findByCode("SGN"), airport);
+    assert.equal(await repository.findByCode("HAN"), undefined);
+  });
+
   test(name("airports are listed by code, paged, with the collection total"), async () => {
     const repository = await setup();
 

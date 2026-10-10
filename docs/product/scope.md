@@ -75,6 +75,8 @@ As an admin, I want to schedule a flight between two airports on a specific airc
 - Given arrival is before departure, then `422` (BR-FLT-01).
 - Given `VN-A321` already operates a flight whose time window overlaps, then `409 AIRCRAFT_UNAVAILABLE` (BR-FLT-03).
 - Given `VN123` already departs at that exact instant, then `409 FLIGHT_ALREADY_EXISTS` (existing rule, kept).
+- The request names airports by IATA code and the aircraft by registration (`"origin": "SGN"`, `"aircraftRegistration": "VN-A321"`). An unknown code or registration is `422` naming the field. The flight's seat count comes from the aircraft's layout, so `availableSeats` is no longer accepted (`422`).
+- Turnaround: a flight on `VN-A321` landing at 10:00 blocks the aircraft until 10:45 (BR-FLT-08); a departure at 10:45 is accepted.
 
 **US-FLT-02 (Must): Open a flight for sale**
 As an admin, I want to open a scheduled flight for sale.
@@ -170,8 +172,9 @@ As an admin, I want to cancel a flight and have every booking on it cancelled.
 
 **US-OPS-02 (Should): Close sales and depart automatically**
 As the system, I want flights to stop selling 1 hour before departure and to be marked departed at departure time.
-- Given `VN123` is `OPEN` and departs in 59 minutes, when the job runs, then it becomes `CLOSED`.
-- Given `VN123` is `CLOSED` and its departure time has passed, when the job runs, then it becomes `DEPARTED`.
+- Given `VN123` is `OPEN` and departs in 59 minutes, then its status reads `CLOSED` and a hold gets `409 SALES_CLOSED`.
+- Given `VN123`'s departure time has passed, then its status reads `DEPARTED`.
+- Since Day 46 no job does this: both statuses are derived from the clock when read and when a seat is held ([ADR-008](../adr/008-time-derived-flight-status.md)), so they are right at any moment, with no job to run late.
 
 ### Admin
 

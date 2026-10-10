@@ -4,14 +4,15 @@ import {
   type Pagination,
   type RawPageQuery,
 } from "../pagination.js";
-import type { Flight, ValidationIssue } from "../types.js";
+import type { ValidationIssue } from "../types.js";
 import type { FlightRepository } from "./flight-repository.js";
+import { toFlightView, type FlightView } from "./flight-view.js";
 
 export type RawListFlightsQuery = RawPageQuery;
 
 export type ListFlightsSuccessResult = {
   outcome: "success";
-  items: Flight[];
+  items: FlightView[];
   pagination: Pagination;
 };
 
@@ -30,12 +31,13 @@ export type ListFlights = (
 
 type ListFlightsDependencies = {
   flightRepository: FlightRepository;
+  getCurrentTime: () => Date;
 };
 
 export function createListFlights(
   dependencies: ListFlightsDependencies,
 ): ListFlights {
-  const { flightRepository } = dependencies;
+  const { flightRepository, getCurrentTime } = dependencies;
 
   return async function listFlights(
     rawQuery: RawListFlightsQuery,
@@ -51,9 +53,13 @@ export function createListFlights(
       offset: pageQuery.value.offset,
     });
 
+    // One clock reading for the whole page, so two flights on it cannot
+    // disagree about "now".
+    const now = getCurrentTime();
+
     return {
       outcome: "success",
-      items: repositoryResult.items,
+      items: repositoryResult.items.map((flight) => toFlightView(flight, now)),
       pagination: toPagination(pageQuery.value, repositoryResult.totalItems),
     };
   };

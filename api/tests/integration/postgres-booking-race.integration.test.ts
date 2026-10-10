@@ -15,6 +15,8 @@ import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { resolveEntityManager } from "../../src/postgres/transaction-context.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import type { Flight } from "../../src/types.js";
+import { makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
+import { insertFlightReferences } from "./flight-references.js";
 
 /**
  * The moment of truth for the whole BookingRepository migration: OCC
@@ -40,18 +42,7 @@ const OWNER_ACTOR = { accountId: OWNER_ACCOUNT_ID };
 let dataSource: DataSource;
 
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
-  return {
-    id: crypto.randomUUID(),
-    flightNumber: "VN123",
-    origin: "SGN",
-    destination: "HAN",
-    departureAt: "2026-08-10T08:00:00+07:00",
-    arrivalAt: "2026-08-10T10:00:00+07:00",
-    priceInCents: 15_000_000,
-    currency: "VND",
-    availableSeats: 1,
-    ...overrides,
-  };
+  return makeFixtureFlight({ availableSeats: 1, ...overrides });
 }
 
 function createCreateBookingUseCase() {
@@ -91,6 +82,7 @@ beforeEach(async () => {
   await dataSource.query(
     'TRUNCATE TABLE "bookings", "flights", "audit_logs", "outbox" CASCADE',
   );
+  await insertFlightReferences(dataSource);
 });
 
 after(async () => {
@@ -128,7 +120,7 @@ test("Test B — 10 concurrent cancelBooking calls on the same active booking yi
   const bookingRepository = createPostgresBookingRepository(dataSource);
   const flight = makeFlight({ availableSeats: 1 });
   await flightRepository.create(flight);
-  await bookingRepository.reserveSeat(flight.id);
+  await bookingRepository.reserveSeat(flight.id, new Date("2026-07-20T00:00:00.000Z"));
 
   const booking = {
     id: crypto.randomUUID(),

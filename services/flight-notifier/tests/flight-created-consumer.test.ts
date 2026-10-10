@@ -38,6 +38,7 @@ function createMemoryLogger() {
   return { logger, entries };
 }
 
+/** The shape every producer sent before Day 46 — still in old outbox/DLQ rows. */
 const validPayload = {
   eventId: "event-abc-123",
   correlationId: "corr-abc-123",
@@ -56,7 +57,15 @@ const validPayload = {
   },
 };
 
-test("flightCreatedConsumer processes a valid fat event", async () => {
+const day46Flight = {
+  ...validPayload.flight,
+  originAirportId: "a1a1a1a1-0000-4000-8000-000000000011",
+  destinationAirportId: "a1a1a1a1-0000-4000-8000-000000000012",
+  aircraftId: "c1c1c1c1-0000-4000-8000-000000000001",
+  status: "SCHEDULED",
+};
+
+test("flightCreatedConsumer processes a valid fat event in the pre-Day-46 shape", async () => {
   const { logger, entries } = createMemoryLogger();
   const handler = createFlightCreatedConsumer({ logger });
 
@@ -72,6 +81,42 @@ test("flightCreatedConsumer processes a valid fat event", async () => {
         entry.fields?.flightId === "flight-1",
     ),
   );
+  const logged = entries.find((entry) => entry.message === "flight_created_consumed");
+  assert.ok(logged?.fields);
+  assert.equal("aircraftId" in logged.fields, false);
+  assert.equal("status" in logged.fields, false);
+});
+
+test("flightCreatedConsumer processes the Day 46 shape and logs the aircraft and status", async () => {
+  const { logger, entries } = createMemoryLogger();
+  const handler = createFlightCreatedConsumer({ logger });
+
+  const result = await handler({ ...validPayload, flight: day46Flight });
+
+  assert.deepEqual(result, { outcome: "processed" });
+  const logged = entries.find((entry) => entry.message === "flight_created_consumed");
+  assert.equal(logged?.fields?.aircraftId, day46Flight.aircraftId);
+  assert.equal(logged?.fields?.status, "SCHEDULED");
+  assert.equal(logged?.fields?.origin, "SGN");
+});
+
+test("flightCreatedConsumer rejects a Day 46 field that is present but empty or not a string", async () => {
+  const { logger } = createMemoryLogger();
+  const handler = createFlightCreatedConsumer({ logger });
+
+  const cases = [
+    { ...day46Flight, aircraftId: "" },
+    { ...day46Flight, originAirportId: 42 },
+    { ...day46Flight, status: null },
+  ];
+
+  for (const flight of cases) {
+    const result = await handler({ ...validPayload, flight });
+    assert.equal(result.outcome, "rejected");
+    if (result.outcome === "rejected") {
+      assert.match(result.reason, /must be a non-empty string when present/);
+    }
+  }
 });
 
 test("flightCreatedConsumer rejects invalid payloads without throwing", async () => {

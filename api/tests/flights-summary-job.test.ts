@@ -58,6 +58,9 @@ test("flights-summary-job logs total from repository page totalItems", async () 
     async create() {
       return { outcome: "created" };
     },
+    async changeStatus() {
+      return { outcome: "not-found" };
+    },
   };
 
   const job = createFlightsSummaryJob({

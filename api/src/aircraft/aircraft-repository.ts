@@ -35,4 +35,10 @@ export interface AircraftRepository {
 
   /** Seats ordered by row, then letter. */
   findById(id: string): Promise<Aircraft | undefined>;
+
+  /**
+   * Exact match on the normalized registration, with its seats (Day 46: a
+   * new flight's capacity is its aircraft's seat count).
+   */
+  findByRegistration(registration: string): Promise<Aircraft | undefined>;
 }

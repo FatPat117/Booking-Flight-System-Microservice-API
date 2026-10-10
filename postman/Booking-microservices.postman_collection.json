@@ -32,6 +32,14 @@
     {
       "key": "userBAccessToken",
       "value": ""
+    },
+    {
+      "key": "day46FlightId",
+      "value": ""
+    },
+    {
+      "key": "day46ScheduledFlightId",
+      "value": ""
     }
   ],
   "item": [
@@ -252,7 +260,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 5\n}"
+              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A321\"\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "201 Created + Location header.\nAuth: Authorization Bearer {{accessToken}} with role=admin.\nDay 29: wait ~5s then grep {{requestId}} in flight-notifier for flight_created_consumed."
@@ -275,10 +283,20 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 5\n}"
+              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A321\"\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "Run after a successful create with the same payload. Expect 409 FLIGHT_ALREADY_EXISTS."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/flights/:id/open",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{flightId}}/open",
+            "description": "Day 46: a new flight is SCHEDULED; open it before the Bookings folder or every booking answers 409 SALES_CLOSED. 200 with status OPEN; 409 INVALID_FLIGHT_STATUS on a second run."
           },
           "response": []
         }
@@ -951,6 +969,348 @@
       ]
     },
     {
+      "name": "Day 46 — Flight lifecycle",
+      "description": "Needs the dev seed (`npm run seed:reference --workspace=@booking-flight-system/api`: SGN, HAN, VN-A323 with 194 seats), an admin accessToken (alice) and a user userAccessToken (bob).\nRun top to bottom on a database without VN461/VN462 on 2026-11-20; a second run answers 409 FLIGHT_ALREADY_EXISTS on the creates.\nStatuses: SCHEDULED/OPEN/CANCELLED are stored; CLOSED (1 h before departure) and DEPARTED are derived from the clock on every read (ADR-008).",
+      "item": [
+        {
+          "name": "POST /api/flights (VN461 on VN-A323 → 201 SCHEDULED, 194 seats)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN461\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights",
+            "description": "US-FLT-01. Airports by IATA code, aircraft by registration. Seats come from the aircraft layout; the flight starts SCHEDULED (not bookable yet)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('SCHEDULED with the aircraft seat count', () => {",
+                  "  pm.expect(body.status).to.eql('SCHEDULED');",
+                  "  pm.expect(body.availableSeats).to.eql(194);",
+                  "});",
+                  "pm.collectionVariables.set('day46FlightId', body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights (same aircraft, departs 30 min after landing → 409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN462\",\n  \"origin\": \"HAN\",\n  \"destination\": \"SGN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T10:30:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T12:30:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights",
+            "description": "BR-FLT-03/08: the aircraft is busy until arrival + 45 min. Decided by the EXCL_flights_aircraft_schedule exclusion constraint, so two admins racing cannot both win."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409', () => pm.response.to.have.status(409));",
+                  "pm.test('AIRCRAFT_UNAVAILABLE', () => pm.expect(pm.response.json().error.code).to.eql('AIRCRAFT_UNAVAILABLE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights (exactly 45 min after landing → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN462\",\n  \"origin\": \"HAN\",\n  \"destination\": \"SGN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T10:45:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T12:45:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights",
+            "description": "The occupancy window is half-open, [departure, arrival + 45 min): the boundary itself is free. This flight is left SCHEDULED for the SALES_CLOSED request below."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day46ScheduledFlightId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights (availableSeats in body → 422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN463\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-11-21T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-21T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 300\n}"
+            },
+            "url": "{{baseUrl}}/api/flights",
+            "description": "Capacity is no longer client-set. Rejected loudly (UNSUPPORTED_FIELD) instead of silently ignored, so an old client notices the breaking change."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));",
+                  "pm.test('UNSUPPORTED_FIELD on availableSeats', () => {",
+                  "  const issue = pm.response.json().error.details[0];",
+                  "  pm.expect([issue.field, issue.code]).to.eql(['availableSeats', 'UNSUPPORTED_FIELD']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights (unknown airports and aircraft → 422, all at once)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN464\",\n  \"origin\": \"XXX\",\n  \"destination\": \"YYY\",\n  \"aircraftRegistration\": \"VN-NOPE\",\n  \"departureAt\": \"2026-11-21T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-21T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));",
+                  "pm.test('UNKNOWN_AIRPORT x2 + UNKNOWN_AIRCRAFT', () => {",
+                  "  const codes = pm.response.json().error.details.map((issue) => issue.code);",
+                  "  pm.expect(codes).to.eql(['UNKNOWN_AIRPORT', 'UNKNOWN_AIRPORT', 'UNKNOWN_AIRCRAFT']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (→ 200 OPEN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day46FlightId}}/open",
+            "description": "US-FLT-02: SCHEDULED → OPEN, allowed while departure is more than 1 hour away. Audited as FLIGHT_OPENED."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('OPEN', () => pm.expect(pm.response.json().status).to.eql('OPEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (again → 409 INVALID_FLIGHT_STATUS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day46FlightId}}/open",
+            "description": "BR-FLT-05. details[0].code says why: NOT_ALLOWED here, DEPARTURE_TOO_SOON for a flight 1 hour or less from departure. A lost concurrent open answers 409 FLIGHT_STATUS_CHANGED instead."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409', () => pm.response.to.have.status(409));",
+                  "const error = pm.response.json().error;",
+                  "pm.test('INVALID_FLIGHT_STATUS / NOT_ALLOWED', () => {",
+                  "  pm.expect(error.code).to.eql('INVALID_FLIGHT_STATUS');",
+                  "  pm.expect(error.details[0].code).to.eql('NOT_ALLOWED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (as bob → 403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day46ScheduledFlightId}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking on the open VN461 (bob → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengerName\": \"Bob Tran\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day46FlightId}}/bookings"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking on the SCHEDULED VN462 (bob → 409 SALES_CLOSED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengerName\": \"Bob Tran\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day46ScheduledFlightId}}/bookings",
+            "description": "BR-FLT-06: a seat can be held only while the effective status is OPEN — not before opening, not after cancellation, not within 1 hour of departure. Checked inside the seat-hold UPDATE itself."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409', () => pm.response.to.have.status(409));",
+                  "pm.test('SALES_CLOSED', () => pm.expect(pm.response.json().error.code).to.eql('SALES_CLOSED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Day 29 — Correlation investigate",
       "description": "Fixed requestId for log grep across api + flight-notifier.",
       "item": [
@@ -1010,7 +1370,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN29\",\n  \"origin\": \"SGN\",\n  \"destination\": \"DAD\",\n  \"departureAt\": \"2026-12-20T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-20T09:30:00+07:00\",\n  \"priceInCents\": 1200000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 3\n}"
+              "raw": "{\n  \"flightNumber\": \"VN29\",\n  \"origin\": \"SGN\",\n  \"destination\": \"DAD\",\n  \"departureAt\": \"2026-12-20T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-20T09:30:00+07:00\",\n  \"priceInCents\": 1200000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A632\"\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "Generates a fresh requestId each run.\nThen: open Postman Console for the id, wait ~5s, search flight-notifier log for correlationId."
@@ -1342,7 +1702,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN999\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-11T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-11T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 120\n}"
+              "raw": "{\n  \"flightNumber\": \"VN999\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-11T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-11T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A321\"\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -1375,7 +1735,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN403\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-12T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-12T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 10\n}"
+              "raw": "{\n  \"flightNumber\": \"VN403\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-12T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-12T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A321\"\n}"
             },
             "description": "Login as bob first (role=user). Expect 403 FORBIDDEN."
           },

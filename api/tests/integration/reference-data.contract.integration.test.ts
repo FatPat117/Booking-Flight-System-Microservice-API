@@ -23,7 +23,10 @@ before(async () => {
 });
 
 beforeEach(async () => {
-  await dataSource.query('TRUNCATE TABLE "airports", "seats", "aircraft"');
+  // CASCADE: flights reference airports and aircraft since Day 46.
+  await dataSource.query(
+    'TRUNCATE TABLE "airports", "seats", "aircraft" CASCADE',
+  );
 });
 
 after(async () => {

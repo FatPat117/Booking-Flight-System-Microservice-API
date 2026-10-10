@@ -3,6 +3,8 @@ import type {
   ValidationIssue,
   ValidationResult,
 } from "../types.js";
+import { normalizeRegistration } from "../aircraft/aircraft-validation.js";
+import { normalizeAirportCode } from "../airports/airport-validation.js";
 import { isNonEmptyString, isPlainObject } from "../validation.js";
 
 const SUPPORTED_CURRENCIES = new Set(["VND", "USD"]);
@@ -16,10 +18,6 @@ function isAirportCode(value: string): boolean {
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
-
-function isNonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function isLeapYear(year: number): boolean {
@@ -89,11 +87,11 @@ export function validateCreateFlightInput(
     "flightNumber",
     "origin",
     "destination",
+    "aircraftRegistration",
     "departureAt",
     "arrivalAt",
     "priceInCents",
     "currency",
-    "availableSeats",
   ] as const;
 
   for (const field of requiredFields) {
@@ -106,10 +104,22 @@ export function validateCreateFlightInput(
     }
   }
 
+  // Day 46: capacity comes from the aircraft's layout. Rejected rather than
+  // ignored, so a client still sending it learns the contract changed.
+  if ("availableSeats" in input) {
+    issues.push({
+      field: "availableSeats",
+      code: "UNSUPPORTED_FIELD",
+      message:
+        "availableSeats is no longer accepted: it is the aircraft's seat count",
+    });
+  }
+
   const stringFields = [
     "flightNumber",
     "origin",
     "destination",
+    "aircraftRegistration",
     "departureAt",
     "arrivalAt",
     "currency",
@@ -138,6 +148,7 @@ export function validateCreateFlightInput(
   let flightNumber = "";
   let origin = "";
   let destination = "";
+  let aircraftRegistration = "";
   let currency = "";
   let departureAtUtc: string | null = null;
   let arrivalAtUtc: string | null = null;
@@ -146,8 +157,12 @@ export function validateCreateFlightInput(
     flightNumber = flightNumberRaw.trim().toUpperCase();
   }
 
+  if (isNonEmptyString(input.aircraftRegistration)) {
+    aircraftRegistration = normalizeRegistration(input.aircraftRegistration);
+  }
+
   if (isNonEmptyString(originRaw)) {
-    origin = originRaw.trim().toUpperCase();
+    origin = normalizeAirportCode(originRaw);
     if (!isAirportCode(origin)) {
       issues.push({
         field: "origin",
@@ -158,7 +173,7 @@ export function validateCreateFlightInput(
   }
 
   if (isNonEmptyString(destinationRaw)) {
-    destination = destinationRaw.trim().toUpperCase();
+    destination = normalizeAirportCode(destinationRaw);
     if (!isAirportCode(destination)) {
       issues.push({
         field: "destination",
@@ -237,17 +252,6 @@ export function validateCreateFlightInput(
     }
   }
 
-  if ("availableSeats" in input && input.availableSeats !== undefined) {
-    if (!isNonNegativeInteger(input.availableSeats)) {
-      issues.push({
-        field: "availableSeats",
-        code: "INVALID_AVAILABLE_SEATS",
-        message:
-          "availableSeats must be a safe integer greater than or equal to 0",
-      });
-    }
-  }
-
   if (issues.length > 0) {
     return { success: false, issues };
   }
@@ -258,11 +262,11 @@ export function validateCreateFlightInput(
       flightNumber,
       origin,
       destination,
+      aircraftRegistration,
       departureAt: departureAtUtc as string,
       arrivalAt: arrivalAtUtc as string,
       priceInCents: input.priceInCents as number,
       currency,
-      availableSeats: input.availableSeats as number,
     },
   };
 }

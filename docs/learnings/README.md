@@ -20,6 +20,10 @@ Personal notes on techniques and mechanisms this project actually uses — writt
 | [domain-model-and-aggregates.md](./domain-model-and-aggregates.md) | Ubiquitous language, entity vs value object, aggregates as consistency boundaries, lifecycles |
 | [object-level-authorization.md](./object-level-authorization.md) | BOLA, ownership scoped inside queries, 404 vs 403, expand → contract for a required column |
 | [reference-data-and-seat-layouts.md](./reference-data-and-seat-layouts.md) | Natural vs surrogate keys, IANA time zones (validate on write), layout snapshot, input amplification |
+| [validating-airports-and-seats.md](./validating-airports-and-seats.md) | Layered validation (shape → rules → DB), `ValidationResult`, collect-all-issues, interview Q&A |
+| [flight-lifecycle-state-machine.md](./flight-lifecycle-state-machine.md) | State machine as a lookup table, guards, stored vs time-derived status, compare-and-set on status change |
+| [exclusion-constraints.md](./exclusion-constraints.md) | Overlap rules across rows, GiST + `btree_gist`, `IMMUTABLE` wrapper, `40P01` deadlock on concurrent inserts |
+| [evolving-event-contracts.md](./evolving-event-contracts.md) | Expand → contract for messages, optional fields, explicit payload mapping |
 
 Add a row here whenever you add a note.
 

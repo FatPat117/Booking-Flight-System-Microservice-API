@@ -1,25 +1,46 @@
+import type { StoredFlightStatus } from "./flights/flight-lifecycle.js";
+
+/**
+ * Since Day 46 a flight references airports and an aircraft by id
+ * (domain-model Decision 6). `origin`/`destination` keep the IATA codes:
+ * the API and FlightCreatedEvent have always exposed them, and readers get
+ * them from a join with `airports`, never from a stored copy.
+ *
+ * `status` is the *stored* status; the effective one (CLOSED, DEPARTED) is
+ * derived from the clock by effectiveFlightStatus (ADR-008).
+ */
 export type Flight = {
   id: string;
   flightNumber: string;
+  originAirportId: string;
   origin: string;
+  destinationAirportId: string;
   destination: string;
+  aircraftId: string;
   departureAt: string;
   arrivalAt: string;
   priceInCents: number;
   currency: string;
+  /** Initialized from the aircraft's seat count; becomes derived in step 4. */
   availableSeats: number;
+  status: StoredFlightStatus;
 };
 
-/** Trusted create payload after validation — not derived from stored Flight. */
+/**
+ * Trusted create payload after validation — not derived from stored Flight.
+ * Airports by IATA code and the aircraft by registration (both normalized);
+ * the use case resolves them to ids. No availableSeats: it comes from the
+ * aircraft's layout.
+ */
 export type CreateFlightInput = {
   flightNumber: string;
   origin: string;
   destination: string;
+  aircraftRegistration: string;
   departureAt: string;
   arrivalAt: string;
   priceInCents: number;
   currency: string;
-  availableSeats: number;
 };
 
 /**

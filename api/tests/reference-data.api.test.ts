@@ -19,6 +19,7 @@ import {
   createInMemoryHealthChecks,
   createInMemoryTransactionRunner,
   createUnusedBookingReads,
+  createUnusedOpenFlight,
   type InMemoryAuditRecorder,
 } from "./fakes/in-memory.js";
 
@@ -72,9 +73,16 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
   };
 
   const app = createApp({
-    getFlight: createGetFlight({ flightRepository }),
-    listFlights: createListFlights({ flightRepository }),
+    getFlight: createGetFlight({
+      flightRepository,
+      getCurrentTime: () => FIXED_TIME,
+    }),
+    listFlights: createListFlights({
+      flightRepository,
+      getCurrentTime: () => FIXED_TIME,
+    }),
     createFlight: async () => ({ outcome: "duplicate" }),
+    ...createUnusedOpenFlight(),
     createBooking: async () => ({ outcome: "flight-not-found" }),
     cancelBooking: async () => ({ outcome: "not-found" }),
     ...createUnusedBookingReads(),

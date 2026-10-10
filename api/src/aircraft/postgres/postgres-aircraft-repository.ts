@@ -82,21 +82,33 @@ export function createPostgresAircraftRepository(
     },
 
     async findById(id: string): Promise<Aircraft | undefined> {
-      const manager = resolveEntityManager(dataSource);
-      const entity = await manager
-        .getRepository(AircraftEntity)
-        .findOneBy({ id });
+      return findOneWithSeats(resolveEntityManager(dataSource), { id });
+    },
 
-      if (entity === null) {
-        return undefined;
-      }
-
-      const seats = await manager.getRepository(SeatEntity).find({
-        where: { aircraftId: id },
-        order: { row: "ASC", letter: "ASC" },
+    async findByRegistration(
+      registration: string,
+    ): Promise<Aircraft | undefined> {
+      return findOneWithSeats(resolveEntityManager(dataSource), {
+        registration,
       });
-
-      return mapAircraft(entity, seats);
     },
   };
+}
+
+async function findOneWithSeats(
+  manager: EntityManager,
+  where: { id: string } | { registration: string },
+): Promise<Aircraft | undefined> {
+  const entity = await manager.getRepository(AircraftEntity).findOneBy(where);
+
+  if (entity === null) {
+    return undefined;
+  }
+
+  const seats = await manager.getRepository(SeatEntity).find({
+    where: { aircraftId: entity.id },
+    order: { row: "ASC", letter: "ASC" },
+  });
+
+  return mapAircraft(entity, seats);
 }

@@ -29,5 +29,6 @@ ADRs do **not** describe how to implement the choice. That lives in code and day
 | [005](./005-test-strategy-fakes-and-postgres-integration.md) | Unit Tests on In-Memory Fakes, Database Semantics on Real Postgres | Accepted |
 | [006](./006-sqlite-to-postgres-migration.md) | Move `api` Storage from SQLite to Postgres/TypeORM | Accepted |
 | [007](./007-domain-before-advanced-patterns.md) | Complete the Domain Before Introducing Advanced Patterns | Accepted |
+| [008](./008-time-derived-flight-status.md) | Derive Time-Based Flight Statuses Instead of Storing Them | Accepted |
 
 See also: [architecture overview](../architecture-overview.md) — current topology and gap vs the destination architecture.

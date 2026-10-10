@@ -1,3 +1,11 @@
+/**
+ * Evolves additively (expand/contract for messages). Day 46 added the
+ * references and the status; the producer always sends them, but they are
+ * optional here because messages written before Day 46 may still sit in the
+ * outbox, the queue or the DLQ. Making them required — and ever dropping
+ * `origin`/`destination` — is a later contract step, once no old-shape
+ * message and no consumer relying on the old fields remains.
+ */
 export type FlightCreatedEvent = {
   eventId: string;
   correlationId: string;
@@ -6,15 +14,29 @@ export type FlightCreatedEvent = {
   flight: {
     id: string;
     flightNumber: string;
+    /** IATA code. */
     origin: string;
+    /** IATA code. */
     destination: string;
     departureAt: string;
     arrivalAt: string;
     priceInCents: number;
     currency: string;
     availableSeats: number;
+    originAirportId?: string;
+    destinationAirportId?: string;
+    aircraftId?: string;
+    /** Status at creation (SCHEDULED); later changes have no event yet. */
+    status?: string;
   };
 };
+
+const OPTIONAL_FLIGHT_STRINGS = [
+  "originAirportId",
+  "destinationAirportId",
+  "aircraftId",
+  "status",
+] as const;
 
 export function parseFlightCreatedEvent(
   payload: unknown,
@@ -84,6 +106,24 @@ export function parseFlightCreatedEvent(
     return { ok: false, reason: "flight.availableSeats must be an integer" };
   }
 
+  // Absent is the old shape and fine; present but empty is a broken producer.
+  const optional: Partial<
+    Record<(typeof OPTIONAL_FLIGHT_STRINGS)[number], string>
+  > = {};
+  for (const key of OPTIONAL_FLIGHT_STRINGS) {
+    const value = flight[key];
+    if (value === undefined) {
+      continue;
+    }
+    if (typeof value !== "string" || value.length === 0) {
+      return {
+        ok: false,
+        reason: `flight.${key} must be a non-empty string when present`,
+      };
+    }
+    optional[key] = value;
+  }
+
   return {
     ok: true,
     event: {
@@ -101,6 +141,7 @@ export function parseFlightCreatedEvent(
         priceInCents: flight.priceInCents,
         currency: flight.currency as string,
         availableSeats: flight.availableSeats,
+        ...optional,
       },
     },
   };

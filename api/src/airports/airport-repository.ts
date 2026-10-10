@@ -40,4 +40,7 @@ export interface AirportRepository {
 
   /** Ordered by code. */
   findPage(request: AirportPageRequest): Promise<AirportPage>;
+
+  /** Exact match on the normalized code (Day 46: resolving a flight's airports). */
+  findByCode(code: string): Promise<Airport | undefined>;
 }

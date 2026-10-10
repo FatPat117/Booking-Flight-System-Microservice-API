@@ -9,20 +9,12 @@ import type {
   FlightRepository,
 } from "../src/flights/flight-repository.js";
 import type { Flight } from "../src/types.js";
+import { makeFlight as makeFixtureFlight } from "./fixtures/flights.js";
+
+const NOW = new Date("2026-10-10T00:00:00.000Z");
 
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
-  return {
-    id: "flight-1",
-    flightNumber: "VN123",
-    origin: "SGN",
-    destination: "HAN",
-    departureAt: "2026-08-10T01:00:00.000Z",
-    arrivalAt: "2026-08-10T03:00:00.000Z",
-    priceInCents: 15_000_000,
-    currency: "VND",
-    availableSeats: 120,
-    ...overrides,
-  };
+  return makeFixtureFlight({ id: "flight-1", availableSeats: 120, ...overrides });
 }
 
 function makeRepository(
@@ -43,6 +35,9 @@ function makeRepository(
         outcome: "created",
       };
     },
+    async changeStatus() {
+      return { outcome: "not-found" };
+    },
     ...overrides,
   };
 }
@@ -62,6 +57,7 @@ test("uses default pagination values", async () => {
 
   const listFlights = createListFlights({
     flightRepository: repository,
+    getCurrentTime: () => NOW,
   });
 
   const result = await listFlights({});
@@ -98,6 +94,7 @@ test("converts page and pageSize to limit and offset", async () => {
 
   const listFlights = createListFlights({
     flightRepository: repository,
+    getCurrentTime: () => NOW,
   });
 
   const result = await listFlights({
@@ -169,6 +166,7 @@ test("rejects invalid pagination values without calling repository", async (t) =
 
       const listFlights = createListFlights({
         flightRepository: repository,
+        getCurrentTime: () => NOW,
       });
 
       const result = await listFlights(testCase.query);
@@ -204,6 +202,7 @@ test("calculates total pages from total items", async () => {
 
   const listFlights = createListFlights({
     flightRepository: repository,
+    getCurrentTime: () => NOW,
   });
 
   const result = await listFlights({
@@ -219,6 +218,49 @@ test("calculates total pages from total items", async () => {
   }
 });
 
+test("every flight on the page carries its effective status", async () => {
+  const flights = [
+    makeFlight({ id: "scheduled", status: "SCHEDULED" }),
+    makeFlight({
+      id: "closing",
+      status: "OPEN",
+      departureAt: "2026-10-10T00:59:59.000Z",
+      arrivalAt: "2026-10-10T02:00:00.000Z",
+    }),
+    makeFlight({
+      id: "departed",
+      status: "OPEN",
+      departureAt: "2026-10-09T22:00:00.000Z",
+      arrivalAt: "2026-10-10T00:00:00.000Z",
+    }),
+    makeFlight({ id: "cancelled", status: "CANCELLED" }),
+  ];
+
+  const listFlights = createListFlights({
+    flightRepository: makeRepository({
+      async findPage() {
+        return { items: flights, totalItems: flights.length };
+      },
+    }),
+    getCurrentTime: () => NOW,
+  });
+
+  const result = await listFlights({});
+
+  assert.equal(result.outcome, "success");
+  if (result.outcome === "success") {
+    assert.deepEqual(
+      result.items.map((flight) => [flight.id, flight.status]),
+      [
+        ["scheduled", "SCHEDULED"],
+        ["closing", "CLOSED"],
+        ["departed", "DEPARTED"],
+        ["cancelled", "CANCELLED"],
+      ],
+    );
+  }
+});
+
 test("propagates unexpected repository failures", async () => {
   const repository = makeRepository({
     async findPage() {
@@ -228,6 +270,7 @@ test("propagates unexpected repository failures", async () => {
 
   const listFlights = createListFlights({
     flightRepository: repository,
+    getCurrentTime: () => NOW,
   });
 
   await assert.rejects(() => listFlights({}), /database failure/);

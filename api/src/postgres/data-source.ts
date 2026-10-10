@@ -17,6 +17,10 @@ import { CreateBookings1790436000000 } from "./migrations/1790436000000-CreateBo
 import { AddBookingOwner1790440000000 } from "./migrations/1790440000000-AddBookingOwner.js";
 import { RequireBookingOwner1790443600000 } from "./migrations/1790443600000-RequireBookingOwner.js";
 import { CreateAirportsAndAircraft1790447200000 } from "./migrations/1790447200000-CreateAirportsAndAircraft.js";
+import { ExpandFlightReferences1790450800000 } from "./migrations/1790450800000-ExpandFlightReferences.js";
+import { BackfillFlightReferences1790454400000 } from "./migrations/1790454400000-BackfillFlightReferences.js";
+import { ContractFlightReferences1790458000000 } from "./migrations/1790458000000-ContractFlightReferences.js";
+import { AddAircraftScheduleExclusion1790461600000 } from "./migrations/1790461600000-AddAircraftScheduleExclusion.js";
 
 /**
  * Day 36+ — dev-complete only. Entities/migrations are added per Strangler
@@ -34,6 +38,11 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
     database: config.database,
     // Never true outside throwaway local experiments — migrations own schema.
     synchronize: false,
+    // Day 46: one transaction per migration, not one for the whole batch.
+    // Expand / backfill / contract are separate steps: when a contract
+    // refuses (NULLs left), the expand before it must stay applied so the
+    // operator has the new columns to backfill by hand before re-running.
+    migrationsTransactionMode: "each",
     entities: [
       FlightEntity,
       OutboxEntity,
@@ -51,6 +60,10 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
       AddBookingOwner1790440000000,
       RequireBookingOwner1790443600000,
       CreateAirportsAndAircraft1790447200000,
+      ExpandFlightReferences1790450800000,
+      BackfillFlightReferences1790454400000,
+      ContractFlightReferences1790458000000,
+      AddAircraftScheduleExclusion1790461600000,
     ],
   });
 }

@@ -98,6 +98,15 @@ export function runAircraftRepositoryContract(
     assert.equal(await repository.findById(aircraft.id), undefined);
   });
 
+  test(name("findByRegistration returns the aircraft with its seats, or undefined"), async () => {
+    const repository = await setup();
+    const aircraft = makeAircraft("VN-A327");
+    await repository.create(aircraft);
+
+    assert.deepEqual(await repository.findByRegistration("VN-A327"), aircraft);
+    assert.equal(await repository.findByRegistration("VN-A999"), undefined);
+  });
+
   test(name("an unknown id is undefined"), async () => {
     const repository = await setup();
 

@@ -42,6 +42,7 @@ import {
   createListFlights,
   type ListFlights,
 } from "../flights/list-flights.js";
+import { createOpenFlight, type OpenFlight } from "../flights/open-flight.js";
 import { createPostgresFlightRepository } from "../flights/postgres/postgres-flight-repository.js";
 import type { HealthChecks } from "../health/health-checks.js";
 import { createPostgresHealthChecks } from "../health/postgres/postgres-health-checks.js";
@@ -74,6 +75,7 @@ export type Application = Readonly<{
   flightRepository: FlightRepository;
   bookingRepository: BookingRepository;
   createFlight: CreateFlight;
+  openFlight: OpenFlight;
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
   getBooking: GetBooking;
@@ -140,12 +142,23 @@ export async function createApplication(
 
   const createFlight = createCreateFlight({
     flightRepository,
+    airportRepository,
+    aircraftRepository,
     auditRecorder,
     outboxRepository,
     transactionRunner,
     generateId: () => crypto.randomUUID(),
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
+  });
+
+  const openFlight = createOpenFlight({
+    flightRepository,
+    auditRecorder,
+    transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
     getCurrentTime: () => new Date(),
   });
@@ -176,9 +189,13 @@ export async function createApplication(
   const getBooking = createGetBooking({ bookingRepository });
   const listBookings = createListBookings({ bookingRepository });
 
-  const getFlight = createGetFlight({ flightRepository });
+  const getFlight = createGetFlight({
+    flightRepository,
+    getCurrentTime: () => new Date(),
+  });
   const listFlights = createListFlights({
     flightRepository,
+    getCurrentTime: () => new Date(),
   });
 
   const registerAirport = createRegisterAirport({
@@ -226,6 +243,7 @@ export async function createApplication(
     flightRepository,
     bookingRepository,
     createFlight,
+    openFlight,
     createBooking,
     cancelBooking,
     getBooking,

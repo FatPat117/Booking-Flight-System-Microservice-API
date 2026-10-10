@@ -11,6 +11,8 @@ import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import type { Flight } from "../../src/types.js";
+import { makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
+import { insertFlightReferences } from "./flight-references.js";
 
 /**
  * Runs the real createCreateBooking use case wired to every Postgres
@@ -24,18 +26,7 @@ const OWNER_ACTOR = { accountId: "11111111-1111-4111-8111-111111111111" };
 let dataSource: DataSource;
 
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
-  return {
-    id: crypto.randomUUID(),
-    flightNumber: "VN123",
-    origin: "SGN",
-    destination: "HAN",
-    departureAt: "2026-08-10T08:00:00+07:00",
-    arrivalAt: "2026-08-10T10:00:00+07:00",
-    priceInCents: 15_000_000,
-    currency: "VND",
-    availableSeats: 1,
-    ...overrides,
-  };
+  return makeFixtureFlight({ availableSeats: 1, ...overrides });
 }
 
 function createUseCase() {
@@ -60,6 +51,7 @@ before(async () => {
 
 beforeEach(async () => {
   await dataSource.query('TRUNCATE TABLE "bookings", "flights", "audit_logs", "outbox" CASCADE');
+  await insertFlightReferences(dataSource);
 });
 
 after(async () => {

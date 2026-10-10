@@ -4,6 +4,7 @@ import type { Express } from "express";
 import jwt from "jsonwebtoken";
 import request from "supertest";
 
+import type { AircraftRepository } from "../src/aircraft/aircraft-repository.js";
 import { createApp } from "../src/app.js";
 import { createCancelBooking } from "../src/bookings/cancel-booking.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
@@ -12,9 +13,13 @@ import { createListBookings } from "../src/bookings/list-bookings.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createGetFlight } from "../src/flights/get-flight.js";
 import { createListFlights } from "../src/flights/list-flights.js";
+import { createOpenFlight } from "../src/flights/open-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { Logger } from "../src/observability/logger.js";
+import { makeSeats, TEST_AIRPORTS } from "./fixtures/flights.js";
 import {
+  createInMemoryAircraftRepository,
+  createInMemoryAirportRepository,
   createInMemoryAuditRecorder,
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
@@ -53,9 +58,14 @@ function createMemoryLogger(): Logger {
   };
 }
 
+/** Per-app access to the aircraft fake seedFlight registers aircraft in. */
+const seedAccess = new WeakMap<Express, AircraftRepository>();
+
 function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
   const flights = createInMemoryFlightStore();
   const flightRepository = createInMemoryFlightRepository(flights);
+  const airportRepository = createInMemoryAirportRepository(TEST_AIRPORTS);
+  const aircraftRepository = createInMemoryAircraftRepository();
   const bookingRepository = createInMemoryBookingRepository({ flights });
   const audit = createInMemoryAuditRecorder();
   const transactionRunner = createInMemoryTransactionRunner();
@@ -70,12 +80,15 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
   };
 
   const app = createApp({
-    getFlight: createGetFlight({ flightRepository }),
+    getFlight: createGetFlight({ flightRepository, getCurrentTime: () => FIXED_TIME }),
     createFlight: createCreateFlight({
       ...common,
       flightRepository,
+      airportRepository,
+      aircraftRepository,
       generateId: () => crypto.randomUUID(),
     }),
+    openFlight: createOpenFlight({ ...common, flightRepository }),
     createBooking: createCreateBooking({
       ...common,
       bookingRepository,
@@ -84,20 +97,42 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
     cancelBooking: createCancelBooking({ ...common, bookingRepository }),
     getBooking: createGetBooking({ bookingRepository }),
     listBookings: createListBookings({ bookingRepository }),
-    listFlights: createListFlights({ flightRepository }),
+    listFlights: createListFlights({ flightRepository, getCurrentTime: () => FIXED_TIME }),
     ...createUnusedReferenceData(),
     logger: createMemoryLogger(),
     healthChecks: createInMemoryHealthChecks(),
     jwtSecret: TEST_JWT_SECRET,
   });
 
+  seedAccess.set(app, aircraftRepository);
   return { app, audit };
 }
 
 let flightSequence = 0;
 
-async function seedFlight(app: Express, availableSeats = 5): Promise<string> {
+/**
+ * A flight with `seats` seats: registers an aircraft of that size (capacity
+ * comes from the aircraft since Day 46), creates the flight through the API,
+ * then opens it for sale through the API unless `open` is false.
+ */
+async function seedFlight(
+  app: Express,
+  seats = 5,
+  { open = true }: { open?: boolean } = {},
+): Promise<string> {
   flightSequence += 1;
+  const aircraftRepository = seedAccess.get(app);
+  assert.ok(aircraftRepository);
+
+  const registration = `VN-B${String(flightSequence).padStart(3, "0")}`;
+  await aircraftRepository.create({
+    id: crypto.randomUUID(),
+    registration,
+    model: "Airbus A321",
+    createdAt: FIXED_TIME.toISOString(),
+    seats: makeSeats(seats),
+  });
+
   const response = await request(app)
     .post("/api/flights")
     .set("Authorization", `Bearer ${ADMIN}`)
@@ -105,15 +140,24 @@ async function seedFlight(app: Express, availableSeats = 5): Promise<string> {
       flightNumber: `VN${100 + flightSequence}`,
       origin: "SGN",
       destination: "HAN",
+      aircraftRegistration: registration,
       departureAt: "2026-12-10T08:00:00+07:00",
       arrivalAt: "2026-12-10T10:00:00+07:00",
       priceInCents: 1_500_000,
       currency: "VND",
-      availableSeats,
     });
 
   assert.equal(response.status, 201);
-  return response.body.id as string;
+  const flightId = response.body.id as string;
+
+  if (open) {
+    const opened = await request(app)
+      .post(`/api/flights/${flightId}/open`)
+      .set("Authorization", `Bearer ${ADMIN}`);
+    assert.equal(opened.status, 200);
+  }
+
+  return flightId;
 }
 
 function book(app: Express, accessToken: string, flightId: string, passengerName = "Alice") {
@@ -164,6 +208,19 @@ test("POST booking returns 409 when flight is sold out", async () => {
 
   assert.equal(second.status, 409);
   assert.equal(second.body.error.code, "FLIGHT_SOLD_OUT");
+});
+
+test("POST booking on a flight not yet opened for sale is 409 SALES_CLOSED, and no seat is taken", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app, 2, { open: false });
+
+  const response = await book(app, USER_A, flightId);
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error.code, "SALES_CLOSED");
+  const flight = await request(app).get(`/api/flights/${flightId}`);
+  assert.equal(flight.body.status, "SCHEDULED");
+  assert.equal(flight.body.availableSeats, 2);
 });
 
 test("POST booking returns 404 for an unknown or malformed flight id", async () => {
@@ -336,7 +393,7 @@ test("DELETE booking returns 204 then 409 on the owner's second cancel, and rele
   assert.equal(flightAfter.body.availableSeats, 3);
 });
 
-test("audit records the acting accounts: admin for the flight, the owner for create and cancel", async () => {
+test("audit records the acting accounts: admin for creating and opening the flight, the owner for create and cancel", async () => {
   const { app, audit } = createContext();
   const bookingId = await seedBooking(app, USER_A);
   await request(app).delete(`/api/bookings/${bookingId}`).set(as(USER_A));
@@ -347,6 +404,7 @@ test("audit records the acting accounts: admin for the flight, the owner for cre
 
   assert.deepEqual(actorsByAction, {
     FLIGHT_CREATED: { type: "account", id: ADMIN_ACCOUNT },
+    FLIGHT_OPENED: { type: "account", id: ADMIN_ACCOUNT },
     BOOKING_CREATED: { type: "account", id: ACCOUNT_A },
     BOOKING_CANCELLED: { type: "account", id: ACCOUNT_A },
   });

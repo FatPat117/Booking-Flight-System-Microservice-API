@@ -8,6 +8,8 @@ import { createPostgresFlightRepository } from "../../src/flights/postgres/postg
 import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import type { Flight } from "../../src/types.js";
+import { makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
+import { insertFlightReferences } from "./flight-references.js";
 
 /**
  * Runs against the real booking_db Postgres container (see Dev.md), same
@@ -18,20 +20,12 @@ import type { Flight } from "../../src/types.js";
 
 let dataSource: DataSource;
 
+/** OPEN and departing in 2027, so bookable at NOW. */
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
-  return {
-    id: crypto.randomUUID(),
-    flightNumber: "VN123",
-    origin: "SGN",
-    destination: "HAN",
-    departureAt: "2026-08-10T01:00:00.000Z",
-    arrivalAt: "2026-08-10T03:00:00.000Z",
-    priceInCents: 15_000_000,
-    currency: "VND",
-    availableSeats: 1,
-    ...overrides,
-  };
+  return makeFixtureFlight({ availableSeats: 1, ...overrides });
 }
+
+const NOW = new Date("2026-10-10T00:00:00.000Z");
 
 const OWNER_ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
 const OWNER: BookingAccessScope = { kind: "owner", accountId: OWNER_ACCOUNT_ID };
@@ -56,6 +50,7 @@ before(async () => {
 
 beforeEach(async () => {
   await dataSource.query('TRUNCATE TABLE "bookings", "flights" CASCADE');
+  await insertFlightReferences(dataSource);
 });
 
 after(async () => {
@@ -68,20 +63,20 @@ test("reserveSeat: reserved then sold-out, decrementing available_seats in SQL",
   const flight = makeFlight({ availableSeats: 1 });
   await flightRepository.create(flight);
 
-  const first = await bookingRepository.reserveSeat(flight.id);
+  const first = await bookingRepository.reserveSeat(flight.id, NOW);
   assert.deepEqual(first, { outcome: "reserved" });
 
   const afterFirst = await flightRepository.findById(flight.id);
   assert.equal(afterFirst?.availableSeats, 0);
 
-  const second = await bookingRepository.reserveSeat(flight.id);
+  const second = await bookingRepository.reserveSeat(flight.id, NOW);
   assert.deepEqual(second, { outcome: "sold-out" });
 });
 
 test("reserveSeat: flight-not-found for an unknown flight id", async () => {
   const bookingRepository = createPostgresBookingRepository(dataSource);
 
-  const result = await bookingRepository.reserveSeat(crypto.randomUUID());
+  const result = await bookingRepository.reserveSeat(crypto.randomUUID(), NOW);
   assert.deepEqual(result, { outcome: "flight-not-found" });
 });
 
@@ -90,7 +85,7 @@ test("cancel: cancelled with flightId via RETURNING, then already-cancelled", as
   const bookingRepository = createPostgresBookingRepository(dataSource);
   const flight = makeFlight({ availableSeats: 1 });
   await flightRepository.create(flight);
-  await bookingRepository.reserveSeat(flight.id);
+  await bookingRepository.reserveSeat(flight.id, NOW);
   const booking = makeBooking(flight.id);
   await bookingRepository.create(booking);
 
@@ -113,7 +108,7 @@ test("releaseSeat: increments available_seats in SQL", async () => {
   const bookingRepository = createPostgresBookingRepository(dataSource);
   const flight = makeFlight({ availableSeats: 1 });
   await flightRepository.create(flight);
-  await bookingRepository.reserveSeat(flight.id);
+  await bookingRepository.reserveSeat(flight.id, NOW);
 
   await bookingRepository.releaseSeat(flight.id);
 

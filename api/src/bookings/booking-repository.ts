@@ -32,9 +32,11 @@ export type BookingPage = {
   totalItems: number;
 };
 
+/** sales-closed: the flight is not effectively OPEN at `now` (BR-FLT-06). */
 export type ReserveSeatResult =
   | { outcome: "reserved" }
   | { outcome: "sold-out" }
+  | { outcome: "sales-closed" }
   | { outcome: "flight-not-found" };
 
 export type CancelBookingRepositoryResult =
@@ -53,9 +55,12 @@ export type CancelBookingRepositoryResult =
  */
 export type BookingRepository = Readonly<{
   /**
-   * Decrement availableSeats atomically — no separate read-then-write.
+   * Decrement availableSeats atomically — no separate read-then-write — and
+   * only while the flight is bookable at `now`: stored OPEN and more than
+   * 1 hour before departure (BR-FLT-06, the same rule as isBookable). `now`
+   * comes from the caller so reads and holds use one clock (ADR-008).
    */
-  reserveSeat(flightId: string): Promise<ReserveSeatResult>;
+  reserveSeat(flightId: string, now: Date): Promise<ReserveSeatResult>;
   create(booking: Booking): Promise<void>;
   findById(
     bookingId: string,

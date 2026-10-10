@@ -19,11 +19,14 @@ import {
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 import {
+  createInMemoryAircraftRepository,
+  createInMemoryAirportRepository,
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
+  createUnusedOpenFlight,
   createUnusedReferenceData,
 } from "./fakes/in-memory.js";
 
@@ -250,9 +253,15 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
   const bookingRepository = createInMemoryBookingRepository({ flights });
 
   const app = createApp({
-    getFlight: createGetFlight({ flightRepository }),
+    getFlight: createGetFlight({
+      flightRepository,
+      getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+    }),
+    ...createUnusedOpenFlight(),
     createFlight: createCreateFlight({
       flightRepository,
+      airportRepository: createInMemoryAirportRepository(),
+      aircraftRepository: createInMemoryAircraftRepository(),
       auditRecorder: createNoopAuditRecorder(),
       outboxRepository: createNoopOutboxRepository(),
       transactionRunner: createPassthroughTransactionRunner(),
@@ -276,7 +285,10 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
     ...createUnusedReferenceData(),
-    listFlights: createListFlights({ flightRepository }),
+    listFlights: createListFlights({
+      flightRepository,
+      getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+    }),
     logger: createMemoryLogger(),
     healthChecks: createInMemoryHealthChecks(),
     jwtSecret: TEST_JWT_SECRET,
@@ -305,9 +317,15 @@ test("GET /api/whoami returns 401 without a token", async () => {
   const flightRepository = createInMemoryFlightRepository(flights);
 
   const app = createApp({
-    getFlight: createGetFlight({ flightRepository }),
+    getFlight: createGetFlight({
+      flightRepository,
+      getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+    }),
+    ...createUnusedOpenFlight(),
     createFlight: createCreateFlight({
       flightRepository,
+      airportRepository: createInMemoryAirportRepository(),
+      aircraftRepository: createInMemoryAircraftRepository(),
       auditRecorder: createNoopAuditRecorder(),
       outboxRepository: createNoopOutboxRepository(),
       transactionRunner: createPassthroughTransactionRunner(),
@@ -321,7 +339,10 @@ test("GET /api/whoami returns 401 without a token", async () => {
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
     ...createUnusedReferenceData(),
-    listFlights: createListFlights({ flightRepository }),
+    listFlights: createListFlights({
+      flightRepository,
+      getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+    }),
     logger: createMemoryLogger(),
     healthChecks: createInMemoryHealthChecks(),
     jwtSecret: TEST_JWT_SECRET,

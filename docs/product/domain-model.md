@@ -82,6 +82,9 @@ IATA codes are short and readable, but they are reassigned when an airport close
 **8. A seat layout is a template; flights snapshot it (Day 45).**
 Seats belong to the aircraft and have no status. When a flight is scheduled it gets its own FlightSeats copied from the layout (BR-SEAT-03), so a later layout change cannot alter seats already sold, the same reasoning as price snapshots (Decision 4). Seats are stored one row each (`seats`, primary key `aircraft_id, row, letter`) so the database itself rejects a duplicate position (BR-REF-03) and step 4 can generate FlightSeats with one `INSERT … SELECT`.
 
+**9. `CLOSED` and `DEPARTED` are derived from the clock, not stored (Day 46, [ADR-008](../adr/008-time-derived-flight-status.md)).**
+A status set by a person (open, cancel) must be stored. A status that is only a consequence of time ("sales close 1 h before departure") can always be computed: `effective = CANCELLED if cancelled; DEPARTED if now ≥ departure; CLOSED if OPEN and now ≥ departure − 1 h; otherwise the stored status`. Storing it would need a job, a plan for a late job, and a race between the job and someone holding a seat at 59 minutes. Derived, it is always right, and the seat-hold `UPDATE` checks the same condition in its `WHERE` clause (`status = 'OPEN' AND departure_at − 1 h > now`), so BR-FLT-06 is enforced atomically like the seat count.
+
 ### What happens to these boundaries in phase F
 
 When Flight and Booking become separate services with separate databases, "hold seats" runs in the **Flight service**, which owns the inventory. Booking then cannot hold seats and create itself in one transaction any more. It will need a request to the Flight service plus compensation when a later step fails: a saga, or at minimum a reservation with its own expiry on the Flight side. This is accepted: the boundary was chosen so that the *invariant* (BR-SEAT-01) stays inside one service. Only the *workflow* becomes distributed, which is the easier half to make eventually consistent. Today's single transaction across both aggregates is a phase-D convenience, and it is written here so nobody mistakes it for a permanent guarantee.
@@ -94,12 +97,14 @@ When Flight and Booking become separate services with separate databases, "hold 
 |---|---|---|---|---|
 | — | `SCHEDULED` | Admin (US-FLT-01) | BR-FLT-01/02/03/04 | One FlightSeat per Seat, all `AVAILABLE`; `flight-created` |
 | `SCHEDULED` | `OPEN` | Admin (US-FLT-02) | Departure more than 1 h away | Bookable |
-| `OPEN` | `CLOSED` | System job (US-OPS-02) | Now ≥ departure − 1 h (BR-FLT-06) | No new holds; existing holds may still be paid until they expire (BR-PAY-06) |
-| `CLOSED` | `DEPARTED` | System job | Now ≥ departure | Remaining `HELD` bookings expire |
+| `OPEN` | `CLOSED` | **Derived from time** (Decision 9) | Now ≥ departure − 1 h (BR-FLT-06) | No new holds; existing holds may still be paid until they expire (BR-PAY-06) |
+| `CLOSED` | `DEPARTED` | **Derived from time** (Decision 9) | Now ≥ departure | Remaining `HELD` bookings expire (expiry job, step 5) |
 | `SCHEDULED` / `OPEN` / `CLOSED` | `CANCELLED` | Admin (US-OPS-01) | Not departed | Every `HELD`/`CONFIRMED` booking → `CANCELLED` (reason `FLIGHT_CANCELLED`, ignores BR-BOOK-06); one `booking-cancelled` per booking; `flight-cancelled` |
 
+- **Stored** statuses: `SCHEDULED`, `OPEN`, `CANCELLED` (set by people). **Derived** statuses: `CLOSED`, `DEPARTED` (consequences of the clock). The effective status is computed from the stored one, the departure time and now; every rule below is checked against the effective status.
 - **Terminal:** `DEPARTED`, `CANCELLED`.
 - **Forbidden:** anything out of a terminal state; `OPEN → SCHEDULED`; `CLOSED → OPEN` (re-opening after closing would bypass BR-FLT-06).
+- **Not yet reachable (Day 46):** `→ CANCELLED`. Without the cascade of step 9 it would leave active bookings on a cancelled flight, so no route offers it until then.
 - **Reschedule** (US-FLT-03) is not a status change. It is allowed in `SCHEDULED`/`OPEN` and re-validates BR-FLT-01/03/06.
 
 ### FlightSeat
@@ -155,16 +160,17 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 | **BR-REF-01** | An airport code is exactly 3 uppercase letters and unique. | ✅ Day 45: normalized + validation, `UQ_airports_code` + `CHECK` |
 | **BR-REF-02** | An aircraft registration is unique. | ✅ Day 45: normalized, `UQ_aircraft_registration` |
 | **BR-REF-03** | Seat positions are unique within a layout, and every seat has a fare class. | ✅ Day 45: `expandSeatLayout` + `PK_seats`, fare class `CHECK` |
-| **BR-REF-04** | An airport's time zone is a valid IANA name (`Asia/Ho_Chi_Minh`), never an offset. Checked when written, not when read. | ✅ Day 45: `isIanaTimeZone` on write |
+| **BR-REF-04** | An airport's time zone is a valid IANA name (`Asia/Ho_Chi_Minh`), never an offset. `Etc/*` zones are rejected too: they are fixed offsets in disguise, with an inverted sign (`Etc/GMT+7` is UTC−7), and no airport uses one. `UTC` is allowed. Checked when written, not when read. | ✅ Day 45: `isIanaTimeZone` on write |
 | **BR-REF-05** | A seat layout has no edit endpoint. If one is added, it may only change an aircraft no flight references yet; flights already scheduled keep their FlightSeats (BR-SEAT-03). | ✅ Day 45: no edit route exists |
 | **BR-REF-06** | A layout has 1–10 cabins, rows 1–99, 1–10 distinct letters `A`–`K` per cabin, no row in two cabins, and at most 900 seats (the A380 is certified for 853). The total is computed from the input **before** seats are generated. | ✅ Day 45: `expandSeatLayout`, row/letter `CHECK` |
 | **BR-FLT-01** | Arrival is after departure. | ✅ validation + `CHECK` |
 | **BR-FLT-02** | Origin and destination differ. | ✅ validation + `CHECK` |
-| **BR-FLT-03** | An aircraft never operates two flights whose `[departureAt, arrivalAt)` windows overlap. | — (concurrent admins can race; needs a DB-level guard, e.g. an exclusion constraint) |
+| **BR-FLT-03** | An aircraft never operates two flights whose occupancy windows `[departureAt, arrivalAt + turnaround)` overlap (BR-FLT-08). A `CANCELLED` flight occupies nothing. ✅ Day 46: `EXCL_flights_aircraft_schedule` (GiST, `WHERE status <> 'CANCELLED'`) → `409 AIRCRAFT_UNAVAILABLE`; race-tested |
 | **BR-FLT-04** | Flight number + departure instant is unique. | ✅ `UNIQUE` |
-| **BR-FLT-05** | Flight status changes only along the Flight lifecycle table. | — |
-| **BR-FLT-06** | Seats can be held only while the flight is `OPEN`; sales close **1 hour** before departure. | — |
+| **BR-FLT-05** | Flight status changes only along the Flight lifecycle table. | ✅ Day 46: `transitionFlight` table + compare-and-set `changeStatus`; `SCHEDULED → OPEN` reachable (`→ CANCELLED` from step 9) |
+| **BR-FLT-06** | Seats can be held only while the flight is `OPEN`; sales close **1 hour** before departure. | ✅ Day 46: condition inside the seat-hold `UPDATE` → `409 SALES_CLOSED`; reads derive `CLOSED` |
 | **BR-FLT-07** | Cancelling a flight cancels every `HELD`/`CONFIRMED` booking on it, regardless of BR-BOOK-06. | — |
+| **BR-FLT-08** | An aircraft needs at least **45 minutes** on the ground between flights (turnaround: cleaning, fuel, boarding). A flight landing at 10:00 frees the aircraft at 10:45; the window is half-open, so the next departure may be exactly 10:45. | ✅ Day 46: `flight_aircraft_occupancy()` + `AIRCRAFT_TURNAROUND_MS`, boundary pinned by the flight repository contract |
 | **BR-SEAT-01** | A FlightSeat is held or booked by at most one active booking. | Counter version ✅ (`available_seats > 0` OCC) |
 | **BR-SEAT-02** | Holding several seats is all-or-nothing. | — |
 | **BR-SEAT-03** | A flight's FlightSeats are generated from its aircraft's layout when it is scheduled; later layout changes do not affect existing flights. | — |
@@ -212,8 +218,8 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 | Booking ownership | ✅ Done on Day 44: `owner_account_id`, owner-scoped queries, `404` for other accounts | — | — |
 | Passengers | `bookings.passenger_name` free text, one per booking | `BookingPassenger` rows, 1–9 per booking, first/last name | **Yes**: column replaced by a table; request body changes |
 | Seat inventory | `flights.available_seats` counter; `reserveSeat`/`releaseSeat` | `FlightSeat` rows; availability derived (Decision 3) | **Yes**: counter removed; `BookingRepository` port changes |
-| Airports / aircraft | Day 45: `airports`, `aircraft`, `seats` exist (US-REF-01/02/03). Flights still use free 3-letter `origin`/`destination` and no aircraft | `flights` reference `airports` and `aircraft` (step 3) | **Yes**: new required columns on `flights` |
-| Flight status | None (every flight is bookable) | `SCHEDULED/OPEN/CLOSED/DEPARTED/CANCELLED` | **Yes**: new column; existing flights need a status |
+| Airports / aircraft | ✅ Done on Day 46: `flights` reference `airports` and `aircraft` by FK; the text codes are gone (expand → backfill → contract) | — | — |
+| Flight status | ✅ Done on Day 46: stored `SCHEDULED/OPEN/CANCELLED`, `CLOSED/DEPARTED` derived (Decision 9); existing flights backfilled `OPEN` | `→ CANCELLED` with the cascade (step 9) | — |
 | Booking status | `active` / `cancelled` (lowercase) | `HELD/CONFIRMED/EXPIRED/CANCELLED` | **Yes**: value set and `CHECK` change; `active` ≈ `CONFIRMED` |
 | Price | One `price_in_cents` per flight; `VND` or `USD` | `Money` per fare class; `VND` only; snapshot on booking | **Yes**: column rename/split; `USD` dropped |
 | Booking reference | None (UUID only) | 6-char unique reference | No (additive) |
@@ -243,7 +249,7 @@ Ordered by dependency first, then by risk: each step builds only on what earlier
 | 6 | Simulated payment with Idempotency-Key | US-PAY-01, BR-PAY-* | Needs `HELD` (step 5). Adds the payment-vs-expiry race test. |
 | 7 | Cancellation policy + seat change | US-BOOK-05/06, BR-BOOK-06/07 | Needs `CONFIRMED` (step 6). |
 | 8 | Flight search + details with availability | US-FLT-04/05 | Read-only. Best done once availability is derived from FlightSeats (step 4) and status exists (step 3). |
-| 9 | Flight cancellation cascade + automatic close/depart | US-OPS-01/02, BR-FLT-07 | Touches every booking state, so it comes after all of them exist. |
+| 9 | Flight cancellation cascade | US-OPS-01, BR-FLT-07 | Touches every booking state, so it comes after all of them exist. (Automatic close/depart, US-OPS-02, needs no job since Day 46: those statuses are derived, Decision 9.) |
 | 10 | Admin: manifest, load factor, audit query | US-ADM-* | Read-only reports over everything above. |
 
 US-FLT-03 (reschedule) and US-BOOK-04 (find by reference) are Should items that slot into steps 3 and 5 if time allows.

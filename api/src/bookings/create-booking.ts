@@ -13,6 +13,7 @@ export type CreateBookingResult =
   | { outcome: "created"; booking: Booking }
   | { outcome: "validation_failed"; issues: ValidationIssue[] }
   | { outcome: "sold-out" }
+  | { outcome: "sales-closed" }
   | { outcome: "flight-not-found" };
 
 /** The actor becomes the booking's owner (BR-AUTH-01). */
@@ -70,17 +71,15 @@ export function createCreateBooking(
     const { passengerName } = validation.value;
 
     return transactionRunner.run(async () => {
-      const reserveResult = await bookingRepository.reserveSeat(flightId);
+      const now = getCurrentTime();
+      const reserveResult = await bookingRepository.reserveSeat(flightId, now);
 
-      if (reserveResult.outcome === "flight-not-found") {
-        return { outcome: "flight-not-found" } as const;
+      // flight-not-found / sold-out / sales-closed pass through unchanged.
+      if (reserveResult.outcome !== "reserved") {
+        return reserveResult;
       }
 
-      if (reserveResult.outcome === "sold-out") {
-        return { outcome: "sold-out" } as const;
-      }
-
-      const occurredAt = getCurrentTime().toISOString();
+      const occurredAt = now.toISOString();
       const booking: Booking = {
         id: generateId(),
         flightId,

@@ -15,6 +15,7 @@ import {
   createInMemoryFlightStore,
   createInMemoryTransactionRunner,
 } from "./fakes/in-memory.js";
+import { makeFlight as makeFixtureFlight } from "./fixtures/flights.js";
 
 const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
 const FLIGHT_ID = "f1f1f1f1-0000-4000-8000-000000000001";
@@ -22,19 +23,9 @@ const BOOKING_ID = "b0b0b0b0-0000-4000-8000-000000000001";
 const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
 const ACTOR_A: Actor = { accountId: ACCOUNT_A };
 
+/** An OPEN flight departing in 2027, well after FIXED_TIME. */
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
-  return {
-    id: FLIGHT_ID,
-    flightNumber: "VN123",
-    origin: "SGN",
-    destination: "HAN",
-    departureAt: "2026-08-10T01:00:00.000Z",
-    arrivalAt: "2026-08-10T03:00:00.000Z",
-    priceInCents: 15_000_000,
-    currency: "VND",
-    availableSeats: 1,
-    ...overrides,
-  };
+  return makeFixtureFlight({ id: FLIGHT_ID, availableSeats: 1, ...overrides });
 }
 
 function createCapturingAuditRecorder() {
@@ -198,6 +189,33 @@ test("returns sold-out without outbox when no seats remain", async () => {
     (await flightRepository.findById(FLIGHT_ID))?.availableSeats,
     0,
   );
+});
+
+test("a flight not open for sale is sales-closed: no seat taken, no audit, no event (BR-FLT-06)", async () => {
+  const flights = createInMemoryFlightStore();
+  const flightRepository = createInMemoryFlightRepository(flights);
+  await flightRepository.create(makeFlight({ status: "SCHEDULED", availableSeats: 3 }));
+  const { auditRecorder, records } = createCapturingAuditRecorder();
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
+
+  const createBooking = createCreateBooking({
+    bookingRepository: createInMemoryBookingRepository({ flights }),
+    auditRecorder,
+    outboxRepository,
+    transactionRunner: createInMemoryTransactionRunner(),
+    generateId: () => BOOKING_ID,
+    generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
+    getRequestId: () => undefined,
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const result = await createBooking(FLIGHT_ID, { passengerName: "Alice" }, ACTOR_A);
+
+  assert.deepEqual(result, { outcome: "sales-closed" });
+  assert.equal((await flightRepository.findById(FLIGHT_ID))?.availableSeats, 3);
+  assert.equal(records.length, 0);
+  assert.equal(entries.length, 0);
 });
 
 test("returns flight-not-found without outbox for missing flight", async () => {

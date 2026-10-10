@@ -12,10 +12,14 @@ import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createGetFlight } from "../src/flights/get-flight.js";
 import { createListFlights } from "../src/flights/list-flights.js";
+import { createOpenFlight } from "../src/flights/open-flight.js";
 import type { HealthChecks } from "../src/health/health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 import { getRequestContext } from "../src/observability/request-context.js";
+import { TEST_AIRCRAFT, TEST_AIRPORTS } from "./fixtures/flights.js";
 import {
+  createInMemoryAircraftRepository,
+  createInMemoryAirportRepository,
   createInMemoryAuditRecorder,
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
@@ -28,6 +32,9 @@ import {
 } from "./fakes/in-memory.js";
 
 const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
+// Before every departure below, so the effective status is the stored one
+// unless a test picks a departure close to it.
+const NOW = new Date("2026-07-01T00:00:00.000Z");
 
 function signAccessToken(role: "user" | "admin" = "admin"): string {
   return jwt.sign(
@@ -49,7 +56,7 @@ type FlightPayload = {
   arrivalAt: string;
   priceInCents: number;
   currency: string;
-  availableSeats: number;
+  aircraftRegistration: string;
   [key: string]: unknown;
 };
 
@@ -98,7 +105,7 @@ function makeValidFlight(
     arrivalAt: "2026-08-10T10:00:00+07:00",
     priceInCents: 15_000_000,
     currency: "VND",
-    availableSeats: 120,
+    aircraftRegistration: "VN-A321",
     ...overrides,
   };
 }
@@ -130,6 +137,8 @@ function createAppWithRepository(
 
   const createFlight = createCreateFlight({
     flightRepository,
+    airportRepository: createInMemoryAirportRepository(TEST_AIRPORTS),
+    aircraftRepository: createInMemoryAircraftRepository(TEST_AIRCRAFT),
     auditRecorder,
     outboxRepository: createNoopOutboxRepository(),
     transactionRunner,
@@ -137,7 +146,16 @@ function createAppWithRepository(
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
-    getCurrentTime: () => new Date(),
+    getCurrentTime: () => NOW,
+  });
+
+  const openFlight = createOpenFlight({
+    flightRepository,
+    auditRecorder,
+    transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => NOW,
   });
 
   const createBooking = createCreateBooking({
@@ -149,18 +167,20 @@ function createAppWithRepository(
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
-    getCurrentTime: () => new Date(),
+    getCurrentTime: () => NOW,
   });
 
   const listFlights = createListFlights({
     flightRepository,
+    getCurrentTime: () => NOW,
   });
 
   const { logger } = createMemoryLogger();
 
   return createApp({
-    getFlight: createGetFlight({ flightRepository }),
+    getFlight: createGetFlight({ flightRepository, getCurrentTime: () => NOW }),
     createFlight,
+    openFlight,
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
@@ -302,6 +322,7 @@ test("POST /api/flights creates a normalized flight with Location header", async
         origin: " sgn ",
         destination: "han",
         currency: "vnd",
+        aircraftRegistration: " vn-a321 ",
         isAdmin: true,
         internalStatus: "APPROVED",
       }),
@@ -322,6 +343,9 @@ test("POST /api/flights creates a normalized flight with Location header", async
   assert.equal(response.body.arrivalAt, "2026-08-10T03:00:00.000Z");
   assert.equal(response.body.priceInCents, 15_000_000);
   assert.equal(response.body.availableSeats, 120);
+  assert.equal(response.body.status, "SCHEDULED");
+  assert.equal(response.body.aircraftId, TEST_AIRCRAFT[0]?.id);
+  assert.equal(response.body.originAirportId, TEST_AIRPORTS[2]?.id);
   assert.equal(response.body.isAdmin, undefined);
   assert.equal(response.body.internalStatus, undefined);
   assert.equal(response.body.flight_number, undefined);
@@ -334,14 +358,216 @@ test("POST /api/flights creates a normalized flight with Location header", async
   assert.equal(getResponse.body.flightNumber, "VN123");
 });
 
-test("POST /api/flights accepts availableSeats = 0", async () => {
+test("POST /api/flights takes its seat count from the aircraft's layout", async () => {
   const { app } = createTestContext();
 
   const response = await postFlight(app)
-    .send(makeValidFlight({ availableSeats: 0 }));
+    .send(makeValidFlight({ aircraftRegistration: "VN-A322" }));
 
   assert.equal(response.status, 201);
-  assert.equal(response.body.availableSeats, 0);
+  assert.equal(response.body.availableSeats, 5);
+});
+
+test("POST /api/flights rejects availableSeats: capacity is no longer client-set (Day 46)", async () => {
+  const { app } = createTestContext();
+
+  const response = await postFlight(app)
+    .send(makeValidFlight({ availableSeats: 300 }));
+
+  assert.equal(response.status, 422);
+  assert.deepEqual(
+    response.body.error.details.map((issue: { field: string; code: string }) => [
+      issue.field,
+      issue.code,
+    ]),
+    [["availableSeats", "UNSUPPORTED_FIELD"]],
+  );
+});
+
+test("POST /api/flights names every unknown airport and aircraft at once (422)", async () => {
+  const { app } = createTestContext();
+
+  const response = await postFlight(app).send(
+    makeValidFlight({
+      origin: "XXX",
+      destination: "YYY",
+      aircraftRegistration: "VN-NOPE",
+    }),
+  );
+
+  assert.equal(response.status, 422);
+  assert.deepEqual(
+    response.body.error.details.map((issue: { field: string; code: string }) => [
+      issue.field,
+      issue.code,
+    ]),
+    [
+      ["origin", "UNKNOWN_AIRPORT"],
+      ["destination", "UNKNOWN_AIRPORT"],
+      ["aircraftRegistration", "UNKNOWN_AIRCRAFT"],
+    ],
+  );
+});
+
+test("POST /api/flights on an aircraft that is still flying (or turning around) is 409 AIRCRAFT_UNAVAILABLE", async () => {
+  const { app } = createTestContext();
+
+  const first = await postFlight(app).send(makeValidFlight());
+  assert.equal(first.status, 201);
+
+  // First lands 10:00 local; the aircraft is busy until 10:45 (BR-FLT-08).
+  const tooSoon = await postFlight(app).send(
+    makeValidFlight({
+      flightNumber: "VN124",
+      origin: "HAN",
+      destination: "SGN",
+      departureAt: "2026-08-10T10:30:00+07:00",
+      arrivalAt: "2026-08-10T12:30:00+07:00",
+    }),
+  );
+  assert.equal(tooSoon.status, 409);
+  assert.equal(tooSoon.body.error.code, "AIRCRAFT_UNAVAILABLE");
+
+  const afterTurnaround = await postFlight(app).send(
+    makeValidFlight({
+      flightNumber: "VN124",
+      origin: "HAN",
+      destination: "SGN",
+      departureAt: "2026-08-10T10:45:00+07:00",
+      arrivalAt: "2026-08-10T12:45:00+07:00",
+    }),
+  );
+  assert.equal(afterTurnaround.status, 201);
+});
+
+// ---------------------------------------------------------------------------
+// Opening a flight for sale (US-FLT-02)
+// ---------------------------------------------------------------------------
+
+function postOpen(app: Express, flightId: string) {
+  return withAdminAuth(request(app).post(`/api/flights/${flightId}/open`));
+}
+
+async function createScheduledFlight(
+  app: Express,
+  overrides: Partial<FlightPayload> = {},
+): Promise<string> {
+  const response = await postFlight(app).send(makeValidFlight(overrides));
+  assert.equal(response.status, 201);
+  assert.equal(response.body.status, "SCHEDULED");
+  return response.body.id as string;
+}
+
+test("POST /api/flights/:id/open opens a scheduled flight and audits who did it", async () => {
+  const { app, audit } = createTestContext();
+  const flightId = await createScheduledFlight(app);
+
+  const response = await postOpen(app, flightId).set("x-request-id", "open-1");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.id, flightId);
+  assert.equal(response.body.status, "OPEN");
+  assert.equal((await request(app).get(`/api/flights/${flightId}`)).body.status, "OPEN");
+
+  const opened = audit.records.find((record) => record.action === "FLIGHT_OPENED");
+  assert.ok(opened);
+  assert.deepEqual(opened.actor, { type: "account", id: "test-user-id" });
+  assert.deepEqual(opened.target, { type: "flight", id: flightId });
+  assert.equal(opened.requestId, "open-1");
+  assert.deepEqual(opened.metadata, {
+    flightNumber: "VN123",
+    previousStatus: "SCHEDULED",
+  });
+});
+
+test("opening an already open flight is 409 INVALID_FLIGHT_STATUS (NOT_ALLOWED), audited once", async () => {
+  const { app, audit } = createTestContext();
+  const flightId = await createScheduledFlight(app);
+  assert.equal((await postOpen(app, flightId)).status, 200);
+
+  const again = await postOpen(app, flightId);
+
+  assert.equal(again.status, 409);
+  assert.equal(again.body.error.code, "INVALID_FLIGHT_STATUS");
+  assert.deepEqual(
+    again.body.error.details.map((issue: { field: string; code: string }) => [
+      issue.field,
+      issue.code,
+    ]),
+    [["status", "NOT_ALLOWED"]],
+  );
+  assert.equal(
+    audit.records.filter((record) => record.action === "FLIGHT_OPENED").length,
+    1,
+  );
+});
+
+test("opening a flight that departs in 1 hour or less is 409 DEPARTURE_TOO_SOON and it stays SCHEDULED", async () => {
+  const { app } = createTestContext();
+  // NOW + 1 h exactly: the guard needs *more* than 1 hour (BR-FLT-05/06).
+  const flightId = await createScheduledFlight(app, {
+    departureAt: "2026-07-01T01:00:00Z",
+    arrivalAt: "2026-07-01T03:00:00Z",
+  });
+
+  const response = await postOpen(app, flightId);
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error.code, "INVALID_FLIGHT_STATUS");
+  assert.equal(response.body.error.details[0].code, "DEPARTURE_TOO_SOON");
+  assert.equal((await request(app).get(`/api/flights/${flightId}`)).body.status, "SCHEDULED");
+});
+
+test("losing the compare-and-set to a concurrent open is 409 FLIGHT_STATUS_CHANGED with no audit", async () => {
+  const flights = createInMemoryFlightStore();
+  const inner = createInMemoryFlightRepository(flights);
+  const audit = createInMemoryAuditRecorder();
+  // Another admin's open lands between this request's read and its write.
+  const racing: FlightRepository = {
+    ...inner,
+    async changeStatus(flightId, expected, next) {
+      await inner.changeStatus(flightId, "SCHEDULED", "OPEN");
+      return inner.changeStatus(flightId, expected, next);
+    },
+  };
+  const app = createAppWithRepository(racing, { flights, auditRecorder: audit });
+  const flightId = await createScheduledFlight(app);
+
+  const response = await postOpen(app, flightId);
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error.code, "FLIGHT_STATUS_CHANGED");
+  assert.match(response.body.error.message, /now OPEN/);
+  assert.equal(
+    audit.records.filter((record) => record.action === "FLIGHT_OPENED").length,
+    0,
+  );
+});
+
+test("opening an unknown or malformed flight id is 404 FLIGHT_NOT_FOUND", async () => {
+  const { app } = createTestContext();
+
+  const unknown = await postOpen(app, "c0ffee00-0000-4000-8000-000000000000");
+  const malformed = await postOpen(app, "not-a-uuid");
+
+  for (const response of [unknown, malformed]) {
+    assert.equal(response.status, 404);
+    assert.equal(response.body.error.code, "FLIGHT_NOT_FOUND");
+  }
+});
+
+test("only an admin can open a flight: 401 without a token, 403 for a user", async () => {
+  const { app } = createTestContext();
+  const flightId = await createScheduledFlight(app);
+
+  const anonymous = await request(app).post(`/api/flights/${flightId}/open`);
+  const user = await request(app)
+    .post(`/api/flights/${flightId}/open`)
+    .set("Authorization", `Bearer ${signAccessToken("user")}`);
+
+  assert.equal(anonymous.status, 401);
+  assert.equal(user.status, 403);
+  assert.equal((await request(app).get(`/api/flights/${flightId}`)).body.status, "SCHEDULED");
 });
 
 // ---------------------------------------------------------------------------
@@ -462,10 +688,10 @@ test("rejects wrong primitive types and empty strings", async (t) => {
       field: "priceInCents",
     },
     {
-      name: "negative seats",
-      override: { availableSeats: -1 },
-      code: "INVALID_AVAILABLE_SEATS",
-      field: "availableSeats",
+      name: "empty aircraftRegistration",
+      override: { aircraftRegistration: "" },
+      code: "INVALID_STRING",
+      field: "aircraftRegistration",
     },
     {
       name: "unsafe integer price",
@@ -669,6 +895,9 @@ test("repository unexpected failure returns generic 500 without leaking internal
     create() {
       throw new Error("sensitive database failure");
     },
+    changeStatus() {
+      throw new Error("sensitive database failure");
+    },
   };
 
   const app = createAppWithRepository(failingRepository, {
@@ -813,6 +1042,7 @@ test("POST /api/flights records an audit log when created", async () => {
     flightNumber: "VN123",
     origin: "SGN",
     destination: "HAN",
+    aircraftRegistration: "VN-A321",
     correlationId: "audit-request-1",
   });
 });

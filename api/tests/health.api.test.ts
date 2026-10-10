@@ -14,11 +14,14 @@ import type { HealthChecks } from "../src/health/health-checks.js";
 import type { Logger } from "../src/observability/logger.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 import {
+  createInMemoryAircraftRepository,
+  createInMemoryAirportRepository,
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
+  createUnusedOpenFlight,
   createUnusedReferenceData,
 } from "./fakes/in-memory.js";
 
@@ -69,6 +72,8 @@ function createTestContext() {
 
   const createFlight = createCreateFlight({
     flightRepository,
+    airportRepository: createInMemoryAirportRepository(),
+    aircraftRepository: createInMemoryAircraftRepository(),
     auditRecorder: createNoopAuditRecorder(),
     outboxRepository: createNoopOutboxRepository(),
     transactionRunner: createPassthroughTransactionRunner(),
@@ -81,13 +86,18 @@ function createTestContext() {
 
   const listFlights = createListFlights({
     flightRepository,
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
   });
 
   const healthChecks = createInMemoryHealthChecks();
 
   const app = createApp({
-    getFlight: createGetFlight({ flightRepository }),
+    getFlight: createGetFlight({
+      flightRepository,
+      getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+    }),
     createFlight,
+    ...createUnusedOpenFlight(),
     createBooking: createTestCreateBooking(bookingRepository),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
@@ -150,6 +160,8 @@ test("GET /ready returns 503 when database is unavailable", async () => {
 
   const createFlight = createCreateFlight({
     flightRepository,
+    airportRepository: createInMemoryAirportRepository(),
+    aircraftRepository: createInMemoryAircraftRepository(),
     auditRecorder: createNoopAuditRecorder(),
     outboxRepository: createNoopOutboxRepository(),
     transactionRunner: createPassthroughTransactionRunner(),
@@ -162,6 +174,7 @@ test("GET /ready returns 503 when database is unavailable", async () => {
 
   const listFlights = createListFlights({
     flightRepository,
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
   });
 
   const unhealthyHealthChecks: HealthChecks = {
@@ -178,8 +191,12 @@ test("GET /ready returns 503 when database is unavailable", async () => {
   };
 
   const app = createApp({
-    getFlight: createGetFlight({ flightRepository }),
+    getFlight: createGetFlight({
+      flightRepository,
+      getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+    }),
     createFlight,
+    ...createUnusedOpenFlight(),
     createBooking: createTestCreateBooking(bookingRepository),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),

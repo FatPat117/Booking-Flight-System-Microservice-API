@@ -1,5 +1,9 @@
 import type { DataSource } from "typeorm";
 
+import {
+  isBookable,
+  toStoredFlightStatus,
+} from "../../flights/flight-lifecycle.js";
 import { FlightEntity } from "../../flights/postgres/flight.entity.js";
 import { resolveEntityManager } from "../../postgres/transaction-context.js";
 import type {
@@ -42,30 +46,48 @@ export function createPostgresBookingRepository(
   dataSource: DataSource,
 ): BookingRepository {
   return {
-    async reserveSeat(flightId: string): Promise<ReserveSeatResult> {
+    async reserveSeat(flightId: string, now: Date): Promise<ReserveSeatResult> {
       const manager = resolveEntityManager(dataSource);
 
       // `available_seats - 1` is computed in SQL, not read out and
       // subtracted in TypeScript — the whole point of a conditional UPDATE
       // (ADR-004) is that "check" and "write" are one statement, evaluated
       // against the row's latest version after waiting for its lock.
+      // Day 46: the sales window (BR-FLT-06) is part of the same condition,
+      // the SQL twin of isBookable() — a flight cannot close between a check
+      // and the write.
       const result = await manager
         .createQueryBuilder()
         .update(FlightEntity)
         .set({ availableSeats: () => '"available_seats" - 1' })
-        .where("id = :id AND available_seats > 0", { id: flightId })
+        .where(
+          `id = :id AND available_seats > 0 AND status = 'OPEN'
+           AND departure_at - interval '1 hour' > :now`,
+          { id: flightId, now },
+        )
         .execute();
 
       if (result.affected === 1) {
         return { outcome: "reserved" };
       }
 
+      // Only picks the outcome; the decision was the UPDATE above.
       const flight = await manager.getRepository(FlightEntity).findOneBy({
         id: flightId,
       });
 
       if (flight === null) {
         return { outcome: "flight-not-found" };
+      }
+
+      if (
+        !isBookable(
+          toStoredFlightStatus(flight.status),
+          flight.departureAt.toISOString(),
+          now,
+        )
+      ) {
+        return { outcome: "sales-closed" };
       }
 
       return { outcome: "sold-out" };

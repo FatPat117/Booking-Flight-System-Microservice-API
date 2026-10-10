@@ -12,6 +12,8 @@ import {
   NestedTransactionError,
 } from "../../src/transactions/postgres-transaction-runner.js";
 import type { Flight } from "../../src/types.js";
+import { makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
+import { insertFlightReferences } from "./flight-references.js";
 
 /**
  * Tests the runner across repositories (Flight + Outbox together), not any
@@ -22,18 +24,7 @@ import type { Flight } from "../../src/types.js";
 let dataSource: DataSource;
 
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
-  return {
-    id: crypto.randomUUID(),
-    flightNumber: "VN123",
-    origin: "SGN",
-    destination: "HAN",
-    departureAt: "2026-08-10T01:00:00.000Z",
-    arrivalAt: "2026-08-10T03:00:00.000Z",
-    priceInCents: 15_000_000,
-    currency: "VND",
-    availableSeats: 120,
-    ...overrides,
-  };
+  return makeFixtureFlight({ availableSeats: 120, ...overrides });
 }
 
 function makeEntry(id: string) {
@@ -53,6 +44,7 @@ before(async () => {
 
 beforeEach(async () => {
   await dataSource.query('TRUNCATE TABLE "flights", "outbox" CASCADE');
+  await insertFlightReferences(dataSource);
 });
 
 after(async () => {
@@ -134,13 +126,15 @@ test("counter-proof: a repository that bypasses transaction-context is not part 
         await legacyStyleRepository.insert({
           id: flight.id,
           flightNumber: flight.flightNumber,
-          origin: flight.origin,
-          destination: flight.destination,
+          originAirportId: flight.originAirportId,
+          destinationAirportId: flight.destinationAirportId,
+          aircraftId: flight.aircraftId,
           departureAt: new Date(flight.departureAt),
           arrivalAt: new Date(flight.arrivalAt),
           priceInCents: flight.priceInCents,
           currency: flight.currency,
           availableSeats: flight.availableSeats,
+          status: flight.status,
         });
         throw new Error("boom");
       }),

@@ -16,6 +16,7 @@ import {
   createInMemoryFlightStore,
   createInMemoryTransactionRunner,
 } from "./fakes/in-memory.js";
+import { makeFlight as makeFixtureFlight } from "./fixtures/flights.js";
 
 const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
 const FLIGHT_ID = "f1f1f1f1-0000-4000-8000-000000000001";
@@ -27,19 +28,9 @@ const ACTOR_B: Actor = { accountId: ACCOUNT_B };
 const SCOPE_A: BookingAccessScope = { kind: "owner", accountId: ACCOUNT_A };
 const SCOPE_B: BookingAccessScope = { kind: "owner", accountId: ACCOUNT_B };
 
+/** An OPEN flight departing in 2027, well after FIXED_TIME. */
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
-  return {
-    id: FLIGHT_ID,
-    flightNumber: "VN123",
-    origin: "SGN",
-    destination: "HAN",
-    departureAt: "2026-08-10T01:00:00.000Z",
-    arrivalAt: "2026-08-10T03:00:00.000Z",
-    priceInCents: 15_000_000,
-    currency: "VND",
-    availableSeats: 5,
-    ...overrides,
-  };
+  return makeFixtureFlight({ id: FLIGHT_ID, availableSeats: 5, ...overrides });
 }
 
 function createCapturingAuditRecorder() {

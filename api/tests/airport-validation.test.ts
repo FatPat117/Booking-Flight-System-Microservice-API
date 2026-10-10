@@ -57,7 +57,6 @@ test("IANA names are accepted whether canonical or an alias, and stored as given
     "Asia/Saigon",
     "Europe/London",
     "America/Argentina/Buenos_Aires",
-    "Etc/GMT+7",
     "UTC",
   ]) {
     assert.equal(isIanaTimeZone(timeZone), true, timeZone);
@@ -65,6 +64,13 @@ test("IANA names are accepted whether canonical or an alias, and stored as given
 
   const result = validateRegisterAirportInput(VALID);
   assert.equal(result.success && result.value.timeZone, "Asia/Ho_Chi_Minh");
+});
+
+test("Etc/* zones are rejected: fixed offsets with an inverted sign (BR-REF-04)", () => {
+  // Intl accepts every one of these; Etc/GMT+7 is actually UTC−7.
+  for (const timeZone of ["Etc/GMT+7", "Etc/GMT-7", "Etc/UTC"]) {
+    assert.equal(isIanaTimeZone(timeZone), false, timeZone);
+  }
 });
 
 test("every missing field is reported at once", () => {

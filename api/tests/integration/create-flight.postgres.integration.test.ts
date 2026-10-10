@@ -6,6 +6,8 @@ import type {
   AuditRecordInput,
   AuditRecorder,
 } from "../../src/audit/audit-recorder.js";
+import { createPostgresAircraftRepository } from "../../src/aircraft/postgres/postgres-aircraft-repository.js";
+import { createPostgresAirportRepository } from "../../src/airports/postgres/postgres-airport-repository.js";
 import { createPostgresAuditRecorder } from "../../src/audit/postgres/postgres-audit-recorder.js";
 import { createCreateFlight } from "../../src/flights/create-flight.js";
 import { createPostgresFlightRepository } from "../../src/flights/postgres/postgres-flight-repository.js";
@@ -13,6 +15,7 @@ import { createPostgresOutboxRepository } from "../../src/outbox/postgres/postgr
 import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
+import { insertFlightReferences } from "./flight-references.js";
 
 /**
  * Runs the real createCreateFlight use case, wired end to end with every
@@ -29,16 +32,17 @@ const ADMIN_ACTOR = { accountId: "aaaaaaaa-0000-4000-8000-000000000001" };
 
 let dataSource: DataSource;
 
+/** Fixture airports ZZA/ZZB and aircraft ZZ-FX1 (flight-references.ts). */
 function makeRawInput(overrides: Record<string, unknown> = {}) {
   return {
     flightNumber: "VN123",
-    origin: "SGN",
-    destination: "HAN",
+    origin: "ZZA",
+    destination: "ZZB",
+    aircraftRegistration: "ZZ-FX1",
     departureAt: "2026-08-10T08:00:00+07:00",
     arrivalAt: "2026-08-10T10:00:00+07:00",
     priceInCents: 15_000_000,
     currency: "VND",
-    availableSeats: 120,
     ...overrides,
   };
 }
@@ -48,6 +52,8 @@ function createUseCase(
 ) {
   return createCreateFlight({
     flightRepository: createPostgresFlightRepository(dataSource),
+    airportRepository: createPostgresAirportRepository(dataSource),
+    aircraftRepository: createPostgresAircraftRepository(dataSource),
     auditRecorder,
     outboxRepository: createPostgresOutboxRepository(dataSource),
     transactionRunner: createPostgresTransactionRunner(dataSource),
@@ -69,6 +75,7 @@ beforeEach(async () => {
   await dataSource.query(
     'TRUNCATE TABLE "flights", "audit_logs", "outbox" CASCADE',
   );
+  await insertFlightReferences(dataSource);
 });
 
 after(async () => {
@@ -112,7 +119,11 @@ test("duplicate: second create with the same flightNumber+departureAt resolves d
   const first = await createFlight(input, ADMIN_ACTOR);
   assert.equal(first.outcome, "created");
 
-  const second = await createFlight(input, ADMIN_ACTOR);
+  // Another aircraft, so only the flight-number rule can object.
+  const second = await createFlight(
+    { ...input, aircraftRegistration: "ZZ-FX2" },
+    ADMIN_ACTOR,
+  );
   assert.equal(second.outcome, "duplicate");
 
   const flightRows = await dataSource.query(`SELECT id FROM flights`);

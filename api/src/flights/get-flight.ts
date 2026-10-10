@@ -1,8 +1,9 @@
-import { isUuid, type Flight } from "../types.js";
+import { isUuid } from "../types.js";
 import type { FlightRepository } from "./flight-repository.js";
+import { toFlightView, type FlightView } from "./flight-view.js";
 
 export type GetFlightResult =
-  | { outcome: "found"; flight: Flight }
+  | { outcome: "found"; flight: FlightView }
   | { outcome: "not-found" };
 
 /**
@@ -15,8 +16,9 @@ export type GetFlight = (flightId: string) => Promise<GetFlightResult>;
 
 export function createGetFlight(dependencies: {
   flightRepository: FlightRepository;
+  getCurrentTime: () => Date;
 }): GetFlight {
-  const { flightRepository } = dependencies;
+  const { flightRepository, getCurrentTime } = dependencies;
 
   return async (flightId) => {
     if (!isUuid(flightId)) {
@@ -27,6 +29,6 @@ export function createGetFlight(dependencies: {
 
     return flight === undefined
       ? { outcome: "not-found" }
-      : { outcome: "found", flight };
+      : { outcome: "found", flight: toFlightView(flight, getCurrentTime()) };
   };
 }

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { after, before, beforeEach } from "node:test";
 import type { DataSource } from "typeorm";
 
@@ -6,6 +7,7 @@ import { createPostgresFlightRepository } from "../../src/flights/postgres/postg
 import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { runBookingRepositoryContract } from "../contracts/booking-repository.contract.js";
+import { insertFlightReferences } from "./flight-references.js";
 
 /**
  * The same contract the in-memory fake runs in the unit tier
@@ -22,6 +24,7 @@ before(async () => {
 
 beforeEach(async () => {
   await dataSource.query('TRUNCATE TABLE "bookings", "flights" CASCADE');
+  await insertFlightReferences(dataSource);
 });
 
 after(async () => {
@@ -34,7 +37,7 @@ runBookingRepositoryContract("postgres", async () => {
   return {
     repository: createPostgresBookingRepository(dataSource),
     async insertFlight(flight) {
-      await flightRepository.create(flight);
+      assert.deepEqual(await flightRepository.create(flight), { outcome: "created" });
     },
   };
 });

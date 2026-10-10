@@ -56,5 +56,13 @@ export function createPostgresAirportRepository(
 
       return { items: entities.map(mapAirport), totalItems };
     },
+
+    async findByCode(code: string): Promise<Airport | undefined> {
+      const entity = await resolveEntityManager(dataSource)
+        .getRepository(AirportEntity)
+        .findOneBy({ code });
+
+      return entity === null ? undefined : mapAirport(entity);
+    },
   };
 }

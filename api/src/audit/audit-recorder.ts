@@ -33,6 +33,7 @@ export type AuditTarget =
  */
 export type AuditAction =
   | "FLIGHT_CREATED"
+  | "FLIGHT_OPENED"
   | "BOOKING_CREATED"
   | "BOOKING_CANCELLED"
   | "AIRPORT_REGISTERED"

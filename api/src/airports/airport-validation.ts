@@ -12,13 +12,15 @@ const AIRPORT_CODE = /^[A-Z]{3}$/;
 const MAX_TEXT_LENGTH = 100;
 
 /**
- * `Area/Location` names (`Asia/Ho_Chi_Minh`, `America/Argentina/Buenos_Aires`,
- * `Etc/GMT+7`) or `UTC`. Excludes what Intl would also accept but is not a
- * time zone a person means: offsets (`+07:00`) and legacy abbreviations
- * (`EST` silently resolves to `America/Panama`). Each segment starts upper
- * case so `asia/ho_chi_minh` is not stored in a second spelling.
+ * `Area/Location` names (`Asia/Ho_Chi_Minh`, `America/Argentina/Buenos_Aires`)
+ * or `UTC`. Excludes what Intl would also accept but is not a time zone a
+ * person means: offsets (`+07:00`), legacy abbreviations (`EST` silently
+ * resolves to `America/Panama`) and, since Day 46, the `Etc/` area — fixed
+ * offsets in disguise with an inverted sign (`Etc/GMT+7` is UTC−7) that no
+ * airport uses. Each segment starts upper case so `asia/ho_chi_minh` is not
+ * stored in a second spelling.
  */
-const IANA_NAME = /^(UTC|[A-Z][A-Za-z_]*(\/[A-Z][A-Za-z0-9_+-]*)+)$/;
+const IANA_NAME = /^(UTC|(?!Etc\/)[A-Z][A-Za-z_]*(\/[A-Z][A-Za-z0-9_+-]*)+)$/;
 
 /** The one place an airport code is normalized (BR-REF-01). */
 export function normalizeAirportCode(raw: string): string {

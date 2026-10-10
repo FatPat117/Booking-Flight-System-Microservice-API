@@ -8,6 +8,7 @@ const runtime = await createApplication({ config });
 const expressApp = createApp({
   getFlight: runtime.getFlight,
   createFlight: runtime.createFlight,
+  openFlight: runtime.openFlight,
   createBooking: runtime.createBooking,
   cancelBooking: runtime.cancelBooking,
   getBooking: runtime.getBooking,

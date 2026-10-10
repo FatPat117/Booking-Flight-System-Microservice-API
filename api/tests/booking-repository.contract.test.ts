@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 import { runBookingRepositoryContract } from "./contracts/booking-repository.contract.js";
 import {
   createInMemoryBookingRepository,
@@ -12,7 +14,7 @@ runBookingRepositoryContract("in-memory", async () => {
   return {
     repository: createInMemoryBookingRepository({ flights }),
     async insertFlight(flight) {
-      await flightRepository.create(flight);
+      assert.deepEqual(await flightRepository.create(flight), { outcome: "created" });
     },
   };
 });

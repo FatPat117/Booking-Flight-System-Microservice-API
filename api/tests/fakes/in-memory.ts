@@ -21,7 +21,12 @@ import type {
 } from "../../src/bookings/booking-repository.js";
 import type { GetBooking } from "../../src/bookings/get-booking.js";
 import type { ListBookings } from "../../src/bookings/list-bookings.js";
+import {
+  AIRCRAFT_TURNAROUND_MS,
+  isBookable,
+} from "../../src/flights/flight-lifecycle.js";
 import type { FlightRepository } from "../../src/flights/flight-repository.js";
+import type { OpenFlight } from "../../src/flights/open-flight.js";
 import type {
   HealthChecks,
   HealthStatus,
@@ -82,18 +87,46 @@ export function createInMemoryFlightRepository(
     },
 
     async create(flight) {
-      // Mirrors Postgres: PK on id, UNIQUE on (flight_number, departure_at)
-      // compared as instants (TIMESTAMPTZ), not as strings.
-      const isDuplicate =
-        flights.has(flight.id) ||
-        [...flights.values()].some(
-          (existing) =>
-            existing.flightNumber === flight.flightNumber &&
-            toInstant(existing.departureAt) === toInstant(flight.departureAt),
-        );
+      // Postgres rejects a colliding primary key as an error, not an outcome.
+      if (flights.has(flight.id)) {
+        throw new Error(`duplicate flight id: ${flight.id}`);
+      }
+
+      // Mirrors UNIQUE (flight_number, departure_at), compared as instants
+      // (TIMESTAMPTZ), not as strings.
+      const isDuplicate = [...flights.values()].some(
+        (existing) =>
+          existing.flightNumber === flight.flightNumber &&
+          toInstant(existing.departureAt) === toInstant(flight.departureAt),
+      );
 
       if (isDuplicate) {
         return { outcome: "duplicate" };
+      }
+
+      // Mirrors EXCL_flights_aircraft_schedule: same aircraft, both not
+      // CANCELLED, half-open windows [departure, arrival + turnaround) overlap.
+      // The flight repository contract runs the boundary cases on both sides.
+      const occupies = (candidate: Flight) => ({
+        from: toInstant(candidate.departureAt),
+        until: toInstant(candidate.arrivalAt) + AIRCRAFT_TURNAROUND_MS,
+      });
+      const window = occupies(flight);
+      const clashes =
+        flight.status !== "CANCELLED" &&
+        [...flights.values()].some((existing) => {
+          if (
+            existing.aircraftId !== flight.aircraftId ||
+            existing.status === "CANCELLED"
+          ) {
+            return false;
+          }
+          const other = occupies(existing);
+          return window.from < other.until && other.from < window.until;
+        });
+
+      if (clashes) {
+        return { outcome: "aircraft-unavailable" };
       }
 
       flights.set(flight.id, {
@@ -102,6 +135,20 @@ export function createInMemoryFlightRepository(
         arrivalAt: new Date(flight.arrivalAt).toISOString(),
       });
       return { outcome: "created" };
+    },
+
+    async changeStatus(flightId, expected, next) {
+      const flight = flights.get(flightId);
+
+      if (flight === undefined) {
+        return { outcome: "not-found" };
+      }
+      if (flight.status !== expected) {
+        return { outcome: "status-changed", current: flight.status };
+      }
+
+      flight.status = next;
+      return { outcome: "changed" };
     },
   };
 }
@@ -123,11 +170,14 @@ export function createInMemoryBookingRepository(deps: {
   const bookings = new Map<string, Booking>();
 
   return {
-    async reserveSeat(flightId) {
+    async reserveSeat(flightId, now) {
       const flight = flights.get(flightId);
 
       if (flight === undefined) {
         return { outcome: "flight-not-found" };
+      }
+      if (!isBookable(flight.status, flight.departureAt, now)) {
+        return { outcome: "sales-closed" };
       }
       if (flight.availableSeats <= 0) {
         return { outcome: "sold-out" };
@@ -204,8 +254,12 @@ export function createInMemoryBookingRepository(deps: {
   };
 }
 
-export function createInMemoryAirportRepository(): AirportRepository {
-  const airports = new Map<string, Airport>();
+export function createInMemoryAirportRepository(
+  initial: readonly Airport[] = [],
+): AirportRepository {
+  const airports = new Map<string, Airport>(
+    initial.map((airport) => [airport.id, structuredClone(airport)]),
+  );
 
   return {
     async create(airport) {
@@ -229,11 +283,22 @@ export function createInMemoryAirportRepository(): AirportRepository {
         totalItems: ordered.length,
       };
     },
+
+    async findByCode(code) {
+      const airport = [...airports.values()].find(
+        (stored) => stored.code === code,
+      );
+      return airport === undefined ? undefined : structuredClone(airport);
+    },
   };
 }
 
-export function createInMemoryAircraftRepository(): AircraftRepository {
-  const aircraftById = new Map<string, Aircraft>();
+export function createInMemoryAircraftRepository(
+  initial: readonly Aircraft[] = [],
+): AircraftRepository {
+  const aircraftById = new Map<string, Aircraft>(
+    initial.map((aircraft) => [aircraft.id, structuredClone(aircraft)]),
+  );
 
   return {
     async create(aircraft) {
@@ -259,21 +324,31 @@ export function createInMemoryAircraftRepository(): AircraftRepository {
     },
 
     async findById(id) {
-      const aircraft = aircraftById.get(id);
+      return withSortedSeats(aircraftById.get(id));
+    },
 
-      if (aircraft === undefined) {
-        return undefined;
-      }
-
-      const seats = [...aircraft.seats].sort(
-        (a, b) =>
-          a.position.row - b.position.row ||
-          a.position.letter.localeCompare(b.position.letter),
+    async findByRegistration(registration) {
+      return withSortedSeats(
+        [...aircraftById.values()].find(
+          (stored) => stored.registration === registration,
+        ),
       );
-
-      return structuredClone({ ...aircraft, seats });
     },
   };
+}
+
+function withSortedSeats(aircraft: Aircraft | undefined): Aircraft | undefined {
+  if (aircraft === undefined) {
+    return undefined;
+  }
+
+  const seats = [...aircraft.seats].sort(
+    (a, b) =>
+      a.position.row - b.position.row ||
+      a.position.letter.localeCompare(b.position.letter),
+  );
+
+  return structuredClone({ ...aircraft, seats });
 }
 
 export type InMemoryAuditRecorder = AuditRecorder &
@@ -348,6 +423,14 @@ export function createInMemoryHealthChecks(
       return { status, checks: { database: { status } } };
     },
   };
+}
+
+/**
+ * For HTTP tests that build createApp() but never open a flight. Opening is
+ * tested in flights.api.test.ts with the real use case.
+ */
+export function createUnusedOpenFlight(): { openFlight: OpenFlight } {
+  return { openFlight: async () => ({ outcome: "not-found" }) };
 }
 
 /**

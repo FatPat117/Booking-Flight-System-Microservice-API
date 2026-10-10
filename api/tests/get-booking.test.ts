@@ -11,6 +11,7 @@ import {
   createInMemoryFlightRepository,
   createInMemoryFlightStore,
 } from "./fakes/in-memory.js";
+import { makeFlight } from "./fixtures/flights.js";
 
 const FLIGHT_ID = "f1f1f1f1-0000-4000-8000-000000000001";
 const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
@@ -20,17 +21,9 @@ const SCOPE_B: BookingAccessScope = { kind: "owner", accountId: ACCOUNT_B };
 
 async function createRuntimeWithBookingOfA() {
   const flights = createInMemoryFlightStore();
-  await createInMemoryFlightRepository(flights).create({
-    id: FLIGHT_ID,
-    flightNumber: "VN123",
-    origin: "SGN",
-    destination: "HAN",
-    departureAt: "2026-08-10T01:00:00.000Z",
-    arrivalAt: "2026-08-10T03:00:00.000Z",
-    priceInCents: 15_000_000,
-    currency: "VND",
-    availableSeats: 5,
-  });
+  await createInMemoryFlightRepository(flights).create(
+    makeFlight({ id: FLIGHT_ID }),
+  );
   const bookingRepository = createInMemoryBookingRepository({ flights });
 
   const booking: Booking = {

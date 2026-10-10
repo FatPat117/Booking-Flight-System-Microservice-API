@@ -11,6 +11,8 @@ import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import type { Flight } from "../../src/types.js";
+import { makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
+import { insertFlightReferences } from "./flight-references.js";
 
 /**
  * Runs the real createCancelBooking use case wired to every Postgres
@@ -24,18 +26,7 @@ const OWNER_ACTOR = { accountId: OWNER_ACCOUNT_ID };
 let dataSource: DataSource;
 
 function makeFlight(overrides: Partial<Flight> = {}): Flight {
-  return {
-    id: crypto.randomUUID(),
-    flightNumber: "VN123",
-    origin: "SGN",
-    destination: "HAN",
-    departureAt: "2026-08-10T08:00:00+07:00",
-    arrivalAt: "2026-08-10T10:00:00+07:00",
-    priceInCents: 15_000_000,
-    currency: "VND",
-    availableSeats: 1,
-    ...overrides,
-  };
+  return makeFixtureFlight({ availableSeats: 1, ...overrides });
 }
 
 function createUseCase() {
@@ -59,6 +50,7 @@ before(async () => {
 
 beforeEach(async () => {
   await dataSource.query('TRUNCATE TABLE "bookings", "flights", "audit_logs", "outbox" CASCADE');
+  await insertFlightReferences(dataSource);
 });
 
 after(async () => {
@@ -70,7 +62,7 @@ test("cancelled then already-cancelled: seat count increases by exactly 1, no ex
   const bookingRepository = createPostgresBookingRepository(dataSource);
   const flight = makeFlight({ availableSeats: 1 });
   await flightRepository.create(flight);
-  await bookingRepository.reserveSeat(flight.id);
+  await bookingRepository.reserveSeat(flight.id, new Date("2026-07-20T00:00:00.000Z"));
 
   const booking = {
     id: crypto.randomUUID(),

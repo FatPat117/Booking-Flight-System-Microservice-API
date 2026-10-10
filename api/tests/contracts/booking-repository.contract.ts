@@ -7,6 +7,7 @@ import type {
   BookingRepository,
 } from "../../src/bookings/booking-repository.js";
 import type { Flight } from "../../src/types.js";
+import { FIXTURE_OTHER_AIRCRAFT_ID, makeFlight } from "../fixtures/flights.js";
 
 /**
  * What every BookingRepository promises, run against every implementation
@@ -30,20 +31,15 @@ export type BookingRepositoryContractSubject = Readonly<{
   insertFlight(flight: Flight): Promise<void>;
 }>;
 
-let flightSequence = 0;
+/** The clock every hold in this contract is made at (fixture flights depart in 2027). */
+const NOW = new Date("2026-10-10T00:00:00.000Z");
+const HOUR_MS = 60 * 60 * 1000;
 
-function makeFlight(availableSeats: number): Flight {
-  flightSequence += 1;
+function departingIn(ms: number): Pick<Flight, "departureAt" | "arrivalAt"> {
+  const departure = NOW.getTime() + ms;
   return {
-    id: crypto.randomUUID(),
-    flightNumber: `CT${String(flightSequence).padStart(3, "0")}`,
-    origin: "SGN",
-    destination: "HAN",
-    departureAt: "2026-08-10T01:00:00.000Z",
-    arrivalAt: "2026-08-10T03:00:00.000Z",
-    priceInCents: 15_000_000,
-    currency: "VND",
-    availableSeats,
+    departureAt: new Date(departure).toISOString(),
+    arrivalAt: new Date(departure + 2 * HOUR_MS).toISOString(),
   };
 }
 
@@ -80,8 +76,9 @@ export function runBookingRepositoryContract(
   async function seedFlight(
     subject: BookingRepositoryContractSubject,
     availableSeats: number,
+    overrides: Partial<Flight> = {},
   ): Promise<Flight> {
-    const flight = makeFlight(availableSeats);
+    const flight = makeFlight({ availableSeats, ...overrides });
     await subject.insertFlight(flight);
     return flight;
   }
@@ -92,7 +89,7 @@ export function runBookingRepositoryContract(
     createdAt?: string,
   ): Promise<Booking> {
     const flight = await seedFlight(subject, 1);
-    await subject.repository.reserveSeat(flight.id);
+    await subject.repository.reserveSeat(flight.id, NOW);
     const booking = makeBooking(flight.id, ownerAccountId, createdAt);
     await subject.repository.create(booking);
     return booking;
@@ -102,28 +99,74 @@ export function runBookingRepositoryContract(
     const subject = await setup();
     const flight = await seedFlight(subject, 2);
 
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id), { outcome: "reserved" });
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id), { outcome: "reserved" });
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id), { outcome: "sold-out" });
+    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), { outcome: "reserved" });
+    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), { outcome: "reserved" });
+    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), { outcome: "sold-out" });
   });
 
   test(name("reserveSeat on an unknown flight returns flight-not-found, not sold-out"), async () => {
     const subject = await setup();
 
-    assert.deepEqual(await subject.repository.reserveSeat(crypto.randomUUID()), {
+    assert.deepEqual(await subject.repository.reserveSeat(crypto.randomUUID(), NOW), {
       outcome: "flight-not-found",
+    });
+  });
+
+  // Day 46, BR-FLT-06: the hold's WHERE clause (Postgres) and isBookable()
+  // (fake) must agree, including at the one-hour boundary (ADR-008).
+  test(name("reserveSeat on a flight not opened for sale is sales-closed and takes no seat"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 1, { status: "SCHEDULED" });
+
+    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), {
+      outcome: "sales-closed",
+    });
+  });
+
+  test(name("reserveSeat on a cancelled flight is sales-closed"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 1, { status: "CANCELLED" });
+
+    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), {
+      outcome: "sales-closed",
+    });
+  });
+
+  test(name("sales close exactly 1 hour before departure"), async () => {
+    const subject = await setup();
+    const atBoundary = await seedFlight(subject, 1, departingIn(HOUR_MS));
+    // Another aircraft: the two windows overlap (BR-FLT-03).
+    const justBefore = await seedFlight(subject, 1, {
+      ...departingIn(HOUR_MS + 1000),
+      aircraftId: FIXTURE_OTHER_AIRCRAFT_ID,
+    });
+
+    assert.deepEqual(await subject.repository.reserveSeat(atBoundary.id, NOW), {
+      outcome: "sales-closed",
+    });
+    assert.deepEqual(await subject.repository.reserveSeat(justBefore.id, NOW), {
+      outcome: "reserved",
+    });
+  });
+
+  test(name("a sold-out open flight is sold-out, not sales-closed"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 0);
+
+    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), {
+      outcome: "sold-out",
     });
   });
 
   test(name("releaseSeat makes one more seat reservable on a sold-out flight"), async () => {
     const subject = await setup();
     const flight = await seedFlight(subject, 1);
-    await subject.repository.reserveSeat(flight.id);
+    await subject.repository.reserveSeat(flight.id, NOW);
 
     await subject.repository.releaseSeat(flight.id);
 
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id), { outcome: "reserved" });
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id), { outcome: "sold-out" });
+    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), { outcome: "reserved" });
+    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), { outcome: "sold-out" });
   });
 
   test(name("cancel on an active booking returns cancelled with its flightId"), async () => {
