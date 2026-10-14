@@ -100,6 +100,7 @@ test("creates booking with audit and outbox when seat is available", async () =>
     return;
   }
 
+  assert.equal(result.booking.seat, "1A");
   assert.equal(result.booking.passengerName, "Alice");
   assert.equal(result.booking.ownerAccountId, ACCOUNT_A);
   assert.equal(entries.length, 1);
@@ -128,10 +129,43 @@ test("creates booking with audit and outbox when seat is available", async () =>
       metadata: {
         flightId: FLIGHT_ID,
         passengerName: "Alice",
+        seat: "1A",
         correlationId: "fixed-request-id",
       },
     },
   ]);
+});
+
+test("the seat is claimed for the booking's own id, before the booking is stored", async () => {
+  const { bookingRepository: inner, transactionRunner } = await createTestRuntime();
+  const calls: string[] = [];
+  const bookingRepository: BookingRepository = {
+    ...inner,
+    async reserveSeat(flightId, bookingId, now) {
+      calls.push(`reserveSeat:${bookingId}`);
+      return inner.reserveSeat(flightId, bookingId, now);
+    },
+    async create(booking) {
+      calls.push(`create:${booking.id}`);
+      return inner.create(booking);
+    },
+  };
+
+  const createBooking = createCreateBooking({
+    bookingRepository,
+    auditRecorder: createCapturingAuditRecorder().auditRecorder,
+    outboxRepository: createCapturingOutboxRepository().outboxRepository,
+    transactionRunner,
+    generateId: () => BOOKING_ID,
+    generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
+    getRequestId: () => undefined,
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  await createBooking(FLIGHT_ID, { passengerName: "Alice" }, ACTOR_A);
+
+  assert.deepEqual(calls, [`reserveSeat:${BOOKING_ID}`, `create:${BOOKING_ID}`]);
 });
 
 test("booking outbox correlationId falls back to eventId when requestId is missing", async () => {
@@ -255,7 +289,7 @@ test("a malformed flight id is flight-not-found, never sent to the repository", 
   const bookingRepository: BookingRepository = {
     async reserveSeat() {
       repositoryCalls += 1;
-      return { outcome: "reserved" };
+      return { outcome: "reserved", seat: "1A" };
     },
     async create() {
       repositoryCalls += 1;
@@ -271,9 +305,6 @@ test("a malformed flight id is flight-not-found, never sent to the repository", 
     async cancel() {
       repositoryCalls += 1;
       return { outcome: "not-found" };
-    },
-    async releaseSeat() {
-      repositoryCalls += 1;
     },
   };
 

@@ -55,6 +55,9 @@ test("flights-summary-job logs total from repository page totalItems", async () 
     async findById() {
       return undefined;
     },
+    async findSeats() {
+      return undefined;
+    },
     async create() {
       return { outcome: "created" };
     },

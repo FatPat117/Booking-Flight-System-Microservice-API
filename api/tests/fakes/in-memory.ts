@@ -3,7 +3,11 @@ import type {
   AircraftRepository,
 } from "../../src/aircraft/aircraft-repository.js";
 import type { RegisterAircraft } from "../../src/aircraft/register-aircraft.js";
-import { formatSeatPosition } from "../../src/aircraft/seat-position.js";
+import type { FareClass } from "../../src/aircraft/seat-layout.js";
+import {
+  formatSeatPosition,
+  type SeatPosition,
+} from "../../src/aircraft/seat-position.js";
 import type {
   Airport,
   AirportRepository,
@@ -26,6 +30,7 @@ import {
   isBookable,
 } from "../../src/flights/flight-lifecycle.js";
 import type { FlightRepository } from "../../src/flights/flight-repository.js";
+import type { GetFlightSeatMap } from "../../src/flights/get-flight-seat-map.js";
 import type { OpenFlight } from "../../src/flights/open-flight.js";
 import type {
   HealthChecks,
@@ -51,20 +56,57 @@ import type { Flight } from "../../src/types.js";
  * test mutating a returned object must not change what is "stored".
  */
 
-/** Shared between the flight and booking fakes: bookings change seat counts. */
-export type InMemoryFlightStore = Map<string, Flight>;
+type InMemoryFlightSeat = {
+  position: SeatPosition;
+  fareClass: FareClass;
+  bookingId: string | null;
+};
+
+/**
+ * Shared between the flight and booking fakes: bookings claim and release
+ * seats. Like Postgres, a flight stores no seat count — reads count the
+ * free seats.
+ */
+export type InMemoryFlightStore = Readonly<{
+  flights: Map<string, Omit<Flight, "availableSeats">>;
+  /** Per flight, in (row, letter) order — the order seats are allocated in. */
+  seats: Map<string, InMemoryFlightSeat[]>;
+}>;
 
 export function createInMemoryFlightStore(): InMemoryFlightStore {
-  return new Map();
+  return { flights: new Map(), seats: new Map() };
 }
 
 function toInstant(isoDate: string): number {
   return new Date(isoDate).getTime();
 }
 
+/**
+ * The fake knows no aircraft layouts, so it creates as many seats as the
+ * flight's `availableSeats` says (CreateFlight passes the aircraft's count),
+ * economy rows of six, ABCDEF — the order Postgres copies the fixture
+ * aircraft's layout in, so both hand out the same seat codes.
+ */
+function generateSeats(count: number): InMemoryFlightSeat[] {
+  return Array.from({ length: count }, (_, index) => ({
+    position: { row: Math.floor(index / 6) + 1, letter: "ABCDEF"[index % 6] as string },
+    fareClass: "ECONOMY",
+    bookingId: null,
+  }));
+}
+
 export function createInMemoryFlightRepository(
-  flights: InMemoryFlightStore = createInMemoryFlightStore(),
+  store: InMemoryFlightStore = createInMemoryFlightStore(),
 ): FlightRepository {
+  const { flights, seats } = store;
+
+  const read = (flight: Omit<Flight, "availableSeats">): Flight => ({
+    ...structuredClone(flight),
+    availableSeats: (seats.get(flight.id) ?? []).filter(
+      (seat) => seat.bookingId === null,
+    ).length,
+  });
+
   return {
     async findPage({ limit, offset }) {
       const ordered = [...flights.values()].sort(
@@ -74,16 +116,26 @@ export function createInMemoryFlightRepository(
       );
 
       return {
-        items: ordered.slice(offset, offset + limit).map((flight) =>
-          structuredClone(flight),
-        ),
+        items: ordered.slice(offset, offset + limit).map(read),
         totalItems: flights.size,
       };
     },
 
     async findById(id) {
       const flight = flights.get(id);
-      return flight === undefined ? undefined : structuredClone(flight);
+      return flight === undefined ? undefined : read(flight);
+    },
+
+    async findSeats(flightId) {
+      if (!flights.has(flightId)) {
+        return undefined;
+      }
+
+      return (seats.get(flightId) ?? []).map((seat) => ({
+        position: { ...seat.position },
+        fareClass: seat.fareClass,
+        status: seat.bookingId === null ? "AVAILABLE" : "BOOKED",
+      }));
     },
 
     async create(flight) {
@@ -107,7 +159,7 @@ export function createInMemoryFlightRepository(
       // Mirrors EXCL_flights_aircraft_schedule: same aircraft, both not
       // CANCELLED, half-open windows [departure, arrival + turnaround) overlap.
       // The flight repository contract runs the boundary cases on both sides.
-      const occupies = (candidate: Flight) => ({
+      const occupies = (candidate: Pick<Flight, "departureAt" | "arrivalAt">) => ({
         from: toInstant(candidate.departureAt),
         until: toInstant(candidate.arrivalAt) + AIRCRAFT_TURNAROUND_MS,
       });
@@ -129,11 +181,13 @@ export function createInMemoryFlightRepository(
         return { outcome: "aircraft-unavailable" };
       }
 
+      const { availableSeats, ...stored } = structuredClone(flight);
       flights.set(flight.id, {
-        ...structuredClone(flight),
+        ...stored,
         departureAt: new Date(flight.departureAt).toISOString(),
         arrivalAt: new Date(flight.arrivalAt).toISOString(),
       });
+      seats.set(flight.id, generateSeats(availableSeats));
       return { outcome: "created" };
     },
 
@@ -166,11 +220,21 @@ function isInScope(booking: Booking, scope: BookingAccessScope): boolean {
 export function createInMemoryBookingRepository(deps: {
   flights: InMemoryFlightStore;
 }): InMemoryBookingRepository {
-  const { flights } = deps;
+  const { flights, seats } = deps.flights;
   const bookings = new Map<string, Booking>();
 
+  // Like Postgres, the seat is read from the seat side, never from the
+  // stored booking: create() ignores the argument's `seat`.
+  const read = (booking: Booking): Booking => {
+    const held = seats.get(booking.flightId)?.find((seat) => seat.bookingId === booking.id);
+    return {
+      ...structuredClone(booking),
+      seat: held === undefined ? null : formatSeatPosition(held.position),
+    };
+  };
+
   return {
-    async reserveSeat(flightId, now) {
+    async reserveSeat(flightId, bookingId, now) {
       const flight = flights.get(flightId);
 
       if (flight === undefined) {
@@ -179,12 +243,14 @@ export function createInMemoryBookingRepository(deps: {
       if (!isBookable(flight.status, flight.departureAt, now)) {
         return { outcome: "sales-closed" };
       }
-      if (flight.availableSeats <= 0) {
+
+      const free = seats.get(flightId)?.find((seat) => seat.bookingId === null);
+      if (free === undefined) {
         return { outcome: "sold-out" };
       }
 
-      flight.availableSeats -= 1;
-      return { outcome: "reserved" };
+      free.bookingId = bookingId;
+      return { outcome: "reserved", seat: formatSeatPosition(free.position) };
     },
 
     async create(booking) {
@@ -204,7 +270,7 @@ export function createInMemoryBookingRepository(deps: {
       const booking = bookings.get(bookingId);
       return booking === undefined || !isInScope(booking, scope)
         ? undefined
-        : structuredClone(booking);
+        : read(booking);
     },
 
     async findPage(scope, request) {
@@ -219,7 +285,7 @@ export function createInMemoryBookingRepository(deps: {
       return {
         items: visible
           .slice(request.offset, request.offset + request.limit)
-          .map((booking) => structuredClone(booking)),
+          .map(read),
         totalItems: visible.length,
       };
     },
@@ -236,20 +302,17 @@ export function createInMemoryBookingRepository(deps: {
       }
 
       bookings.set(bookingId, { ...booking, status: "cancelled" });
-      return { outcome: "cancelled", flightId: booking.flightId };
-    },
-
-    async releaseSeat(flightId) {
-      // Unknown flight: Postgres's UPDATE matches zero rows, silently.
-      const flight = flights.get(flightId);
-      if (flight !== undefined) {
-        flight.availableSeats += 1;
+      for (const seat of seats.get(booking.flightId) ?? []) {
+        if (seat.bookingId === bookingId) {
+          seat.bookingId = null;
+        }
       }
+      return { outcome: "cancelled", flightId: booking.flightId };
     },
 
     peek(id) {
       const booking = bookings.get(id);
-      return booking === undefined ? undefined : structuredClone(booking);
+      return booking === undefined ? undefined : read(booking);
     },
   };
 }
@@ -431,6 +494,14 @@ export function createInMemoryHealthChecks(
  */
 export function createUnusedOpenFlight(): { openFlight: OpenFlight } {
   return { openFlight: async () => ({ outcome: "not-found" }) };
+}
+
+/**
+ * For HTTP tests that build createApp() but never read a seat map. The seat
+ * map is tested in flights.api.test.ts with the real use case.
+ */
+export function createUnusedFlightSeatMap(): { getFlightSeatMap: GetFlightSeatMap } {
+  return { getFlightSeatMap: async () => ({ outcome: "not-found" }) };
 }
 
 /**

@@ -7,7 +7,10 @@ import {
   isForeignKeyViolation,
   isUniqueViolation,
 } from "../../postgres/postgres-errors.js";
-import { resolveEntityManager } from "../../postgres/transaction-context.js";
+import {
+  isInTransaction,
+  resolveEntityManager,
+} from "../../postgres/transaction-context.js";
 import type { Flight } from "../../types.js";
 import {
   toStoredFlightStatus,
@@ -19,7 +22,10 @@ import type {
   FlightPage,
   FlightPageRequest,
   FlightRepository,
+  FlightSeat,
+  FlightSeatStatus,
 } from "../flight-repository.js";
+import type { FareClass } from "../../aircraft/seat-layout.js";
 import { FlightEntity } from "./flight.entity.js";
 
 /**
@@ -29,7 +35,7 @@ import { FlightEntity } from "./flight.entity.js";
  * FlightRepository's callers know FlightEntity exists.
  */
 function mapFlight(
-  entity: FlightEntity,
+  { entity, availableSeats }: FlightRow,
   codes: ReadonlyMap<string, string>,
 ): Flight {
   const code = (airportId: string) => {
@@ -52,19 +58,54 @@ function mapFlight(
     arrivalAt: entity.arrivalAt.toISOString(),
     priceInCents: entity.priceInCents,
     currency: entity.currency,
-    availableSeats: entity.availableSeats,
+    availableSeats,
     status: toStoredFlightStatus(entity.status),
   };
+}
+
+type FlightRow = { entity: FlightEntity; availableSeats: number };
+
+/**
+ * A correlated subquery, not a join: a flight with no AVAILABLE seat counts
+ * 0 instead of dropping out of the result (what an INNER JOIN would do), and
+ * the page stays one query however many flights it holds.
+ */
+const AVAILABLE_SEATS = `(SELECT count(*)::int FROM "flight_seats" "seat"
+  WHERE "seat"."flight_id" = "flight"."id" AND "seat"."status" = 'AVAILABLE')`;
+
+function selectFlights(manager: EntityManager) {
+  return manager
+    .getRepository(FlightEntity)
+    .createQueryBuilder("flight")
+    .addSelect(AVAILABLE_SEATS, "available_seats");
+}
+
+async function loadFlightRows(
+  query: ReturnType<typeof selectFlights>,
+): Promise<FlightRow[]> {
+  const { entities, raw } = await query.getRawAndEntities<{
+    flight_id: string;
+    available_seats: number;
+  }>();
+  const counts = new Map(raw.map((row) => [row.flight_id, row.available_seats]));
+
+  return entities.map((entity) => {
+    const availableSeats = counts.get(entity.id);
+    if (availableSeats === undefined) {
+      throw new Error(`available_seats missing for flight ${entity.id}`);
+    }
+    return { entity, availableSeats };
+  });
 }
 
 /** One query for every airport code a page of flights needs. */
 async function mapFlights(
   manager: EntityManager,
-  entities: FlightEntity[],
+  rows: FlightRow[],
 ): Promise<Flight[]> {
   const airportIds = [
     ...new Set(
-      entities.flatMap((entity) => [
+      rows.flatMap(({ entity }) => [
         entity.originAirportId,
         entity.destinationAirportId,
       ]),
@@ -80,7 +121,68 @@ async function mapFlights(
     .find({ where: { id: In(airportIds) }, select: { id: true, code: true } });
   const codes = new Map(airports.map((airport) => [airport.id, airport.code]));
 
-  return entities.map((entity) => mapFlight(entity, codes));
+  return rows.map((row) => mapFlight(row, codes));
+}
+
+async function insertFlight(
+  manager: EntityManager,
+  flight: Flight,
+): Promise<CreateFlightRepositoryResult> {
+  try {
+    await manager.getRepository(FlightEntity).insert({
+      id: flight.id,
+      flightNumber: flight.flightNumber,
+      originAirportId: flight.originAirportId,
+      destinationAirportId: flight.destinationAirportId,
+      aircraftId: flight.aircraftId,
+      departureAt: new Date(flight.departureAt),
+      arrivalAt: new Date(flight.arrivalAt),
+      priceInCents: flight.priceInCents,
+      currency: flight.currency,
+      status: flight.status,
+    });
+  } catch (error) {
+    if (isUniqueViolation(error, "UQ_flights_flight_number_departure_at")) {
+      return { outcome: "duplicate" };
+    }
+
+    if (isExclusionViolation(error, "EXCL_flights_aircraft_schedule")) {
+      return { outcome: "aircraft-unavailable" };
+    }
+
+    // Unlike a unique index, an exclusion constraint has no special path
+    // for concurrent inserts: two overlapping flights of one aircraft
+    // inserted at once each wait for the other's uncommitted row, and
+    // Postgres aborts one with 40P01 instead of 23P01 (race test B).
+    // Mapping it to aircraft-unavailable assumes this insert is the first
+    // write of CreateFlight's transaction, so that wait is the only cycle
+    // it can be in. Anything written after it (the flight's seats) must
+    // only touch rows no other transaction can see yet. A write added
+    // *before* this insert breaks the assumption: retry instead.
+    // If the winner later rolls back too, the slot stays free and this
+    // 409 is safe to retry.
+    if (isDeadlockDetected(error)) {
+      return { outcome: "aircraft-unavailable" };
+    }
+
+    if (isForeignKeyViolation(error)) {
+      return { outcome: "reference-not-found" };
+    }
+
+    throw error;
+  }
+
+  // One statement copies the whole layout inside Postgres: no seat list
+  // travels through TypeScript, and the copy is the aircraft's layout as
+  // this transaction sees it.
+  await manager.query(
+    `INSERT INTO "flight_seats" ("flight_id", "row", "letter", "fare_class", "status")
+     SELECT $1, "row", "letter", "fare_class", 'AVAILABLE'
+     FROM "seats" WHERE "aircraft_id" = $2`,
+    [flight.id, flight.aircraftId],
+  );
+
+  return { outcome: "created" };
 }
 
 export function createPostgresFlightRepository(
@@ -89,77 +191,77 @@ export function createPostgresFlightRepository(
   return {
     async findPage(request: FlightPageRequest): Promise<FlightPage> {
       const manager = resolveEntityManager(dataSource);
-      const [entities, totalItems] = await manager
-        .getRepository(FlightEntity)
-        .findAndCount({
-          order: { departureAt: "ASC", id: "ASC" },
-          take: request.limit,
-          skip: request.offset,
-        });
+      const rows = await loadFlightRows(
+        selectFlights(manager)
+          .orderBy("flight.departureAt", "ASC")
+          .addOrderBy("flight.id", "ASC")
+          .limit(request.limit)
+          .offset(request.offset),
+      );
+      const totalItems = await manager.getRepository(FlightEntity).count();
 
       return {
-        items: await mapFlights(manager, entities),
+        items: await mapFlights(manager, rows),
         totalItems,
       };
     },
 
     async findById(id: string): Promise<Flight | undefined> {
       const manager = resolveEntityManager(dataSource);
-      const entity = await manager.getRepository(FlightEntity).findOneBy({ id });
+      const rows = await loadFlightRows(
+        selectFlights(manager).where("flight.id = :id", { id }),
+      );
 
-      if (entity === null) {
-        return undefined;
-      }
-
-      const [flight] = await mapFlights(manager, [entity]);
+      const [flight] = await mapFlights(manager, rows);
       return flight;
     },
 
-    async create(flight: Flight): Promise<CreateFlightRepositoryResult> {
-      const repository =
-        resolveEntityManager(dataSource).getRepository(FlightEntity);
+    async findSeats(flightId: string): Promise<FlightSeat[] | undefined> {
+      // LEFT JOIN: no row at all means no flight; one row of NULLs means a
+      // flight without seats. booking_id is never selected.
+      const rows = (await resolveEntityManager(dataSource).query(
+        `SELECT seat."row", seat."letter", seat."fare_class", seat."status"
+         FROM "flights" flight
+         LEFT JOIN "flight_seats" seat ON seat."flight_id" = flight."id"
+         WHERE flight."id" = $1
+         ORDER BY seat."row", seat."letter"`,
+        [flightId],
+      )) as Array<{
+        row: number | null;
+        letter: string | null;
+        fare_class: string | null;
+        status: string | null;
+      }>;
 
-      try {
-        await repository.insert({
-          id: flight.id,
-          flightNumber: flight.flightNumber,
-          originAirportId: flight.originAirportId,
-          destinationAirportId: flight.destinationAirportId,
-          aircraftId: flight.aircraftId,
-          departureAt: new Date(flight.departureAt),
-          arrivalAt: new Date(flight.arrivalAt),
-          priceInCents: flight.priceInCents,
-          currency: flight.currency,
-          availableSeats: flight.availableSeats,
-          status: flight.status,
-        });
-        return { outcome: "created" };
-      } catch (error) {
-        if (isUniqueViolation(error, "UQ_flights_flight_number_departure_at")) {
-          return { outcome: "duplicate" };
-        }
-
-        if (isExclusionViolation(error, "EXCL_flights_aircraft_schedule")) {
-          return { outcome: "aircraft-unavailable" };
-        }
-
-        // Unlike a unique index, an exclusion constraint has no special path
-        // for concurrent inserts: two overlapping flights of one aircraft
-        // inserted at once each wait for the other's uncommitted row, and
-        // Postgres aborts one with 40P01 instead of 23P01 (race test B).
-        // The insert is the first write of CreateFlight's transaction, so that
-        // wait is the only cycle it can be in. If the winner later rolls back
-        // too, the slot stays free and this 409 is safe to retry.
-        if (isDeadlockDetected(error)) {
-          return { outcome: "aircraft-unavailable" };
-        }
-
-        if (isForeignKeyViolation(error)) {
-          return { outcome: "reference-not-found" };
-        }
-
-        throw error;
+      if (rows.length === 0) {
+        return undefined;
       }
+
+      return rows.flatMap(({ row, letter, fare_class, status }) =>
+        row === null || letter === null
+          ? []
+          : [
+              {
+                position: { row, letter },
+                // The CHECK constraints guarantee both value sets.
+                fareClass: fare_class as FareClass,
+                status: status as FlightSeatStatus,
+              },
+            ],
+      );
+    },
+
+    /**
+     * Atomic on its own, like AircraftRepository.create(): inside a
+     * TransactionRunner it joins that transaction; outside one it opens its
+     * own, so a flight is never stored without its seats.
+     */
+    async create(flight: Flight): Promise<CreateFlightRepositoryResult> {
+      if (isInTransaction()) {
+        return insertFlight(resolveEntityManager(dataSource), flight);
+      }
+
+      return dataSource.transaction((manager) => insertFlight(manager, flight));
     },
 
     async changeStatus(

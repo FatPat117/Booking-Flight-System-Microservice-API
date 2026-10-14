@@ -26,6 +26,7 @@ import {
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
+  createUnusedFlightSeatMap,
   createUnusedOpenFlight,
   createUnusedReferenceData,
 } from "./fakes/in-memory.js";
@@ -258,6 +259,7 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
       getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
     }),
     ...createUnusedOpenFlight(),
+    ...createUnusedFlightSeatMap(),
     createFlight: createCreateFlight({
       flightRepository,
       airportRepository: createInMemoryAirportRepository(),
@@ -322,6 +324,7 @@ test("GET /api/whoami returns 401 without a token", async () => {
       getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
     }),
     ...createUnusedOpenFlight(),
+    ...createUnusedFlightSeatMap(),
     createFlight: createCreateFlight({
       flightRepository,
       airportRepository: createInMemoryAirportRepository(),

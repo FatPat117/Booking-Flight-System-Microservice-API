@@ -33,6 +33,7 @@ async function createRuntimeWithBookingOfA() {
     passengerName: "Alice",
     createdAt: "2026-07-20T00:00:00.000Z",
     status: "active",
+    seat: null,
   };
   await bookingRepository.create(booking);
 

@@ -39,6 +39,10 @@ import {
 import type { FlightRepository } from "../flights/flight-repository.js";
 import { createGetFlight, type GetFlight } from "../flights/get-flight.js";
 import {
+  createGetFlightSeatMap,
+  type GetFlightSeatMap,
+} from "../flights/get-flight-seat-map.js";
+import {
   createListFlights,
   type ListFlights,
 } from "../flights/list-flights.js";
@@ -81,6 +85,7 @@ export type Application = Readonly<{
   getBooking: GetBooking;
   listBookings: ListBookings;
   getFlight: GetFlight;
+  getFlightSeatMap: GetFlightSeatMap;
   listFlights: ListFlights;
   registerAirport: RegisterAirport;
   listAirports: ListAirports;
@@ -193,6 +198,7 @@ export async function createApplication(
     flightRepository,
     getCurrentTime: () => new Date(),
   });
+  const getFlightSeatMap = createGetFlightSeatMap({ flightRepository });
   const listFlights = createListFlights({
     flightRepository,
     getCurrentTime: () => new Date(),
@@ -249,6 +255,7 @@ export async function createApplication(
     getBooking,
     listBookings,
     getFlight,
+    getFlightSeatMap,
     listFlights,
     registerAirport,
     listAirports,

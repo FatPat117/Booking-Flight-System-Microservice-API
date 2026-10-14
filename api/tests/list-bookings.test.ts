@@ -26,6 +26,7 @@ function makeBooking(n: number, ownerAccountId: string): Booking {
     passengerName: `Passenger ${n}`,
     createdAt: `2026-07-2${n}T00:00:00.000Z`,
     status: "active",
+    seat: null,
   };
 }
 

@@ -83,10 +83,16 @@ let sequence = 0;
  * An OPEN flight, far enough in the future to be bookable, departing one
  * day after the previous fixture so fixtures never clash on the shared
  * aircraft. Override departureAt and arrivalAt together.
+ *
+ * `availableSeats` defaults to the aircraft's seat count — what a freshly
+ * created flight reads back with (Day 47).
  */
 export function makeFlight(overrides: Partial<Flight> = {}): Flight {
   sequence += 1;
   const departure = FIRST_DEPARTURE_MS + sequence * DAY_MS;
+  const aircraftId = overrides.aircraftId ?? FIXTURE_AIRCRAFT_ID;
+  const seatCount =
+    TEST_AIRCRAFT.find((aircraft) => aircraft.id === aircraftId)?.seats.length ?? 0;
 
   return {
     id: crypto.randomUUID(),
@@ -95,12 +101,12 @@ export function makeFlight(overrides: Partial<Flight> = {}): Flight {
     origin: FIXTURE_ORIGIN.code,
     destinationAirportId: FIXTURE_DESTINATION.id,
     destination: FIXTURE_DESTINATION.code,
-    aircraftId: FIXTURE_AIRCRAFT_ID,
+    aircraftId,
     departureAt: new Date(departure).toISOString(),
     arrivalAt: new Date(departure + 2 * 60 * 60 * 1000).toISOString(),
     priceInCents: 1_500_000,
     currency: "VND",
-    availableSeats: 10,
+    availableSeats: seatCount,
     status: "OPEN",
     ...overrides,
   };

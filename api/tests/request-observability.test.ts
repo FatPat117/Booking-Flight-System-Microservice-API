@@ -20,6 +20,7 @@ import {
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
+  createUnusedFlightSeatMap,
   createUnusedOpenFlight,
   createUnusedReferenceData,
 } from "./fakes/in-memory.js";
@@ -123,6 +124,7 @@ function createTestContext() {
     }),
     createFlight,
     ...createUnusedOpenFlight(),
+    ...createUnusedFlightSeatMap(),
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
@@ -217,6 +219,9 @@ test("logs unexpected errors with request id without leaking them to client", as
     async findById() {
       return undefined;
     },
+    async findSeats() {
+      return undefined;
+    },
     async changeStatus() {
       return { outcome: "not-found" };
     },
@@ -270,6 +275,7 @@ test("logs unexpected errors with request id without leaking them to client", as
     }),
     createFlight,
     ...createUnusedOpenFlight(),
+    ...createUnusedFlightSeatMap(),
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),

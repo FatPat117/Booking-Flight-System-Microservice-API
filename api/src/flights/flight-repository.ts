@@ -1,5 +1,20 @@
+import type { FareClass } from "../aircraft/seat-layout.js";
+import type { SeatPosition } from "../aircraft/seat-position.js";
 import type { Flight } from "../types.js";
 import type { StoredFlightStatus } from "./flight-lifecycle.js";
+
+export type FlightSeatStatus = "AVAILABLE" | "BOOKED";
+
+/**
+ * One seat of a flight's inventory as anyone may see it. Deliberately
+ * without the booking that holds it: the seat map is public, and who sits
+ * where is not (Decision 10).
+ */
+export type FlightSeat = Readonly<{
+  position: SeatPosition;
+  fareClass: FareClass;
+  status: FlightSeatStatus;
+}>;
 
 /**
  * - duplicate: flight number + departure instant taken (BR-FLT-04)
@@ -63,8 +78,19 @@ export interface FlightRepository {
   findById(id: string): Promise<Flight | undefined>;
 
   /**
+   * The flight's seats in (row, letter) order; undefined when the flight
+   * does not exist (an existing flight with no seats is `[]`).
+   */
+  findSeats(flightId: string): Promise<FlightSeat[] | undefined>;
+
+  /**
    * Stores the airport and aircraft ids; `origin`/`destination` codes on the
    * argument are not stored (reads take them from `airports`).
+   *
+   * Also stores the flight's seat inventory, copied from its aircraft's
+   * layout, all AVAILABLE — in the same transaction: a flight never exists
+   * without its seats (Decision 10). `availableSeats` on the argument is not
+   * stored either; reads count it.
    */
   create(flight: Flight): Promise<CreateFlightRepositoryResult>;
 

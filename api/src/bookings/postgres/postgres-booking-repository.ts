@@ -1,5 +1,6 @@
-import type { DataSource } from "typeorm";
+import type { DataSource, EntityManager } from "typeorm";
 
+import { formatSeatPosition } from "../../aircraft/seat-position.js";
 import {
   isBookable,
   toStoredFlightStatus,
@@ -23,7 +24,7 @@ import { BookingEntity } from "./booking.entity.js";
  * including cancel()'s follow-up read, which would otherwise answer
  * already-cancelled for another account's booking and confirm it exists
  * (BR-AUTH-02). cancel()'s UPDATE applies the same scope as an explicit
- * andWhere, since query-builder conditions are SQL, not find options.
+ * SQL condition, since its statement is raw SQL, not find options.
  */
 function scopeFilter(
   scope: BookingAccessScope,
@@ -31,7 +32,7 @@ function scopeFilter(
   return scope.kind === "owner" ? { ownerAccountId: scope.accountId } : {};
 }
 
-function mapBooking(entity: BookingEntity): Booking {
+function mapBooking(entity: BookingEntity, seat: string | null): Booking {
   return {
     id: entity.id,
     flightId: entity.flightId,
@@ -39,36 +40,77 @@ function mapBooking(entity: BookingEntity): Booking {
     passengerName: entity.passengerName,
     createdAt: entity.createdAt.toISOString(),
     status: entity.status as BookingStatus,
+    seat,
   };
+}
+
+/**
+ * One query for the seat of every booking on a page (UQ_flight_seats_booking_id
+ * serves it). A booking without a row there is cancelled: null, not an error.
+ */
+async function mapBookings(
+  manager: EntityManager,
+  entities: BookingEntity[],
+): Promise<Booking[]> {
+  if (entities.length === 0) {
+    return [];
+  }
+
+  const rows = (await manager.query(
+    `SELECT "booking_id", "row", "letter" FROM "flight_seats" WHERE "booking_id" = ANY($1)`,
+    [entities.map((entity) => entity.id)],
+  )) as Array<{ booking_id: string; row: number; letter: string }>;
+  const seats = new Map(
+    rows.map((row) => [row.booking_id, formatSeatPosition(row)]),
+  );
+
+  return entities.map((entity) => mapBooking(entity, seats.get(entity.id) ?? null));
 }
 
 export function createPostgresBookingRepository(
   dataSource: DataSource,
 ): BookingRepository {
   return {
-    async reserveSeat(flightId: string, now: Date): Promise<ReserveSeatResult> {
+    async reserveSeat(
+      flightId: string,
+      bookingId: string,
+      now: Date,
+    ): Promise<ReserveSeatResult> {
       const manager = resolveEntityManager(dataSource);
 
-      // `available_seats - 1` is computed in SQL, not read out and
-      // subtracted in TypeScript — the whole point of a conditional UPDATE
-      // (ADR-004) is that "check" and "write" are one statement, evaluated
-      // against the row's latest version after waiting for its lock.
-      // Day 46: the sales window (BR-FLT-06) is part of the same condition,
-      // the SQL twin of isBookable() — a flight cannot close between a check
-      // and the write.
-      const result = await manager
-        .createQueryBuilder()
-        .update(FlightEntity)
-        .set({ availableSeats: () => '"available_seats" - 1' })
-        .where(
-          `id = :id AND available_seats > 0 AND status = 'OPEN'
-           AND departure_at - interval '1 hour' > :now`,
-          { id: flightId, now },
-        )
-        .execute();
+      // Pick and claim in one statement (ADR-004 addendum, Day 47):
+      // - SKIP LOCKED: a seat another booking is claiming right now is
+      //   passed over, not waited on — twenty callers take twenty different
+      //   seats instead of queueing behind each other on the first one.
+      // - FOR SHARE OF flight: the sales window (BR-FLT-06, the SQL twin of
+      //   isBookable()) is checked against a flight row nobody can change
+      //   until this transaction ends. Share locks do not block each other,
+      //   so bookings still run in parallel; only a status change waits.
+      const rows = (await manager.query(
+        `WITH picked AS (
+           SELECT seat."flight_id", seat."row", seat."letter"
+           FROM "flight_seats" seat
+           JOIN "flights" flight ON flight."id" = seat."flight_id"
+           WHERE seat."flight_id" = $1 AND seat."status" = 'AVAILABLE'
+             AND flight."status" = 'OPEN'
+             AND flight."departure_at" - interval '1 hour' > $3
+           ORDER BY seat."row", seat."letter"
+           LIMIT 1
+           FOR UPDATE OF seat SKIP LOCKED
+           FOR SHARE OF flight
+         )
+         UPDATE "flight_seats" seat
+         SET "status" = 'BOOKED', "booking_id" = $2
+         FROM picked
+         WHERE (seat."flight_id", seat."row", seat."letter")
+             = (picked."flight_id", picked."row", picked."letter")
+         RETURNING seat."row", seat."letter"`,
+        [flightId, bookingId, now],
+      )) as [Array<{ row: number; letter: string }>, number];
 
-      if (result.affected === 1) {
-        return { outcome: "reserved" };
+      const [claimed] = rows[0];
+      if (claimed !== undefined) {
+        return { outcome: "reserved", seat: formatSeatPosition(claimed) };
       }
 
       // Only picks the outcome; the decision was the UPDATE above.
@@ -113,18 +155,25 @@ export function createPostgresBookingRepository(
       bookingId: string,
       scope: BookingAccessScope,
     ): Promise<Booking | undefined> {
-      const entity = await resolveEntityManager(dataSource)
+      const manager = resolveEntityManager(dataSource);
+      const entity = await manager
         .getRepository(BookingEntity)
         .findOneBy({ id: bookingId, ...scopeFilter(scope) });
 
-      return entity === null ? undefined : mapBooking(entity);
+      if (entity === null) {
+        return undefined;
+      }
+
+      const [booking] = await mapBookings(manager, [entity]);
+      return booking;
     },
 
     async findPage(
       scope: BookingAccessScope,
       request: BookingPageRequest,
     ): Promise<BookingPage> {
-      const [entities, totalItems] = await resolveEntityManager(dataSource)
+      const manager = resolveEntityManager(dataSource);
+      const [entities, totalItems] = await manager
         .getRepository(BookingEntity)
         .findAndCount({
           where: scopeFilter(scope),
@@ -133,7 +182,7 @@ export function createPostgresBookingRepository(
           skip: request.offset,
         });
 
-      return { items: entities.map(mapBooking), totalItems };
+      return { items: await mapBookings(manager, entities), totalItems };
     },
 
     async cancel(
@@ -142,23 +191,29 @@ export function createPostgresBookingRepository(
     ): Promise<CancelBookingRepositoryResult> {
       const manager = resolveEntityManager(dataSource);
 
-      const update = manager
-        .createQueryBuilder()
-        .update(BookingEntity)
-        .set({ status: "cancelled" })
-        .where("id = :id AND status = 'active'", { id: bookingId });
+      // One statement, two writes: the seat is released only for the row the
+      // first UPDATE actually cancelled, so a losing concurrent cancel (which
+      // re-checks `status = 'active'` after waiting and matches nothing)
+      // releases nothing either.
+      const ownerCondition =
+        scope.kind === "owner" ? `AND "owner_account_id" = $2` : "";
+      const rows = (await manager.query(
+        `WITH cancelled AS (
+           UPDATE "bookings" SET "status" = 'cancelled'
+           WHERE "id" = $1 AND "status" = 'active' ${ownerCondition}
+           RETURNING "id", "flight_id"
+         ), released AS (
+           UPDATE "flight_seats" seat
+           SET "status" = 'AVAILABLE', "booking_id" = NULL
+           FROM cancelled WHERE seat."booking_id" = cancelled."id"
+         )
+         SELECT "flight_id" FROM cancelled`,
+        scope.kind === "owner" ? [bookingId, scope.accountId] : [bookingId],
+      )) as Array<{ flight_id: string }>;
 
-      if (scope.kind === "owner") {
-        update.andWhere("owner_account_id = :accountId", {
-          accountId: scope.accountId,
-        });
-      }
-
-      const result = await update.returning(["flightId"]).execute();
-
-      if (result.affected === 1) {
-        const row = result.raw[0] as { flight_id: string };
-        return { outcome: "cancelled", flightId: row.flight_id };
+      const [cancelled] = rows;
+      if (cancelled !== undefined) {
+        return { outcome: "cancelled", flightId: cancelled.flight_id };
       }
 
       const booking = await manager.getRepository(BookingEntity).findOneBy({
@@ -171,17 +226,6 @@ export function createPostgresBookingRepository(
       }
 
       return { outcome: "already-cancelled" };
-    },
-
-    async releaseSeat(flightId: string): Promise<void> {
-      const manager = resolveEntityManager(dataSource);
-
-      await manager
-        .createQueryBuilder()
-        .update(FlightEntity)
-        .set({ availableSeats: () => '"available_seats" + 1' })
-        .where("id = :id", { id: flightId })
-        .execute();
     },
   };
 }

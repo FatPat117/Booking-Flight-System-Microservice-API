@@ -6,8 +6,9 @@ import { createPostgresBookingRepository } from "../../src/bookings/postgres/pos
 import { createPostgresFlightRepository } from "../../src/flights/postgres/postgres-flight-repository.js";
 import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
+import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import { runBookingRepositoryContract } from "../contracts/booking-repository.contract.js";
-import { insertFlightReferences } from "./flight-references.js";
+import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
 /**
  * The same contract the in-memory fake runs in the unit tier
@@ -33,11 +34,14 @@ after(async () => {
 
 runBookingRepositoryContract("postgres", async () => {
   const flightRepository = createPostgresFlightRepository(dataSource);
+  const transactionRunner = createPostgresTransactionRunner(dataSource);
 
   return {
     repository: createPostgresBookingRepository(dataSource),
+    transaction: (work) => transactionRunner.run(work),
     async insertFlight(flight) {
       assert.deepEqual(await flightRepository.create(flight), { outcome: "created" });
+      await keepFirstSeats(dataSource, flight.id, flight.availableSeats);
     },
   };
 });

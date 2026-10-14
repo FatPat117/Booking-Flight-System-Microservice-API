@@ -8,6 +8,12 @@ export type Booking = Readonly<{
   passengerName: string;
   createdAt: string;
   status: BookingStatus;
+  /**
+   * Derived: the code of the seat this booking holds ("12C"), null once
+   * cancelled (its seat was released). The link lives on the seat
+   * (Decision 10); create() does not store this, reads look it up.
+   */
+  seat: string | null;
 }>;
 
 /**
@@ -32,9 +38,13 @@ export type BookingPage = {
   totalItems: number;
 };
 
-/** sales-closed: the flight is not effectively OPEN at `now` (BR-FLT-06). */
+/**
+ * - reserved: `seat` is the allocated seat's code, e.g. "12C"
+ * - sold-out: no AVAILABLE seat this caller could take
+ * - sales-closed: the flight is not effectively OPEN at `now` (BR-FLT-06)
+ */
 export type ReserveSeatResult =
-  | { outcome: "reserved" }
+  | { outcome: "reserved"; seat: string }
   | { outcome: "sold-out" }
   | { outcome: "sales-closed" }
   | { outcome: "flight-not-found" };
@@ -55,12 +65,22 @@ export type CancelBookingRepositoryResult =
  */
 export type BookingRepository = Readonly<{
   /**
-   * Decrement availableSeats atomically — no separate read-then-write — and
-   * only while the flight is bookable at `now`: stored OPEN and more than
-   * 1 hour before departure (BR-FLT-06, the same rule as isBookable). `now`
-   * comes from the caller so reads and holds use one clock (ADR-008).
+   * Allocate one AVAILABLE seat of the flight to `bookingId` — the lowest
+   * row, then letter, that no concurrent caller is taking — in one
+   * statement, and only while the flight is bookable at `now`: stored OPEN
+   * and more than 1 hour before departure (BR-FLT-06, the same rule as
+   * isBookable). `now` comes from the caller so reads and holds use one
+   * clock (ADR-008).
+   *
+   * Called before create(booking): the booking id is generated first and
+   * the seat points at it; the storage must accept that order within one
+   * transaction (Decision 10).
    */
-  reserveSeat(flightId: string, now: Date): Promise<ReserveSeatResult>;
+  reserveSeat(
+    flightId: string,
+    bookingId: string,
+    now: Date,
+  ): Promise<ReserveSeatResult>;
   create(booking: Booking): Promise<void>;
   findById(
     bookingId: string,
@@ -72,15 +92,12 @@ export type BookingRepository = Readonly<{
     request: BookingPageRequest,
   ): Promise<BookingPage>;
   /**
-   * Mark booking cancelled only when still active and inside the scope (OCC).
-   * Seat release stays in the use case — only after a successful first cancel.
+   * Mark booking cancelled only when still active and inside the scope (OCC),
+   * and release its seat (AVAILABLE, no booking) in the same statement — so
+   * only the call that wins the active → cancelled transition releases it.
    */
   cancel(
     bookingId: string,
     scope: BookingAccessScope,
   ): Promise<CancelBookingRepositoryResult>;
-  /**
-   * Increment availableSeats by 1. Call only after cancel() returns cancelled.
-   */
-  releaseSeat(flightId: string): Promise<void>;
 }>;

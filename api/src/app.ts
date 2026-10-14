@@ -13,6 +13,7 @@ import type { GetBooking } from "./bookings/get-booking.js";
 import type { ListBookings } from "./bookings/list-bookings.js";
 import type { CreateFlight } from "./flights/create-flight.js";
 import type { GetFlight } from "./flights/get-flight.js";
+import type { GetFlightSeatMap } from "./flights/get-flight-seat-map.js";
 import type { ListFlights } from "./flights/list-flights.js";
 import type { OpenFlight } from "./flights/open-flight.js";
 import type { HealthChecks } from "./health/health-checks.js";
@@ -30,6 +31,7 @@ import { createRequestObservabilityMiddleware } from "./observability/request-ob
 
 export type AppDependencies = {
   getFlight: GetFlight;
+  getFlightSeatMap: GetFlightSeatMap;
   createFlight: CreateFlight;
   openFlight: OpenFlight;
   createBooking: CreateBooking;
@@ -68,6 +70,7 @@ const BOOKING_NOT_FOUND = {
 export function createApp(dependencies: AppDependencies) {
   const {
     getFlight,
+    getFlightSeatMap,
     createFlight,
     openFlight,
     createBooking,
@@ -149,6 +152,19 @@ export function createApp(dependencies: AppDependencies) {
     }
 
     return res.status(200).json(result.flight);
+  });
+
+  app.get("/api/flights/:id/seats", async (req, res) => {
+    const result = await getFlightSeatMap(req.params.id);
+
+    if (result.outcome === "not-found") {
+      return sendApiError(res, 404, {
+        code: "FLIGHT_NOT_FOUND",
+        message: "Flight was not found",
+      });
+    }
+
+    return res.status(200).json(result.seatMap);
   });
 
   app.post(

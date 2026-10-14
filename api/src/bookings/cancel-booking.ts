@@ -39,7 +39,8 @@ type CancelBookingDependencies = {
 /**
  * Cancel an active booking and release its seat.
  *
- * Seat is released only when cancel() wins the OCC race (first active→cancelled).
+ * BookingRepository.cancel() releases the seat in the same statement, only
+ * when it wins the OCC race (first active→cancelled).
  * booking-cancelled stays in outbox only — no contracts entry until a consumer exists.
  */
 export function createCancelBooking(
@@ -77,7 +78,6 @@ export function createCancelBooking(
       }
 
       const { flightId } = cancelResult;
-      await bookingRepository.releaseSeat(flightId);
 
       const occurredAt = getCurrentTime().toISOString();
       const requestId = getRequestId();

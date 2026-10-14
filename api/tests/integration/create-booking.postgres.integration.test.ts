@@ -12,13 +12,13 @@ import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import type { Flight } from "../../src/types.js";
 import { makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
-import { insertFlightReferences } from "./flight-references.js";
+import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
 /**
  * Runs the real createCreateBooking use case wired to every Postgres
  * adapter (Flight + Booking + Audit + Outbox + TransactionRunner) — the
  * Day 38 create-flight.postgres.integration.test.ts pattern, applied to the
- * one use case that also contends for a shared row (available_seats).
+ * one use case that contends for shared rows (the flight's seats).
  */
 
 const OWNER_ACTOR = { accountId: "11111111-1111-4111-8111-111111111111" };
@@ -58,10 +58,11 @@ after(async () => {
   await dataSource.destroy();
 });
 
-test("created: writes one booking row, decrements the seat, one audit row, one outbox row", async () => {
+test("created: writes one booking row, claims its seat, one audit row, one outbox row", async () => {
   const flightRepository = createPostgresFlightRepository(dataSource);
   const flight = makeFlight({ availableSeats: 1 });
   await flightRepository.create(flight);
+  await keepFirstSeats(dataSource, flight.id, 1);
 
   const createBooking = createUseCase();
   const result = await createBooking(flight.id, { passengerName: "Alice" }, OWNER_ACTOR);
@@ -70,6 +71,13 @@ test("created: writes one booking row, decrements the seat, one audit row, one o
   if (result.outcome !== "created") {
     return;
   }
+  assert.equal(result.booking.seat, "1A");
+
+  const seats = await dataSource.query(
+    `SELECT "row" || "letter" AS seat, "status", "booking_id" FROM "flight_seats" WHERE "flight_id" = $1`,
+    [flight.id],
+  );
+  assert.deepEqual(seats, [{ seat: "1A", status: "BOOKED", booking_id: result.booking.id }]);
 
   const bookingRows = (await dataSource.query(
     `SELECT id, flight_id, owner_account_id, status FROM bookings`,
@@ -102,6 +110,7 @@ test("sold-out: no booking, audit, or outbox row is written, and the seat count 
   const flightRepository = createPostgresFlightRepository(dataSource);
   const flight = makeFlight({ availableSeats: 0 });
   await flightRepository.create(flight);
+  await keepFirstSeats(dataSource, flight.id, 0);
 
   const createBooking = createUseCase();
   const result = await createBooking(flight.id, { passengerName: "Alice" }, OWNER_ACTOR);

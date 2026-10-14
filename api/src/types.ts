@@ -21,7 +21,7 @@ export type Flight = {
   arrivalAt: string;
   priceInCents: number;
   currency: string;
-  /** Initialized from the aircraft's seat count; becomes derived in step 4. */
+  /** Derived: the flight's AVAILABLE seats, counted on read (Day 47). */
   availableSeats: number;
   status: StoredFlightStatus;
 };

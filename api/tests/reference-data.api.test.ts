@@ -19,6 +19,7 @@ import {
   createInMemoryHealthChecks,
   createInMemoryTransactionRunner,
   createUnusedBookingReads,
+  createUnusedFlightSeatMap,
   createUnusedOpenFlight,
   type InMemoryAuditRecorder,
 } from "./fakes/in-memory.js";
@@ -83,6 +84,7 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
     }),
     createFlight: async () => ({ outcome: "duplicate" }),
     ...createUnusedOpenFlight(),
+    ...createUnusedFlightSeatMap(),
     createBooking: async () => ({ outcome: "flight-not-found" }),
     cancelBooking: async () => ({ outcome: "not-found" }),
     ...createUnusedBookingReads(),

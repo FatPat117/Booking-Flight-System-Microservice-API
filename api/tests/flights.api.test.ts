@@ -11,6 +11,7 @@ import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createGetFlight } from "../src/flights/get-flight.js";
+import { createGetFlightSeatMap } from "../src/flights/get-flight-seat-map.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createOpenFlight } from "../src/flights/open-flight.js";
 import type { HealthChecks } from "../src/health/health-checks.js";
@@ -179,6 +180,7 @@ function createAppWithRepository(
 
   return createApp({
     getFlight: createGetFlight({ flightRepository, getCurrentTime: () => NOW }),
+    getFlightSeatMap: createGetFlightSeatMap({ flightRepository }),
     createFlight,
     openFlight,
     createBooking,
@@ -574,6 +576,85 @@ test("only an admin can open a flight: 401 without a token, 403 for a user", asy
 // Top-level body shape
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Seat map (Day 47)
+// ---------------------------------------------------------------------------
+
+/** Every key at any depth of a JSON value — objects inside arrays included. */
+function collectKeys(value: unknown, keys = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectKeys(item, keys));
+  } else if (value !== null && typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      keys.add(key);
+      collectKeys(nested, keys);
+    }
+  }
+  return keys;
+}
+
+test("GET /api/flights/:id/seats is public: every seat grouped by row, in order, all AVAILABLE on a new flight", async () => {
+  const { app } = createTestContext();
+  const flightId = await createScheduledFlight(app); // VN-A321, 120 seats, rows of 6
+
+  const response = await request(app).get(`/api/flights/${flightId}/seats`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.flightId, flightId);
+  assert.equal(response.body.rows.length, 20);
+  assert.deepEqual(response.body.rows[0], {
+    row: 1,
+    seats: ["1A", "1B", "1C", "1D", "1E", "1F"].map((code) => ({
+      code,
+      fareClass: "ECONOMY",
+      status: "AVAILABLE",
+    })),
+  });
+  assert.equal(response.body.rows.at(-1).row, 20);
+});
+
+test("the seat map shows a booked seat as BOOKED and no key anywhere says who booked it", async () => {
+  const { app } = createTestContext();
+  const flightId = await createScheduledFlight(app);
+  assert.equal((await postOpen(app, flightId)).status, 200);
+  const booking = await request(app)
+    .post(`/api/flights/${flightId}/bookings`)
+    .set("Authorization", `Bearer ${signAccessToken("user")}`)
+    .send({ passengerName: "Alice Nguyen" });
+  assert.equal(booking.status, 201);
+
+  const response = await request(app).get(`/api/flights/${flightId}/seats`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.rows[0].seats[0], {
+    code: booking.body.seat,
+    fareClass: "ECONOMY",
+    status: "BOOKED",
+  });
+  // An allow-list of keys, not a check for a few forbidden ones: a field
+  // added later (bookingId, ownerAccountId, passenger...) fails here.
+  assert.deepEqual(
+    [...collectKeys(response.body)].sort(),
+    ["code", "fareClass", "flightId", "row", "rows", "seats", "status"],
+  );
+  const body = JSON.stringify(response.body);
+  assert.ok(!body.includes(booking.body.id));
+  assert.ok(!body.includes("Alice"));
+  assert.ok(!body.includes("test-user-id"));
+});
+
+test("GET /api/flights/:id/seats for an unknown or malformed id is 404 FLIGHT_NOT_FOUND", async () => {
+  const { app } = createTestContext();
+
+  const unknown = await request(app).get("/api/flights/c0ffee00-0000-4000-8000-000000000000/seats");
+  const malformed = await request(app).get("/api/flights/not-a-uuid/seats");
+
+  for (const response of [unknown, malformed]) {
+    assert.equal(response.status, 404);
+    assert.equal(response.body.error.code, "FLIGHT_NOT_FOUND");
+  }
+});
+
 test("rejects valid JSON primitives and arrays with INVALID_BODY", async (t) => {
   const cases = [
     { name: "null", raw: "null" },
@@ -890,6 +971,9 @@ test("repository unexpected failure returns generic 500 without leaking internal
       throw new Error("sensitive database failure");
     },
     findById() {
+      throw new Error("sensitive database failure");
+    },
+    findSeats() {
       throw new Error("sensitive database failure");
     },
     create() {

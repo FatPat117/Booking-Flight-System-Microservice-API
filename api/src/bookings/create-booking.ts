@@ -72,21 +72,31 @@ export function createCreateBooking(
 
     return transactionRunner.run(async () => {
       const now = getCurrentTime();
-      const reserveResult = await bookingRepository.reserveSeat(flightId, now);
+      // The id comes first so the seat can point at the booking before it
+      // exists (deferred FK, Decision 10): a sold-out request then costs
+      // one statement and writes nothing, instead of an insert to undo.
+      const bookingId = generateId();
+      const reserveResult = await bookingRepository.reserveSeat(
+        flightId,
+        bookingId,
+        now,
+      );
 
       // flight-not-found / sold-out / sales-closed pass through unchanged.
       if (reserveResult.outcome !== "reserved") {
         return reserveResult;
       }
 
+      const { seat } = reserveResult;
       const occurredAt = now.toISOString();
       const booking: Booking = {
-        id: generateId(),
+        id: bookingId,
         flightId,
         ownerAccountId: actor.accountId,
         passengerName,
         createdAt: occurredAt,
         status: "active",
+        seat,
       };
 
       await bookingRepository.create(booking);
@@ -111,6 +121,7 @@ export function createCreateBooking(
         metadata: {
           flightId: booking.flightId,
           passengerName: booking.passengerName,
+          seat,
           correlationId,
         },
       });

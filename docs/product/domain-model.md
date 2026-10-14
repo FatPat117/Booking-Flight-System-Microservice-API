@@ -22,7 +22,7 @@ This document describes the **target** model for phase D, not what the code does
 | `Aircraft` | `id`, `registration`, `model` |
 | `Seat` | `aircraftId`, `position: SeatPosition`, `fareClass` |
 | `Flight` | `id`, `flightNumber`, `originAirportId`, `destinationAirportId`, `aircraftId`, `departureAt`, `arrivalAt`, `status`, `fares: { ECONOMY: Money, BUSINESS: Money }` |
-| `FlightSeat` | `id`, `flightId`, `position`, `fareClass`, `status`, `bookingId?` (no version column: `status` itself is the OCC guard, ADR-004) |
+| `FlightSeat` | `flightId` + `position` (composite key, no surrogate id), `fareClass`, `status`, `bookingId?` (no version column: `status` itself is the guard, ADR-004; see Decision 10) |
 | `Booking` | `id`, `reference`, `flightId`, `ownerAccountId`, `status`, `total: Money`, `holdExpiresAt`, `createdAt` |
 | `BookingPassenger` | `bookingId`, `firstName`, `lastName`, `flightSeatId`, `fareClass`, `price: Money` (snapshot) |
 | `Payment` | `id`, `bookingId`, `idempotencyKey`, `requestHash`, `amount: Money`, `status`, `createdAt` |
@@ -65,7 +65,8 @@ An aggregate is the set of data that must be consistent **together, immediately*
 A family that cannot sit together usually does not want a partial booking. A partial hold would also need a "short of seats" booking state. Mechanically, all seats are held in **one transaction** with one conditional `UPDATE` per seat. If any update affects 0 rows, the use case returns `seats-unavailable` with the losing positions and the transaction rolls back, releasing the seats it had already claimed. The ADR-004 addendum applies: once a miss is detected, no further query runs in that transaction.
 
 **3. `availableSeats` becomes derived, not stored.**
-Today `flights.available_seats` is the inventory. Once FlightSeats exist, a stored counter would be a second copy of the truth that can drift. Availability is computed as a count of `FlightSeat` rows with `status = 'AVAILABLE'` (per fare class). The existing `reserveSeat`/`releaseSeat` counter logic is replaced, not kept alongside.
+Until Day 46 `flights.available_seats` was the inventory. Once FlightSeats exist, a stored counter would be a second copy of the truth that can drift. Availability is computed as a count of `FlightSeat` rows with `status = 'AVAILABLE'` (per fare class). The existing `reserveSeat`/`releaseSeat` counter logic is replaced, not kept alongside.
+*Done Day 47:* the column is dropped; `availableSeats` is counted on every read (one total today, not yet per fare class). A booking claims one concrete seat with `FOR UPDATE SKIP LOCKED` rather than a plain conditional `UPDATE`: when any of many seats will do, OCC would make concurrent bookers collide on the same "first free" seat (ADR-004 addendum).
 
 **4. Booking prices are a snapshot.**
 `BookingPassenger.price` and `Booking.total` are copied from the flight's fares when the hold is created. If an admin changes a fare afterwards, the customer still pays the price they were shown. That is the only defensible answer to "which price does the customer pay?", and it keeps Payment independent of later fare edits.
@@ -84,6 +85,14 @@ Seats belong to the aircraft and have no status. When a flight is scheduled it g
 
 **9. `CLOSED` and `DEPARTED` are derived from the clock, not stored (Day 46, [ADR-008](../adr/008-time-derived-flight-status.md)).**
 A status set by a person (open, cancel) must be stored. A status that is only a consequence of time ("sales close 1 h before departure") can always be computed: `effective = CANCELLED if cancelled; DEPARTED if now ≥ departure; CLOSED if OPEN and now ≥ departure − 1 h; otherwise the stored status`. Storing it would need a job, a plan for a late job, and a race between the job and someone holding a seat at 59 minutes. Derived, it is always right, and the seat-hold `UPDATE` checks the same condition in its `WHERE` clause (`status = 'OPEN' AND departure_at − 1 h > now`), so BR-FLT-06 is enforced atomically like the seat count.
+
+**10. Seat inventory: a copied snapshot, linked from the inventory side (Day 47).**
+
+- **Copy, not reference.** `flight_seats` carries its own `row`, `letter` and `fare_class`, filled from `seats` by one `INSERT … SELECT` when the flight is created. It has no foreign key to `seats`. A reference would make every seat map depend on the template table, and BR-REF-05 ("layouts are never edited") would become the thing keeping sold seats correct, instead of a product rule. A copy is what Decision 8 already says a flight does ("snapshot the layout"), the same reasoning as price snapshots (Decision 4). In phase F the Flight service takes `flight_seats` with it and needs nothing from the template except at creation time. Cost: one extra row per seat per flight, and fare class stored twice.
+- **The link lives on `flight_seats.booking_id`, not on `bookings`.** BR-SEAT-01 ("a seat is sold at most once") is a rule about the inventory (Decision 1), so the row that is guarded by `WHERE status = 'AVAILABLE'` is also the row that says who has it. In phase F the two tables are in different databases: the foreign key to `bookings` is dropped (as `owner_account_id` already has none), and `booking_id` stays as a plain reservation id in the Flight service, next to the invariant it protects. A `seat` column on `bookings` would put the invariant in Booking's database, where a unique constraint across bookings would be the only guard. Booking will keep a *copy* of the seat code for display (step 5 `BookingPassenger`), never the source of truth.
+- **Statuses today: `AVAILABLE` and `BOOKED` only.** An active booking occupies a `BOOKED` seat. `HELD` arrives with timed holds (step 5) and is added to the `CHECK` then. Listing it now would allow a value no code writes and no test covers; widening a `CHECK` is a one-line migration. A second `CHECK` ties the columns together: `booking_id` is set exactly when the seat is not `AVAILABLE`.
+- **One booking occupies at most one seat: enforced today.** A unique index on `booking_id` (where not null) is true for every booking that can exist now (one passenger each). Step 5 (1–9 passengers) drops it on purpose, in a migration that says why. Until then it catches a double allocation bug that no test thought of. A constraint that is right today protects data until it is relaxed deliberately.
+- **The FK `flight_seats.booking_id → bookings` is `DEFERRABLE INITIALLY DEFERRED`.** `CreateBooking` claims the seat *before* inserting the booking (unchanged order). The booking id is generated first and written onto the seat, and the FK is checked at commit, when the booking row exists. The other order (insert the booking, then claim) would cost a write and a rollback on every sold-out request. Accepted trade-off: a missing booking would surface at `COMMIT`, not at the statement. That can only be a bug, since both writes are in one use case.
 
 ### What happens to these boundaries in phase F
 
@@ -121,6 +130,7 @@ When Flight and Booking become separate services with separate databases, "hold 
 
 - **Terminal:** `UNAVAILABLE`.
 - **Forbidden:** `HELD → HELD` for a different booking, and `BOOKED → HELD`. Both are exactly what the `WHERE status = 'AVAILABLE'` guard prevents.
+- **Reachable today (Day 47):** only `AVAILABLE → BOOKED` (a booking is created; the seat is any free one, lowest row then letter) and `BOOKED → AVAILABLE` (the booking is cancelled). `HELD` and `UNAVAILABLE` come with steps 5 and 9 (Decision 10).
 
 ### Booking
 
@@ -171,9 +181,9 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 | **BR-FLT-06** | Seats can be held only while the flight is `OPEN`; sales close **1 hour** before departure. | ✅ Day 46: condition inside the seat-hold `UPDATE` → `409 SALES_CLOSED`; reads derive `CLOSED` |
 | **BR-FLT-07** | Cancelling a flight cancels every `HELD`/`CONFIRMED` booking on it, regardless of BR-BOOK-06. | — |
 | **BR-FLT-08** | An aircraft needs at least **45 minutes** on the ground between flights (turnaround: cleaning, fuel, boarding). A flight landing at 10:00 frees the aircraft at 10:45; the window is half-open, so the next departure may be exactly 10:45. | ✅ Day 46: `flight_aircraft_occupancy()` + `AIRCRAFT_TURNAROUND_MS`, boundary pinned by the flight repository contract |
-| **BR-SEAT-01** | A FlightSeat is held or booked by at most one active booking. | Counter version ✅ (`available_seats > 0` OCC) |
+| **BR-SEAT-01** | A FlightSeat is held or booked by at most one active booking. | ✅ Day 47: one `booking_id` column per seat, `UQ_flight_seats_booking_id`, claim via `FOR UPDATE SKIP LOCKED`; race tests A–E on Postgres |
 | **BR-SEAT-02** | Holding several seats is all-or-nothing. | — |
-| **BR-SEAT-03** | A flight's FlightSeats are generated from its aircraft's layout when it is scheduled; later layout changes do not affect existing flights. | — |
+| **BR-SEAT-03** | A flight's FlightSeats are generated from its aircraft's layout when it is scheduled; later layout changes do not affect existing flights. | ✅ Day 47: copied in the flight's create transaction (Decision 10); existing flights backfilled |
 | **BR-BOOK-01** | A booking has **1 to 9** passengers. | — (exactly 1 today) |
 | **BR-BOOK-02** | Each passenger gets exactly one seat; a seat appears at most once in a booking. | — |
 | **BR-BOOK-03** | Each passenger's price is the flight's fare for that seat's class at hold time; the booking total is their sum. | — |
@@ -217,7 +227,7 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 |---|---|---|---|
 | Booking ownership | ✅ Done on Day 44: `owner_account_id`, owner-scoped queries, `404` for other accounts | — | — |
 | Passengers | `bookings.passenger_name` free text, one per booking | `BookingPassenger` rows, 1–9 per booking, first/last name | **Yes**: column replaced by a table; request body changes |
-| Seat inventory | `flights.available_seats` counter; `reserveSeat`/`releaseSeat` | `FlightSeat` rows; availability derived (Decision 3) | **Yes**: counter removed; `BookingRepository` port changes |
+| Seat inventory | ✅ Done on Day 47: `flight_seats` rows, `availableSeats` derived (Decision 3), public seat map, booking shows its `seat` | `HELD` + expiry, per-fare-class availability (step 5) | — |
 | Airports / aircraft | ✅ Done on Day 46: `flights` reference `airports` and `aircraft` by FK; the text codes are gone (expand → backfill → contract) | — | — |
 | Flight status | ✅ Done on Day 46: stored `SCHEDULED/OPEN/CANCELLED`, `CLOSED/DEPARTED` derived (Decision 9); existing flights backfilled `OPEN` | `→ CANCELLED` with the cascade (step 9) | — |
 | Booking status | `active` / `cancelled` (lowercase) | `HELD/CONFIRMED/EXPIRED/CANCELLED` | **Yes**: value set and `CHECK` change; `active` ≈ `CONFIRMED` |

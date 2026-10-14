@@ -60,6 +60,28 @@ export function runFlightRepositoryContract(
     assert.equal(stored?.destination, FIXTURE_DESTINATION.code);
   });
 
+  test(name("a created flight's seats read back in (row, letter) order, all AVAILABLE"), async () => {
+    const repository = await setup();
+    const flight = scheduled(FIXTURE_OTHER_AIRCRAFT_ID, 0); // 5 seats
+
+    await repository.create(flight);
+
+    assert.deepEqual(
+      await repository.findSeats(flight.id),
+      ["A", "B", "C", "D", "E"].map((letter) => ({
+        position: { row: 1, letter },
+        fareClass: "ECONOMY",
+        status: "AVAILABLE",
+      })),
+    );
+  });
+
+  test(name("findSeats of an unknown flight is undefined, not an empty list"), async () => {
+    const repository = await setup();
+
+    assert.equal(await repository.findSeats(crypto.randomUUID()), undefined);
+  });
+
   test(name("the same flight number at the same instant is duplicate (BR-FLT-04)"), async () => {
     const repository = await setup();
     const first = scheduled(FIXTURE_AIRCRAFT_ID, 0);

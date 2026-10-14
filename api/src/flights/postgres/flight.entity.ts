@@ -15,6 +15,9 @@ import { Column, Entity, PrimaryColumn, Unique } from "typeorm";
  * aircraft_id is required, and status is the stored status only. The FKs,
  * CHECKs and the aircraft-schedule exclusion constraint live in the
  * ContractFlightReferences / AddAircraftScheduleExclusion migrations.
+ *
+ * Day 47: no seat counter. Available seats are counted from `flight_seats`
+ * (ContractFlightSeats dropped `available_seats`).
  */
 @Entity({ name: "flights" })
 @Unique("UQ_flights_flight_number_departure_at", [
@@ -48,9 +51,6 @@ export class FlightEntity {
 
   @Column({ type: "varchar" })
   currency!: string;
-
-  @Column({ type: "integer", name: "available_seats" })
-  availableSeats!: number;
 
   @Column({ type: "text" })
   status!: string;

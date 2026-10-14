@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Booking Microservices (Day 45)",
-    "description": "Local API collection for the booking learning project.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31–34: Identity JWT + role; POST /api/flights requires admin JWT\n- Day 35–40: api + identity run on Postgres (booking_db / identity_db); /ready checks Postgres\n\nImport together with Booking-microservices.local.postman_environment.json.\nServices: api http://localhost:3000, identity http://localhost:3001.\nFlow: register -> promote-to-admin (CLI) -> login (sets accessToken, role=admin) -> create flight -> booking.\n- Day 44: booking ownership — JWT on every booking route, GET /api/bookings(/:id), BOLA folder\n- Day 45: airports + aircraft with seat layouts (reference data folder)",
+    "description": "Local API collection for the booking learning project.\n\nImport together with Booking-microservices.local.postman_environment.json.\nServices: api http://localhost:3000, identity http://localhost:3001.\nPrerequisite: `npm run seed:reference --workspace=@booking-flight-system/api` (airports + aircraft; flights need a registered aircraft since Day 46).\nFlow: register -> promote-to-admin (CLI) -> login (accessToken, role=admin) -> register + login bob (userAccessToken) -> create flight (SCHEDULED) -> open it -> book as bob.\n\nProgress covered:\n- Day 9–15: flights CRUD, auth, audit, migrations\n- Day 26–29: bookings, cancel, correlationId\n- Day 31–34: Identity JWT + role; POST /api/flights requires admin JWT\n- Day 35–40: api + identity run on Postgres (booking_db / identity_db); /ready checks Postgres\n- Day 44: booking ownership — JWT on every booking route, GET /api/bookings(/:id), BOLA folder\n- Day 45: airports + aircraft with seat layouts (reference data folder)\n- Day 46: flights reference airports/aircraft; SCHEDULED → OPEN lifecycle; SALES_CLOSED\n- Day 47: per-flight seat inventory, derived availableSeats, public seat map, booking shows its seat",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -39,6 +39,18 @@
     },
     {
       "key": "day46ScheduledFlightId",
+      "value": ""
+    },
+    {
+      "key": "day47FlightId",
+      "value": ""
+    },
+    {
+      "key": "day47BookingId",
+      "value": ""
+    },
+    {
+      "key": "day47Seat",
       "value": ""
     }
   ],
@@ -187,7 +199,7 @@
                 }
               ]
             },
-            "description": "200 + { items: Flight[], pagination }. 422 VALIDATION_FAILED on invalid page/pageSize."
+            "description": "200 + { items: Flight[], pagination }. 422 VALIDATION_FAILED on invalid page/pageSize.\nDay 47: availableSeats is counted from the flight's AVAILABLE seats on every read (0 for a sold-out flight, never omitted). status is the effective one (CLOSED/DEPARTED derived from the clock)."
           },
           "response": []
         },
@@ -202,9 +214,31 @@
               }
             ],
             "url": "{{baseUrl}}/api/flights/{{flightId}}",
-            "description": "Uses {{flightId}} from a previous create. Run POST /api/flights first or set flightId manually.\n404 FLIGHT_NOT_FOUND when id does not exist."
+            "description": "Uses {{flightId}} from a previous create. Run POST /api/flights first or set flightId manually.\n404 FLIGHT_NOT_FOUND when the id does not exist or is malformed."
           },
           "response": []
+        },
+        {
+          "name": "GET /api/flights/:id/seats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{flightId}}/seats",
+            "description": "Day 47 (US-SEAT-01): public seat map of {{flightId}}. 200 + { flightId, rows: [{ row, seats: [{ code, fareClass, status }] }] }, status AVAILABLE | BOOKED. Never a booking id, owner or passenger.\n404 FLIGHT_NOT_FOUND for an unknown or malformed id."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('grouped by row', () => pm.expect(pm.response.json().rows).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -263,7 +297,7 @@
               "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A321\"\n}"
             },
             "url": "{{baseUrl}}/api/flights",
-            "description": "201 Created + Location header.\nAuth: Authorization Bearer {{accessToken}} with role=admin.\nDay 29: wait ~5s then grep {{requestId}} in flight-notifier for flight_created_consumed."
+            "description": "201 Created + Location header. Auth: Authorization Bearer {{accessToken}} with role=admin.\nDay 46: origin/destination are registered IATA codes and aircraftRegistration a registered aircraft (run the seed); the flight starts SCHEDULED — open it before booking.\nDay 47: availableSeats = the aircraft's seat count (VN-A321: 176); the flight gets its own copy of the seats.\nDay 29: wait ~5s then grep {{requestId}} in flight-notifier for flight_created_consumed."
           },
           "response": []
         },
@@ -304,7 +338,7 @@
     },
     {
       "name": "Bookings",
-      "description": "Day 44: every booking route needs a JWT. Create/cancel need role=user (admins get 403); the booking's owner is the token's sub. Another account's booking answers 404 exactly like a missing one.\nRun Identity → login bob first (saves userAccessToken). Day 29: x-request-id -> correlationId on booking.created.",
+      "description": "Day 44: every booking route needs a JWT. Create/cancel need role=user (admins get 403); the booking's owner is the token's sub. Another account's booking answers 404 exactly like a missing one.\nRun Identity → login bob first (saves userAccessToken), and open {{flightId}} (Flights (Write) → open). Day 29: x-request-id -> correlationId on booking.created.",
       "item": [
         {
           "name": "POST /api/flights/:flightId/bookings",
@@ -352,7 +386,7 @@
               "raw": "{\n  \"passengerName\": \"Alice Nguyen\"\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
-            "description": "role=user JWT (bob). Owner = token sub.\n201 created (Location: /api/bookings/:id) | 409 sold-out | 404 flight-not-found | 422 validation | 401 no token | 403 admin token.\nSaves {{bookingId}}. Wait ~5s → booking_created_consumed with same correlationId."
+            "description": "role=user JWT (bob). Owner = token sub.\n201 created (Location: /api/bookings/:id), body includes seat (Day 47: the lowest free seat, e.g. \"1A\") | 409 FLIGHT_SOLD_OUT | 409 SALES_CLOSED (flight not OPEN or departing within 1 h) | 404 FLIGHT_NOT_FOUND | 422 validation | 401 no token | 403 admin token.\nSaves {{bookingId}}. Wait ~5s → booking_created_consumed with same correlationId."
           },
           "response": []
         },
@@ -438,7 +472,7 @@
               }
             ],
             "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
-            "description": "Day 44: 200 for the owner (or an admin). Another account or an unknown/malformed id → 404 BOOKING_NOT_FOUND."
+            "description": "Day 44: 200 for the owner (or an admin). Another account or an unknown/malformed id → 404 BOOKING_NOT_FOUND.\nDay 47: seat is the booking's seat code while active, null once cancelled."
           },
           "response": []
         },
@@ -458,7 +492,7 @@
               }
             ],
             "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
-            "description": "Day 28 cancel.\n204 first cancel | 409 already-cancelled | 404 not-found.\nReleases one seat. Run twice to see 204 then 409."
+            "description": "Day 28 cancel.\n204 first cancel | 409 BOOKING_ALREADY_CANCELLED | 404 BOOKING_NOT_FOUND.\nDay 47: releases the booking's seat in the same statement (AVAILABLE again in the seat map, availableSeats + 1). Run twice to see 204 then 409."
           },
           "response": []
         },
@@ -486,7 +520,7 @@
     },
     {
       "name": "Day 44 — Booking ownership (BOLA)",
-      "description": "Prerequisites: login bob (userAccessToken) and carol (userBAccessToken), an admin accessToken, create a flight, then POST a booking as bob (saves bookingId).\nEvery request below must be refused without revealing whether bob's booking exists.",
+      "description": "Prerequisites: login bob (userAccessToken) and carol (userBAccessToken), an admin accessToken, create and open a flight (Flights (Write)), then POST a booking as bob (saves bookingId).\nEvery request below must be refused without revealing whether bob's booking exists.",
       "item": [
         {
           "name": "GET bob's booking as carol → 404",
@@ -1311,6 +1345,294 @@
       ]
     },
     {
+      "name": "Day 47 — Seat inventory",
+      "description": "Needs the dev seed (VN-A321: 176 seats, 8 business + 168 economy), alice's accessToken (admin) and bob's userAccessToken.\nRun top to bottom on a database without VN471 on 2026-12-01; a second run answers 409 FLIGHT_ALREADY_EXISTS on the create.\nEach flight owns its seats (copied from the aircraft on create); availableSeats is counted from them on every read; booking claims the lowest free seat (FOR UPDATE SKIP LOCKED), cancelling releases it.",
+      "item": [
+        {
+          "name": "POST /api/flights (VN471 on VN-A321 → 201, availableSeats 176)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN471\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-01T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-01T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights",
+            "description": "BR-SEAT-03: the flight's seat inventory is copied from the aircraft layout in the same transaction."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('availableSeats = the aircraft seat count', () => pm.expect(pm.response.json().availableSeats).to.eql(176));",
+                  "pm.collectionVariables.set('day47FlightId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id/seats (public → 200, all AVAILABLE, no booking fields)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day47FlightId}}/seats",
+            "description": "US-SEAT-01. Public, no token. Grouped by row; each seat has code, fareClass, status — never a booking id, owner or passenger."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const seats = pm.response.json().rows.flatMap((row) => row.seats);",
+                  "pm.test('176 seats, all AVAILABLE', () => {",
+                  "  pm.expect(seats.length).to.eql(176);",
+                  "  pm.expect(seats.every((seat) => seat.status === 'AVAILABLE')).to.be.true;",
+                  "});",
+                  "pm.test('8 business, 168 economy', () => pm.expect(seats.filter((seat) => seat.fareClass === 'BUSINESS').length).to.eql(8));",
+                  "const keys = new Set();",
+                  "(function walk(value) { if (Array.isArray(value)) value.forEach(walk); else if (value && typeof value === 'object') for (const [key, nested] of Object.entries(value)) { keys.add(key); walk(nested); } })(pm.response.json());",
+                  "pm.test('only seat-map keys at any depth', () => pm.expect([...keys].sort()).to.eql(['code', 'fareClass', 'flightId', 'row', 'rows', 'seats', 'status']));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (→ 200 OPEN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day47FlightId}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OPEN', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('OPEN'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking on VN471 (bob → 201 with seat 1A)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengerName\": \"Bob Tran\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day47FlightId}}/bookings",
+            "description": "The system picks the lowest free seat in (row, letter) order."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('booking carries its seat', () => pm.expect(pm.response.json().seat).to.eql('1A'));",
+                  "pm.collectionVariables.set('day47BookingId', pm.response.json().id);",
+                  "pm.collectionVariables.set('day47Seat', pm.response.json().seat);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id/seats (bob's seat → BOOKED)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day47FlightId}}/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const seats = pm.response.json().rows.flatMap((row) => row.seats);",
+                  "pm.test('the booked seat shows BOOKED', () => pm.expect(seats.find((seat) => seat.code === pm.collectionVariables.get('day47Seat')).status).to.eql('BOOKED'));",
+                  "pm.test('nothing says who booked it', () => pm.expect(pm.response.text()).to.not.include(pm.collectionVariables.get('day47BookingId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id (availableSeats 175)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day47FlightId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('one seat fewer', () => pm.expect(pm.response.json().availableSeats).to.eql(175));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE /api/bookings/:id (bob → 204, releases the seat)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day47BookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id/seats (seat AVAILABLE again)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day47FlightId}}/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const seats = pm.response.json().rows.flatMap((row) => row.seats);",
+                  "pm.test('the released seat is AVAILABLE', () => pm.expect(seats.find((seat) => seat.code === pm.collectionVariables.get('day47Seat')).status).to.eql('AVAILABLE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id (availableSeats back to 176)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day47FlightId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('seat returned to the count', () => pm.expect(pm.response.json().availableSeats).to.eql(176));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/bookings/:id (cancelled → seat null)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day47BookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('cancelled, no seat', () => { const body = pm.response.json(); pm.expect(body.status).to.eql('cancelled'); pm.expect(body.seat).to.eql(null); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/not-a-uuid/seats → 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/not-a-uuid/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 FLIGHT_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error.code).to.eql('FLIGHT_NOT_FOUND'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Day 29 — Correlation investigate",
       "description": "Fixed requestId for log grep across api + flight-notifier.",
       "item": [
@@ -1373,9 +1695,40 @@
               "raw": "{\n  \"flightNumber\": \"VN29\",\n  \"origin\": \"SGN\",\n  \"destination\": \"DAD\",\n  \"departureAt\": \"2026-12-20T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-20T09:30:00+07:00\",\n  \"priceInCents\": 1200000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A632\"\n}"
             },
             "url": "{{baseUrl}}/api/flights",
-            "description": "Generates a fresh requestId each run.\nThen: open Postman Console for the id, wait ~5s, search flight-notifier log for correlationId."
+            "description": "Generates a fresh requestId each run (needs alice's admin accessToken and the seed: VN-A632).\nThen: open Postman Console for the id, wait ~5s, search flight-notifier log for correlationId.\nVN29 on 2026-12-20 can be created once: a second run answers 409 FLIGHT_ALREADY_EXISTS."
           },
           "response": []
+        },
+        {
+          "name": "1b) Open flight (correlation probe)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/flights/{{flightId}}/open",
+            "description": "Day 46: the probe flight starts SCHEDULED; without this step the booking below answers 409 SALES_CLOSED."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OPEN', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "2) Create booking (same correlation probe)",
@@ -1419,7 +1772,7 @@
               "raw": "{\n  \"passengerName\": \"Correlation Probe\"\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
-            "description": "Uses flightId from step 1. Grep {{requestId}}-booking in both logs after ~5s."
+            "description": "Uses flightId from step 1 (opened in 1b). Grep {{requestId}}-booking in both logs after ~5s."
           },
           "response": []
         }

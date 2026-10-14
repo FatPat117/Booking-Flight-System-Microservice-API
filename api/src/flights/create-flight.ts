@@ -49,8 +49,8 @@ function unknownAirport(
 }
 
 /**
- * Field by field, not `flight` its
- * and spreading the domain type woelf: the event is a published contract,uld publish every field Flight gains
+ * Field by field, not `flight` itself: the event is a published contract,
+ * and spreading the domain type would publish every field Flight gains
  * (Day 46 leaked four that way until this mapping existed).
  */
 function toFlightCreatedPayload(flight: Flight): FlightCreatedEvent["flight"] {
@@ -80,7 +80,9 @@ function toFlightCreatedPayload(flight: Flight): FlightCreatedEvent["flight"] {
  *
  * Day 46 (US-FLT-01): airports and aircraft are real references, resolved
  * from code / registration. The flight starts SCHEDULED with as many seats
- * as its aircraft has. Whether the aircraft is free (BR-FLT-03/08) is not
+ * as its aircraft has (Day 47: FlightRepository.create() copies them, so
+ * `availableSeats` here is what a read would count right after the commit).
+ * Whether the aircraft is free (BR-FLT-03/08) is not
  * checked here — the database's exclusion constraint decides, so two admins
  * racing for the same aircraft cannot both win.
  */

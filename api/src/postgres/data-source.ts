@@ -21,6 +21,9 @@ import { ExpandFlightReferences1790450800000 } from "./migrations/1790450800000-
 import { BackfillFlightReferences1790454400000 } from "./migrations/1790454400000-BackfillFlightReferences.js";
 import { ContractFlightReferences1790458000000 } from "./migrations/1790458000000-ContractFlightReferences.js";
 import { AddAircraftScheduleExclusion1790461600000 } from "./migrations/1790461600000-AddAircraftScheduleExclusion.js";
+import { CreateFlightSeats1790465200000 } from "./migrations/1790465200000-CreateFlightSeats.js";
+import { BackfillFlightSeats1790468800000 } from "./migrations/1790468800000-BackfillFlightSeats.js";
+import { ContractFlightSeats1790472400000 } from "./migrations/1790472400000-ContractFlightSeats.js";
 
 /**
  * Day 36+ — dev-complete only. Entities/migrations are added per Strangler
@@ -64,6 +67,9 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
       BackfillFlightReferences1790454400000,
       ContractFlightReferences1790458000000,
       AddAircraftScheduleExclusion1790461600000,
+      CreateFlightSeats1790465200000,
+      BackfillFlightSeats1790468800000,
+      ContractFlightSeats1790472400000,
     ],
   });
 }

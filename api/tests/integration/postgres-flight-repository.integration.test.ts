@@ -3,6 +3,7 @@ import { after, before, beforeEach, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { DataSource } from "typeorm";
 
+import { createPostgresBookingRepository } from "../../src/bookings/postgres/postgres-booking-repository.js";
 import { createPostgresFlightRepository } from "../../src/flights/postgres/postgres-flight-repository.js";
 import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
@@ -13,7 +14,8 @@ import {
   FIXTURE_OTHER_AIRCRAFT_ID,
   makeFlight as makeFixtureFlight,
 } from "../fixtures/flights.js";
-import { insertFlightReferences } from "./flight-references.js";
+import { failSeatInserts } from "./failing-seat-inserts.js";
+import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
 /**
  * Runs against the real booking_db Postgres container — not a fake, not
@@ -127,10 +129,10 @@ test("the exclusion violation surfaces as SQLSTATE 23P01 on the named constraint
   await assert.rejects(
     dataSource.query(
       `INSERT INTO flights (id, flight_number, origin_airport_id, destination_airport_id,
-         aircraft_id, departure_at, arrival_at, price_in_cents, currency, available_seats, status)
+         aircraft_id, departure_at, arrival_at, price_in_cents, currency, status)
        SELECT gen_random_uuid(), 'VN999', origin_airport_id, destination_airport_id,
          aircraft_id, departure_at + interval '1 hour', arrival_at + interval '1 hour',
-         price_in_cents, currency, 1, 'SCHEDULED'
+         price_in_cents, currency, 'SCHEDULED'
        FROM flights WHERE id = $1`,
       [flight.id],
     ),
@@ -175,6 +177,113 @@ test("a deadlock between two concurrent overlapping inserts is aircraft-unavaila
     `expected the deadlock victim to be aircraft-unavailable, got ${outcomes.join(", ")}`,
   );
   assert.ok(outcomes.every((outcome) => outcome === "created" || outcome === "aircraft-unavailable"));
+});
+
+test("create copies the aircraft's layout into flight_seats: every seat, AVAILABLE, no booking", async () => {
+  const flight = makeFlight();
+  await createPostgresFlightRepository(dataSource).create(flight);
+
+  // Position by position against the aircraft's seats, both directions.
+  const [diff] = (await dataSource.query(
+    `SELECT
+       (SELECT count(*) FROM (
+          SELECT "row", "letter", "fare_class" FROM "seats" WHERE "aircraft_id" = $2
+          EXCEPT
+          SELECT "row", "letter", "fare_class" FROM "flight_seats" WHERE "flight_id" = $1
+        ) missing)::int AS missing,
+       (SELECT count(*) FROM (
+          SELECT "row", "letter", "fare_class" FROM "flight_seats" WHERE "flight_id" = $1
+          EXCEPT
+          SELECT "row", "letter", "fare_class" FROM "seats" WHERE "aircraft_id" = $2
+        ) extra)::int AS extra,
+       (SELECT count(*) FROM "flight_seats"
+        WHERE "flight_id" = $1 AND ("status" <> 'AVAILABLE' OR "booking_id" IS NOT NULL))::int AS taken`,
+    [flight.id, flight.aircraftId],
+  )) as { missing: number; extra: number; taken: number }[];
+
+  assert.deepEqual(diff, { missing: 0, extra: 0, taken: 0 });
+  assert.equal((await createPostgresFlightRepository(dataSource).findById(flight.id))?.availableSeats, 120);
+});
+
+test("outside a transaction, a failing seat insert leaves no flight behind (create opens its own)", async () => {
+  const restore = await failSeatInserts(dataSource);
+  try {
+    await assert.rejects(
+      createPostgresFlightRepository(dataSource).create(makeFlight()),
+      /seat insert failed/,
+    );
+  } finally {
+    await restore();
+  }
+
+  const [counts] = (await dataSource.query(
+    `SELECT (SELECT count(*) FROM "flights")::int AS flights,
+            (SELECT count(*) FROM "flight_seats")::int AS seats`,
+  )) as { flights: number; seats: number }[];
+  assert.deepEqual(counts, { flights: 0, seats: 0 });
+});
+
+test("findPage keeps a sold-out flight and a flight with no seats at all, counting 0, never dropping them", async () => {
+  const repository = createPostgresFlightRepository(dataSource);
+  const bookingRepository = createPostgresBookingRepository(dataSource);
+  const soldOut = makeFlight({ flightNumber: "VN301" });
+  const seatless = makeFlight({ flightNumber: "VN302" });
+  const roomy = makeFlight({ flightNumber: "VN303" });
+  for (const flight of [soldOut, seatless, roomy]) {
+    await repository.create(flight);
+  }
+  await keepFirstSeats(dataSource, soldOut.id, 1);
+  await keepFirstSeats(dataSource, seatless.id, 0);
+  const booking = {
+    id: crypto.randomUUID(),
+    flightId: soldOut.id,
+    ownerAccountId: "11111111-1111-4111-8111-111111111111",
+    passengerName: "Alice",
+    createdAt: "2026-07-20T00:00:00.000Z",
+    status: "active" as const,
+    seat: null,
+  };
+  await createPostgresTransactionRunner(dataSource).run(async () => {
+    await bookingRepository.reserveSeat(soldOut.id, booking.id, new Date("2026-07-20T00:00:00.000Z"));
+    await bookingRepository.create(booking);
+  });
+
+  const page = await repository.findPage({ limit: 20, offset: 0 });
+
+  assert.equal(page.totalItems, 3);
+  assert.deepEqual(
+    page.items.map((flight) => [flight.flightNumber, flight.availableSeats]),
+    [["VN301", 0], ["VN302", 0], ["VN303", 120]],
+  );
+  assert.equal((await repository.findById(soldOut.id))?.availableSeats, 0);
+  assert.deepEqual(await repository.findSeats(seatless.id), []);
+});
+
+test("findSeats reports a claimed seat as BOOKED", async () => {
+  const repository = createPostgresFlightRepository(dataSource);
+  const bookingRepository = createPostgresBookingRepository(dataSource);
+  const flight = makeFlight();
+  await repository.create(flight);
+  const booking = {
+    id: crypto.randomUUID(),
+    flightId: flight.id,
+    ownerAccountId: "11111111-1111-4111-8111-111111111111",
+    passengerName: "Alice",
+    createdAt: "2026-07-20T00:00:00.000Z",
+    status: "active" as const,
+    seat: null,
+  };
+  await createPostgresTransactionRunner(dataSource).run(async () => {
+    await bookingRepository.reserveSeat(flight.id, booking.id, new Date("2026-07-20T00:00:00.000Z"));
+    await bookingRepository.create(booking);
+  });
+
+  const seats = await repository.findSeats(flight.id);
+
+  assert.deepEqual(seats?.slice(0, 2), [
+    { position: { row: 1, letter: "A" }, fareClass: "ECONOMY", status: "BOOKED" },
+    { position: { row: 1, letter: "B" }, fareClass: "ECONOMY", status: "AVAILABLE" },
+  ]);
 });
 
 runFlightRepositoryContract("postgres", async () =>

@@ -5,6 +5,7 @@ import type {
   Booking,
   BookingAccessScope,
   BookingRepository,
+  ReserveSeatResult,
 } from "../../src/bookings/booking-repository.js";
 import type { Flight } from "../../src/types.js";
 import { FIXTURE_OTHER_AIRCRAFT_ID, makeFlight } from "../fixtures/flights.js";
@@ -27,8 +28,18 @@ import { FIXTURE_OTHER_AIRCRAFT_ID, makeFlight } from "../fixtures/flights.js";
  */
 export type BookingRepositoryContractSubject = Readonly<{
   repository: BookingRepository;
-  /** Storage-specific seeding; the flight's shape stays in the contract. */
+  /**
+   * Storage-specific seeding; the flight's shape stays in the contract. The
+   * flight must end up with exactly `availableSeats` seats, the first ones
+   * in (row, letter) order of a six-abreast ABCDEF layout.
+   */
   insertFlight(flight: Flight): Promise<void>;
+  /**
+   * Runs `work` in one transaction. A claimed seat points at a booking that
+   * is inserted right after it; Postgres checks that link at commit, so the
+   * two must commit together — as they do inside CreateBooking.
+   */
+  transaction<T>(work: () => Promise<T>): Promise<T>;
 }>;
 
 /** The clock every hold in this contract is made at (fixture flights depart in 2027). */
@@ -63,6 +74,7 @@ function makeBooking(
     passengerName: "Alice",
     createdAt,
     status: "active",
+    seat: null,
   };
 }
 
@@ -89,25 +101,43 @@ export function runBookingRepositoryContract(
     createdAt?: string,
   ): Promise<Booking> {
     const flight = await seedFlight(subject, 1);
-    await subject.repository.reserveSeat(flight.id, NOW);
     const booking = makeBooking(flight.id, ownerAccountId, createdAt);
-    await subject.repository.create(booking);
-    return booking;
+    const reserved = await book(subject, booking);
+    assert.equal(reserved.outcome, "reserved");
+    // What reads return: the seat comes from the seat side.
+    return { ...booking, seat: "1A" };
   }
 
-  test(name("reserveSeat reserves until seats run out, then returns sold-out"), async () => {
+  /**
+   * Seat first, then the booking it points at, in one transaction —
+   * CreateBooking's order. The booking is stored only if a seat was claimed.
+   */
+  function book(
+    subject: BookingRepositoryContractSubject,
+    booking: Booking,
+  ): Promise<ReserveSeatResult> {
+    return subject.transaction(async () => {
+      const reserved = await subject.repository.reserveSeat(booking.flightId, booking.id, NOW);
+      if (reserved.outcome === "reserved") {
+        await subject.repository.create(booking);
+      }
+      return reserved;
+    });
+  }
+
+  test(name("reserveSeat allocates seats lowest row then letter, returning each code, until sold-out"), async () => {
     const subject = await setup();
     const flight = await seedFlight(subject, 2);
 
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), { outcome: "reserved" });
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), { outcome: "reserved" });
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), { outcome: "sold-out" });
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "reserved", seat: "1A" });
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "reserved", seat: "1B" });
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "sold-out" });
   });
 
   test(name("reserveSeat on an unknown flight returns flight-not-found, not sold-out"), async () => {
     const subject = await setup();
 
-    assert.deepEqual(await subject.repository.reserveSeat(crypto.randomUUID(), NOW), {
+    assert.deepEqual(await book(subject, makeBooking(crypto.randomUUID())), {
       outcome: "flight-not-found",
     });
   });
@@ -118,7 +148,7 @@ export function runBookingRepositoryContract(
     const subject = await setup();
     const flight = await seedFlight(subject, 1, { status: "SCHEDULED" });
 
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), {
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), {
       outcome: "sales-closed",
     });
   });
@@ -127,7 +157,7 @@ export function runBookingRepositoryContract(
     const subject = await setup();
     const flight = await seedFlight(subject, 1, { status: "CANCELLED" });
 
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), {
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), {
       outcome: "sales-closed",
     });
   });
@@ -141,11 +171,12 @@ export function runBookingRepositoryContract(
       aircraftId: FIXTURE_OTHER_AIRCRAFT_ID,
     });
 
-    assert.deepEqual(await subject.repository.reserveSeat(atBoundary.id, NOW), {
+    assert.deepEqual(await book(subject, makeBooking(atBoundary.id)), {
       outcome: "sales-closed",
     });
-    assert.deepEqual(await subject.repository.reserveSeat(justBefore.id, NOW), {
+    assert.deepEqual(await book(subject, makeBooking(justBefore.id)), {
       outcome: "reserved",
+      seat: "1A",
     });
   });
 
@@ -153,20 +184,50 @@ export function runBookingRepositoryContract(
     const subject = await setup();
     const flight = await seedFlight(subject, 0);
 
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), {
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), {
       outcome: "sold-out",
     });
   });
 
-  test(name("releaseSeat makes one more seat reservable on a sold-out flight"), async () => {
+  test(name("cancel releases the seat: a sold-out flight can allocate it again"), async () => {
     const subject = await setup();
     const flight = await seedFlight(subject, 1);
-    await subject.repository.reserveSeat(flight.id, NOW);
+    const first = makeBooking(flight.id);
+    await book(subject, first);
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "sold-out" });
 
-    await subject.repository.releaseSeat(flight.id);
+    await subject.repository.cancel(first.id, ADMIN);
 
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), { outcome: "reserved" });
-    assert.deepEqual(await subject.repository.reserveSeat(flight.id, NOW), { outcome: "sold-out" });
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "reserved", seat: "1A" });
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "sold-out" });
+  });
+
+  test(name("a released seat in front is allocated before the free seats behind it"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 3);
+    const inFront = makeBooking(flight.id);
+    await book(subject, inFront); // 1A
+    await book(subject, makeBooking(flight.id)); // 1B
+
+    await subject.repository.cancel(inFront.id, ADMIN);
+
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "reserved", seat: "1A" });
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "reserved", seat: "1C" });
+  });
+
+  test(name("an already-cancelled booking releases nothing a second time"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 2);
+    const cancelledTwice = makeBooking(flight.id);
+    await book(subject, cancelledTwice); // 1A
+    await subject.repository.cancel(cancelledTwice.id, ADMIN);
+    await book(subject, makeBooking(flight.id)); // takes 1A again
+
+    assert.deepEqual(await subject.repository.cancel(cancelledTwice.id, ADMIN), {
+      outcome: "already-cancelled",
+    });
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "reserved", seat: "1B" });
+    assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "sold-out" });
   });
 
   test(name("cancel on an active booking returns cancelled with its flightId"), async () => {
@@ -187,6 +248,16 @@ export function runBookingRepositoryContract(
     assert.deepEqual(await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A)), {
       outcome: "already-cancelled",
     });
+  });
+
+  test(name("an active booking reads back with its seat; once cancelled, with none"), async () => {
+    const subject = await setup();
+    const booking = await seedActiveBooking(subject);
+    assert.equal((await subject.repository.findById(booking.id, ADMIN))?.seat, "1A");
+
+    await subject.repository.cancel(booking.id, ADMIN);
+
+    assert.equal((await subject.repository.findById(booking.id, ADMIN))?.seat, null);
   });
 
   test(name("cancel on an unknown booking returns not-found"), async () => {

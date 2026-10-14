@@ -1,40 +1,44 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 46
-**Current day:** Day 46 — flights reference airports/aircraft + flight lifecycle (phase D step 3)
-**Status:** ✅ Complete — unit 309/309, flight-notifier 6/6, integration 88/88, race tests
-10× in a row, end-to-end verified (curl + psql + notifier logs).
-Flights reference `airports` and `aircraft` by FK (expand → backfill → contract, one
-transaction per migration). An aircraft cannot fly overlapping flights, including a 45-minute
-turnaround: exclusion constraint `EXCL_flights_aircraft_schedule`, race-tested, with the
-`40P01` deadlock it can raise mapped to `409`. Stored statuses `SCHEDULED/OPEN/CANCELLED`;
-`CLOSED/DEPARTED` derived from the clock (ADR-008). `POST /api/flights/:id/open` with a
-lifecycle table and compare-and-set; booking needs an effectively `OPEN` flight
-(`409 SALES_CLOSED`). `flight-created` gained optional fields without breaking the consumer.
+**Last completed day:** Day 47
+**Current day:** Day 47 — FlightSeat inventory + seat map (phase D step 4)
+**Status:** ✅ Complete — unit 321/321, flight-notifier 6/6, identity 12/12, integration
+102/102, race file 10× in a row, end-to-end verified (HTTP + psql + notifier logs + newman).
+Each flight owns a copy of its aircraft's seats (`flight_seats`, expand → backfill → contract,
+the contract refusing until the dev data was reconciled by hand). The `available_seats` counter
+is gone: `availableSeats` is counted on read (scalar subquery, partial index, index-only scan).
+Booking claims the lowest free seat in one statement (`FOR UPDATE OF seat SKIP LOCKED FOR SHARE
+OF flight`) and shows it as `seat`; cancel releases it in the same statement. Public
+`GET /api/flights/:id/seats` with no booking/owner data (allow-list test over every key).
+Control race tests measured what `SKIP LOCKED` buys on Postgres: no false sold-outs without it,
+but a lock queue — ADR-004 addendum records the measured trade-off.
 
-## Day 46 delivered
+## Day 47 delivered
 
 ```text
-Step 0: domain-model Decision 9, BR-FLT-03/08, BR-REF-04 (Etc/*), ADR-008
-Step 1: 4 migrations (expand, backfill, contract, exclusion), checkpoint on dev data
-Step 2: flight-lifecycle.ts (pure state machine, 37 tests)
-Step 3: repositories (create error mapping, changeStatus, reserveSeat sales window),
-  CreateFlight new body, fixtures, flight repository contract
-Step 4: OpenFlight + route, FlightView (effective status on reads)
-Step 5: FlightCreatedEvent additive evolution, explicit producer mapping
-Step 6: race tests A/B/C + deadlock fix, e2e, Postman, README, learnings, DAY-46
+Step 0: Day 46 leftovers (40P01 assumption, IMMUTABLE note, booking-cancelled limitation)
+Step 1: domain-model Decision 10 (copy not reference, link on flight_seats.booking_id,
+  AVAILABLE/BOOKED, one seat per booking, deferred FK)
+Step 2: 3 migrations (CreateFlightSeats, BackfillFlightSeats, ContractFlightSeats) on shaped
+  dev data; refusal → human decisions → applied; 6 constraint probes
+Step 3: FlightRepository.create copies the layout atomically; derived availableSeats
+Step 4: reserveSeat with SKIP LOCKED, cancel releases via data-modifying CTEs, Booking.seat,
+  ADR-004 addendum
+Step 5: findSeats + GetFlightSeatMap + public route; sold-out list test; EXPLAIN recorded
+Step 6: race tests A–E (+C1/C2 controls), mutations, e2e, Postman folder, README, docs
 ```
 
-## Previous day (Day 45) recap
+## Previous day (Day 46) recap
 
 ```text
-Airports + aircraft with seat layouts: reference data, expandSeatLayout, admin
-writes with audit, idempotent dev seed.
+Flights reference airports/aircraft by FK; aircraft schedule exclusion constraint (45 min
+turnaround); SCHEDULED/OPEN/CANCELLED stored, CLOSED/DEPARTED derived (ADR-008); open route.
 ```
 
 ## Next
 
-Day 47 — Phase D step 4: FlightSeat inventory + seat map (US-SEAT-01, BR-SEAT-01/03: seats
-generated from the aircraft layout, availability derived instead of the `available_seats`
-counter), per
+Day 48 — Phase D step 5: multi-passenger booking — booking reference, all-or-nothing seat hold
+(`HELD` + 15-minute expiry job), US-BOOK-01, US-SEAT-02, BR-BOOK-01..05, BR-SEAT-02, per
 [`docs/product/domain-model.md`](../../docs/product/domain-model.md#phase-d-order).
+Open items carried from Day 47 (see DAY-47 "Not today"): per-fare-class availability, seat code
+on `booking-created`, deep-OFFSET cost of the counted flight list.

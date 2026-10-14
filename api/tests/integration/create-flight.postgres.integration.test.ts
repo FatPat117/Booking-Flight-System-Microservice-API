@@ -15,6 +15,8 @@ import { createPostgresOutboxRepository } from "../../src/outbox/postgres/postgr
 import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
+import { expandSeatLayout } from "../../src/aircraft/seat-layout.js";
+import { failSeatInserts } from "./failing-seat-inserts.js";
 import { insertFlightReferences } from "./flight-references.js";
 
 /**
@@ -133,6 +135,73 @@ test("duplicate: second create with the same flightNumber+departureAt resolves d
   assert.equal(flightRows.length, 1);
   assert.equal(auditRows.length, 1);
   assert.equal(outboxRows.length, 1);
+});
+
+test("a 176-seat aircraft gives its flight exactly 176 flight_seats with the same fare-class split", async () => {
+  const aircraftRepository = createPostgresAircraftRepository(dataSource);
+  if ((await aircraftRepository.findByRegistration("ZZ-176")) === undefined) {
+    const layout = expandSeatLayout({
+      cabins: [
+        { fareClass: "BUSINESS", fromRow: 1, toRow: 2, seatLetters: "ACDF" },
+        { fareClass: "ECONOMY", fromRow: 3, toRow: 30, seatLetters: "ABCDEF" },
+      ],
+    });
+    assert.ok(layout.success);
+    await aircraftRepository.create({
+      id: crypto.randomUUID(),
+      registration: "ZZ-176",
+      model: "Fixture A321",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      seats: layout.value,
+    });
+  }
+
+  const result = await createUseCase()(
+    makeRawInput({ aircraftRegistration: "ZZ-176" }),
+    ADMIN_ACTOR,
+  );
+
+  assert.equal(result.outcome, "created");
+  if (result.outcome !== "created") {
+    return;
+  }
+  assert.equal(result.flight.availableSeats, 176);
+
+  const split = (await dataSource.query(
+    `SELECT "fare_class", count(*)::int AS seats,
+            count(*) FILTER (WHERE "status" = 'AVAILABLE' AND "booking_id" IS NULL)::int AS free
+     FROM "flight_seats" WHERE "flight_id" = $1
+     GROUP BY "fare_class" ORDER BY "fare_class"`,
+    [result.flight.id],
+  )) as { fare_class: string; seats: number; free: number }[];
+
+  assert.deepEqual(split, [
+    { fare_class: "BUSINESS", seats: 8, free: 8 },
+    { fare_class: "ECONOMY", seats: 168, free: 168 },
+  ]);
+});
+
+test("a failing seat insert rolls back the flight, its audit row and its outbox row", async () => {
+  const createFlight = createUseCase();
+  const restore = await failSeatInserts(dataSource);
+
+  try {
+    await assert.rejects(
+      () => createFlight(makeRawInput(), ADMIN_ACTOR),
+      /seat insert failed/,
+    );
+  } finally {
+    await restore();
+  }
+
+  const [counts] = (await dataSource.query(
+    `SELECT (SELECT count(*) FROM "flights")::int AS flights,
+            (SELECT count(*) FROM "flight_seats")::int AS seats,
+            (SELECT count(*) FROM "audit_logs")::int AS audit,
+            (SELECT count(*) FROM "outbox")::int AS outbox`,
+  )) as { flights: number; seats: number; audit: number; outbox: number }[];
+
+  assert.deepEqual(counts, { flights: 0, seats: 0, audit: 0, outbox: 0 });
 });
 
 test("mid-transaction failure: an error after the audit write rolls back flights, audit_logs, and outbox together", async () => {

@@ -30,6 +30,9 @@ function makeRepository(
     async findById() {
       return undefined;
     },
+    async findSeats() {
+      return undefined;
+    },
     async create() {
       return {
         outcome: "created",

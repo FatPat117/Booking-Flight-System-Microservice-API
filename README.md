@@ -150,6 +150,22 @@ POST /api/flights/:id/open
 
 Rules: BR-FLT-01..08 in [docs/product/domain-model.md](docs/product/domain-model.md).
 
+## Seat inventory and seat map (Day 47)
+
+```http
+GET /api/flights/:id/seats
+→ 200 { "flightId": "…", "rows": [ { "row": 1, "seats": [ { "code": "1A", "fareClass": "BUSINESS", "status": "BOOKED" }, … ] }, … ] }
+```
+
+- **Each flight owns its seats.** Creating a flight copies its aircraft's layout into `flight_seats` (one row per position, `AVAILABLE`) in the same transaction, so a later layout change cannot touch seats already sold (BR-SEAT-03). Existing flights were migrated expand → backfill → contract, refusing to finish if a flight's bookings did not fit its seats.
+- **`availableSeats` is derived, not stored.** `GET /api/flights(/:id)` counts the flight's `AVAILABLE` seats in the same query as the page (a scalar subquery served by the partial index `idx_flight_seats_available`, so a sold-out flight shows `0` instead of disappearing). The `flights.available_seats` column is gone.
+- **Booking claims a concrete seat** — the lowest free one in (row, letter) order — and the `201` and `GET /api/bookings/:id` show it as `seat` (`null` once cancelled). Cancelling releases the seat in the same statement that cancels the booking.
+- **Concurrency.** The claim is one statement: `SELECT … FOR UPDATE OF seat SKIP LOCKED FOR SHARE OF flight` then `UPDATE … SET status = 'BOOKED'`. Concurrent bookings take different seats instead of queueing on the same one; the flight row is share-locked so its sales window cannot change mid-claim ([ADR-004 addendum](docs/adr/004-optimistic-concurrency-control.md)). A seat belongs to at most one booking: `UQ_flight_seats_booking_id`, and a check that `BOOKED` ⇔ `booking_id IS NOT NULL`.
+- **The seat map is public** (like the flight) and carries no booking id, owner or passenger — only code, fare class and status. Unknown or malformed id → `404 FLIGHT_NOT_FOUND`.
+- No seat choice yet: the system picks the seat. Holds with expiry and multi-passenger bookings come with phase D step 5.
+
+Rules: BR-SEAT-01/03 and Decisions 3 and 10 in [docs/product/domain-model.md](docs/product/domain-model.md).
+
 ## Audit trail
 
 Every successful write records an audit entry in the `audit_logs` table, in the same Postgres transaction as the write itself. If the audit insert fails, the whole write rolls back.
@@ -158,7 +174,7 @@ Every successful write records an audit entry in the `audit_logs` table, in the 
 |---|---|---|
 | `FLIGHT_CREATED` | `POST /api/flights` | `account` / admin's JWT `sub` (metadata includes `aircraftRegistration`) |
 | `FLIGHT_OPENED` | `POST /api/flights/:id/open` | `account` / admin's JWT `sub` (metadata: `previousStatus`) |
-| `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` |
+| `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` (metadata includes `seat`) |
 | `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` |
 | `AIRPORT_REGISTERED` | `POST /api/airports` | `account` / admin's JWT `sub` |
 | `AIRCRAFT_REGISTERED` | `POST /api/aircraft` | `account` / admin's JWT `sub` (metadata: seats per fare class) |
@@ -419,7 +435,9 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No route cancels a flight yet (phase D step 9); a status change other than the creation has no event
 - `Flight` is both the write model and the read shape; only `status` is mapped to a separate `FlightView`
 - Two overlapping flights of one aircraft inserted at the same instant can deadlock (`40P01`) instead of failing the exclusion constraint; the loser is answered `409 AIRCRAFT_UNAVAILABLE`, which is safe to retry if the winner also rolled back
-- `availableSeats` is still a stored counter, initialized from the aircraft's seats; per-seat inventory comes with phase D step 4
+- The system picks the seat (lowest free one); a user cannot choose, hold or change a seat yet (phase D step 5)
+- The flight list counts seats for every row the `OFFSET` skips, so deep pages get slower (measured Day 47: 1.4 ms on page 1, 52 ms on page 100 of 2000 flights); flights have no index on `(departure_at, id)`
+- `booking-created` does not carry the seat code yet (only the API response and the audit entry do)
 - Seat layouts cannot be edited (BR-REF-05); there are no read routes for a single airport or aircraft
 - Roles are a single `user` | `admin` claim — no permission tables, no refresh tokens
 - A role change takes effect only at the next login: a token keeps the role it was issued with until it expires, both after promotion (still `403`) and after demotion (still admin)
@@ -427,7 +445,7 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - In-process jobs only — duplicate execution if multiple instances run; job intervals hardcoded in the Composition Root; no job timeout
 - Outbox relay polls every 5s; duplicate delivery possible if `markPublished` fails after a successful publish
 - `eventId` is on every event, but consumers have no dedupe store yet
-- `booking-cancelled` has no consumer and no shared contract type
+- `booking-cancelled` is published but has no consumer and no shared contract type, so its queue only grows. Next step: add `BookingCancelledEvent` to `packages/contracts`, validate it in a `bookingCancelledConsumer` in `flight-notifier` (same shape as `bookingCreatedConsumer`, with its own DLQ), then drain the queue
 - Dead-letter queues are inspected manually — no auto-retry or alerting; no outbox monitoring
 - `/ready` checks Postgres only (`SELECT 1`), not RabbitMQ
 - Transactions are local to `booking_db`; no nested transactions (they throw `NestedTransactionError`); no cross-service transactions

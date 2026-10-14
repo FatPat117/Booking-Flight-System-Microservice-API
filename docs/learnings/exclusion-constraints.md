@@ -21,7 +21,7 @@ EXCLUDE USING gist (
 
 Pieces that were needed:
 - **`btree_gist`**: GiST indexes ranges, but `uuid WITH =` needs btree behaviour inside GiST. The extension is *trusted*, so the database owner (`booking`) can create it without a superuser.
-- **An `IMMUTABLE` wrapper**: index expressions must be immutable. `timestamptz + interval` is only `STABLE`, because adding "1 day" depends on the session time zone. Adding minutes does not, so `flight_aircraft_occupancy()` is declared `IMMUTABLE` and that is true.
+- **An `IMMUTABLE` wrapper**: index expressions must be immutable. `timestamptz + interval` is only `STABLE`, because adding "1 day" depends on the session time zone. Adding minutes does not, so `flight_aircraft_occupancy()` is declared `IMMUTABLE` and that is true. **Condition:** it stays true only while the interval has no day or month part. Postgres does not check what you declare; a turnaround written as `'1 day'` would still be accepted, and the index would silently disagree with the table across a DST change. Write long turnarounds in minutes (`'1440 minutes'`).
 - **Half-open `[)`**: the next flight may depart exactly at arrival + 45 min. The contract test pins both sides: +45 is allowed, +44 is rejected.
 - **Partial (`WHERE status <> 'CANCELLED'`)**: a cancelled flight frees its aircraft.
 

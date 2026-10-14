@@ -12,6 +12,7 @@ import { createGetBooking } from "../src/bookings/get-booking.js";
 import { createListBookings } from "../src/bookings/list-bookings.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createGetFlight } from "../src/flights/get-flight.js";
+import { createGetFlightSeatMap } from "../src/flights/get-flight-seat-map.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createOpenFlight } from "../src/flights/open-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
@@ -81,6 +82,7 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
 
   const app = createApp({
     getFlight: createGetFlight({ flightRepository, getCurrentTime: () => FIXED_TIME }),
+    getFlightSeatMap: createGetFlightSeatMap({ flightRepository }),
     createFlight: createCreateFlight({
       ...common,
       flightRepository,
@@ -192,6 +194,7 @@ test("POST booking returns 201 owned by the caller, with a Location that GET res
   assert.equal(created.body.flightId, flightId);
   assert.equal(created.body.ownerAccountId, ACCOUNT_A);
   assert.equal(created.body.passengerName, "Alice Nguyen");
+  assert.equal(created.body.seat, "1A");
   assert.equal(created.headers.location, `/api/bookings/${created.body.id}`);
 
   const fetched = await request(app).get(created.headers.location ?? "").set(as(USER_A));

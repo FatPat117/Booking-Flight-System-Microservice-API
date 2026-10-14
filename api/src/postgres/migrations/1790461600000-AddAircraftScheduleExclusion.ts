@@ -20,8 +20,11 @@ import type { MigrationInterface, QueryRunner } from "typeorm";
  * be IMMUTABLE, and `timestamptz + interval` is only STABLE because an
  * interval with days or months depends on the session time zone (DST). A
  * fixed number of minutes does not, so declaring this wrapper IMMUTABLE is
- * truthful. Changing the turnaround means replacing the function *and*
- * rebuilding the constraint.
+ * truthful — but ONLY while the interval has no day or month part. A
+ * turnaround written as '1 day' or '1 mon' would make IMMUTABLE a lie and
+ * the index silently wrong across a DST change; use '1440 minutes' instead.
+ * Changing the turnaround means replacing the function *and* rebuilding the
+ * constraint.
  *
  * WHERE status <> 'CANCELLED': a cancelled flight frees its aircraft.
  */
