@@ -66,6 +66,16 @@ fix the code directly.
 - Update `.cursor/progress/CURRENT.md` (last completed day, status, next day).
 - Update `docs/roadmap.md` only if the plan genuinely changed — add a line to its
   "Roadmap history" table explaining why, and write an ADR if the order of phases changed.
+- Update the Vietnamese study notes in `docs/learnings/vietnamese/` (the one place where
+  Vietnamese is allowed in docs) so they stay current through the day just finished:
+  - `on-tap-nhanh-day-01-XX.md` — add the day's row to the timeline and any new technique,
+    measured number or gotcha; rename the file to the new last day and fix links to it.
+  - `race-conditions/` — a new file (or an update) when the day handled contested writes.
+  - `interview/` — new Q&A when the day produced something worth explaining in an interview.
+  - `use-cases/` — new or changed endpoints, outcomes and HTTP mappings.
+  - `migrations/danh-sach.md` — every new migration (what it does, why).
+  - Bump the "Cập nhật đến Day XX" line in `vietnamese/README.md` and check all relative
+    links still resolve.
 
 ### Automation: progress check on `git push`
 

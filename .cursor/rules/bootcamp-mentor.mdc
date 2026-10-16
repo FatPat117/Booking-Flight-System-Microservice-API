@@ -43,3 +43,5 @@ Review like a company PR: Architecture, Structure, Naming, Readability, TypeScri
 ## Progress
 
 Read `.cursor/progress/CURRENT.md` before each session. Update it after each completed day.
+
+After each completed day, also update the Vietnamese study notes in `docs/learnings/vietnamese/` (Vietnamese is allowed only there): the quick-review timeline (`on-tap-nhanh-day-01-XX.md`, renamed to the new last day), `race-conditions/`, `interview/`, `use-cases/` and `migrations/danh-sach.md` wherever the day added something, and the "Cập nhật đến Day XX" line in `vietnamese/README.md`. See CLAUDE.md "After a day is completed".
