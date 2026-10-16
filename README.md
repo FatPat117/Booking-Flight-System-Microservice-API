@@ -23,7 +23,7 @@ Details, principles and why the order is what it is: [docs/roadmap.md](docs/road
   packages/contracts/         ← @booking-flight-system/contracts (shared event types)
   api/                        ← @booking-flight-system/api (flights + bookings HTTP, outbox relay)
   services/identity/          ← register / login, issues JWTs (identity_db)
-  services/flight-notifier/   ← RabbitMQ consumer (flight-created, booking-created)
+  services/flight-notifier/   ← RabbitMQ consumer (flight-created, booking-held, booking-created)
 
 docker-compose.yml
   ├── app              (build context: ., Dockerfile: api/Dockerfile)
@@ -86,7 +86,7 @@ Identity (`services/identity`, port `3001`) issues JWTs: `POST /api/identity/reg
 | `POST /api/airports`, `POST /api/aircraft` | JWT with `role=admin` |
 | `POST /api/flights/:flightId/bookings` | JWT with `role=user` (an admin gets `403`); the booking's owner is the token's `sub` |
 | `GET /api/bookings` | any valid JWT — a user sees their own bookings, an admin sees all |
-| `GET /api/bookings/:id` | any valid JWT — owner or admin |
+| `GET /api/bookings/:id`, `GET /api/bookings/by-reference/:reference` | any valid JWT — owner or admin |
 | `DELETE /api/bookings/:id` | JWT with `role=user`, owner only |
 
 Promote an account to admin once with `npm run promote-to-admin -- <email>` in the identity workspace, then log in again to get a token carrying the new role.
@@ -99,10 +99,10 @@ Booking request:
 POST /api/flights/:flightId/bookings
 Content-Type: application/json
 
-{ "passengerName": "Nguyen Van A" }
+{ "passengers": [ { "name": "Nguyen Van A", "seat": "12A" }, { "name": "Tran Thi B", "seat": "12B" } ] }
 ```
 
-Responses: `201` created with `Location: /api/bookings/:id`, `409 FLIGHT_SOLD_OUT`, `409 SALES_CLOSED` (the flight is not `OPEN`: not opened yet, cancelled, or within 1 hour of departure — Day 46), `404` flight not found, `422` validation error. `DELETE /api/bookings/:id` returns `204`, then `409` on the owner's second cancel, `404` for an unknown id or another account's booking. `GET /api/bookings` uses the same `page`/`pageSize` rules as flights, newest first.
+Responses: `201` created with `Location: /api/bookings/:id` (a `HELD` booking, see [Multi-passenger holds](#multi-passenger-holds-and-booking-references-day-48a)), `409 NOT_ENOUGH_SEATS`, `409 SEATS_UNAVAILABLE`, `409 SALES_CLOSED` (the flight is not `OPEN`: not opened yet, cancelled, or within 1 hour of departure — Day 46), `404` flight not found, `422` validation error. `DELETE /api/bookings/:id` returns `204`, then `409` on the owner's second cancel, `404` for an unknown id or another account's booking. `GET /api/bookings` uses the same `page`/`pageSize` rules as flights, newest first.
 
 Missing/invalid/expired JWT on protected routes returns `401 Unauthorized` with `WWW-Authenticate: Bearer`. A valid JWT with the wrong role returns `403 Forbidden`.
 
@@ -154,17 +154,36 @@ Rules: BR-FLT-01..08 in [docs/product/domain-model.md](docs/product/domain-model
 
 ```http
 GET /api/flights/:id/seats
-→ 200 { "flightId": "…", "rows": [ { "row": 1, "seats": [ { "code": "1A", "fareClass": "BUSINESS", "status": "BOOKED" }, … ] }, … ] }
+→ 200 { "flightId": "…", "rows": [ { "row": 1, "seats": [ { "code": "1A", "fareClass": "BUSINESS", "status": "HELD" }, … ] }, … ] }
 ```
 
 - **Each flight owns its seats.** Creating a flight copies its aircraft's layout into `flight_seats` (one row per position, `AVAILABLE`) in the same transaction, so a later layout change cannot touch seats already sold (BR-SEAT-03). Existing flights were migrated expand → backfill → contract, refusing to finish if a flight's bookings did not fit its seats.
 - **`availableSeats` is derived, not stored.** `GET /api/flights(/:id)` counts the flight's `AVAILABLE` seats in the same query as the page (a scalar subquery served by the partial index `idx_flight_seats_available`, so a sold-out flight shows `0` instead of disappearing). The `flights.available_seats` column is gone.
-- **Booking claims a concrete seat** — the lowest free one in (row, letter) order — and the `201` and `GET /api/bookings/:id` show it as `seat` (`null` once cancelled). Cancelling releases the seat in the same statement that cancels the booking.
-- **Concurrency.** The claim is one statement: `SELECT … FOR UPDATE OF seat SKIP LOCKED FOR SHARE OF flight` then `UPDATE … SET status = 'BOOKED'`. Concurrent bookings take different seats instead of queueing on the same one; the flight row is share-locked so its sales window cannot change mid-claim ([ADR-004 addendum](docs/adr/004-optimistic-concurrency-control.md)). A seat belongs to at most one booking: `UQ_flight_seats_booking_id`, and a check that `BOOKED` ⇔ `booking_id IS NOT NULL`.
-- **The seat map is public** (like the flight) and carries no booking id, owner or passenger — only code, fare class and status. Unknown or malformed id → `404 FLIGHT_NOT_FOUND`.
-- No seat choice yet: the system picks the seat. Holds with expiry and multi-passenger bookings come with phase D step 5.
+- **Booking holds concrete seats** (since Day 48A one per passenger, next section). Cancelling releases them in the same statement that cancels the booking.
+- **Concurrency.** A system-picked hold is one statement: `SELECT … FOR UPDATE OF seat SKIP LOCKED FOR SHARE OF flight` then `UPDATE … SET status = 'HELD'`. Concurrent bookings take different seats instead of queueing on the same one; the flight row is share-locked so its sales window cannot change mid-claim ([ADR-004 addendum](docs/adr/004-optimistic-concurrency-control.md)). A check ties `booking_id IS NOT NULL` to a non-`AVAILABLE` status.
+- **The seat map is public** (like the flight) and carries no booking id, owner or passenger — only code, fare class and status (`AVAILABLE`, `HELD`, `BOOKED`). Unknown or malformed id → `404 FLIGHT_NOT_FOUND`.
 
 Rules: BR-SEAT-01/03 and Decisions 3 and 10 in [docs/product/domain-model.md](docs/product/domain-model.md).
+
+## Multi-passenger holds and booking references (Day 48A)
+
+```http
+POST /api/flights/:flightId/bookings
+{ "passengers": [ { "name": "Bob Tran" }, { "name": "Lan Tran" }, { "name": "Minh Tran" } ] }
+→ 201 { "id": "…", "reference": "K7Q4PZ", "status": "HELD", "holdExpiresAt": "…+15 min",
+        "passengers": [ { "name": "Bob Tran", "seat": "1A" }, … ], … }
+
+GET /api/bookings/by-reference/K7Q4PZ
+```
+
+- **Breaking change to the booking body.** `{ "passengerName": … }` is replaced by `passengers`: 1 to 9 (BR-BOOK-01, counted before any passenger is read), each with a non-empty `name`. Either every passenger names a `seat` (`12A`) or none does (BR-BOOK-09); with none the system holds the lowest free seats in (row, letter) order. The old body answers `422 UNSUPPORTED_FIELD`.
+- **All or nothing** (BR-SEAT-02): either every passenger gets a seat or no seat is held. `409 NOT_ENOUGH_SEATS` (system-picked), `409 SEATS_UNAVAILABLE` with the taken seat codes in `details` (chosen; never who holds them), `422 UNKNOWN_SEAT` for a code the flight does not have, `422 MIXED_SEAT_SELECTION`, `422 DUPLICATE_SEAT`, `422 INVALID_PASSENGER_COUNT`. `FLIGHT_SOLD_OUT` is gone.
+- **A new booking is `HELD` for 15 minutes** (`holdExpiresAt`, BR-BOOK-04) and its seats show `HELD` on the map. Existing bookings were migrated `active → CONFIRMED`, `cancelled → CANCELLED`. A `HELD` booking can be cancelled at any time; its passengers keep the seat codes they had, as history.
+- **Booking reference** (BR-BOOK-05): 6 characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no `0/O`, `1/I`), unique (`UQ_bookings_reference`). A clash is drawn again, up to 5 times, inside the same transaction (`INSERT … ON CONFLICT DO NOTHING` keeps it usable). `GET /api/bookings/by-reference/:reference` follows the same ownership rule as by id: another account's or a malformed reference → `404 BOOKING_NOT_FOUND`.
+- **Concurrency.** Each hold is a single statement. System-picked seats use `SKIP LOCKED` and a count check in the `UPDATE`'s own `WHERE`, so finding fewer seats than passengers writes nothing. Chosen seats are locked **in (row, letter) order, whatever order the request lists them in**, so `[12A, 12B]` and `[12B, 12A]` cannot deadlock (race tests in `postgres-booking-hold-race.integration.test.ts`).
+- **Event `booking-held`** replaces `booking-created` for new bookings (`reference`, `holdExpiresAt`, passengers with seats). flight-notifier consumes it and still consumes `booking-created` for messages sent before Day 48A.
+
+Rules: BR-BOOK-01/02/04/05/09, BR-SEAT-02 and Decision 11 in [docs/product/domain-model.md](docs/product/domain-model.md).
 
 ## Audit trail
 
@@ -174,7 +193,7 @@ Every successful write records an audit entry in the `audit_logs` table, in the 
 |---|---|---|
 | `FLIGHT_CREATED` | `POST /api/flights` | `account` / admin's JWT `sub` (metadata includes `aircraftRegistration`) |
 | `FLIGHT_OPENED` | `POST /api/flights/:id/open` | `account` / admin's JWT `sub` (metadata: `previousStatus`) |
-| `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` (metadata includes `seat`) |
+| `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` (metadata: `reference`, `passengerCount`, `seats`, `holdExpiresAt` — no passenger names) |
 | `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` |
 | `AIRPORT_REGISTERED` | `POST /api/airports` | `account` / admin's JWT `sub` |
 | `AIRCRAFT_REGISTERED` | `POST /api/aircraft` | `account` / admin's JWT `sub` (metadata: seats per fare class) |
@@ -282,7 +301,7 @@ docker compose exec app sh -c "getent hosts rabbitmq"
 
 ## Messaging
 
-Every successful write enqueues an outbox row in the same Postgres transaction as the write and its audit entry: `flight-created`, `booking-created`, `booking-cancelled`. `outbox-relay-job` (default every 5s) reads unpublished rows and publishes each to the durable queue named after its event type.
+Every successful write enqueues an outbox row in the same Postgres transaction as the write and its audit entry: `flight-created`, `booking-held` (`booking-created` before Day 48A), `booking-cancelled`. `outbox-relay-job` (default every 5s) reads unpublished rows and publishes each to the durable queue named after its event type.
 
 | Decision | Choice | Why |
 |----------|--------|-----|
@@ -299,7 +318,7 @@ After startup, the publisher reconnects lazily: an unexpected connection/channel
 
 ### flight-notifier service
 
-`services/flight-notifier/` has its own `package.json`, build, Dockerfile and process. It subscribes to `flight-created` and `booking-created`, validates each event against `packages/contracts`, logs `flight_created_consumed` / `booking_created_consumed` with the `correlationId`, and acks/nacks manually. `booking-cancelled` is published but has no consumer yet.
+`services/flight-notifier/` has its own `package.json`, build, Dockerfile and process. It subscribes to `flight-created`, `booking-held` and `booking-created` (no longer produced since Day 48A; kept for messages already queued), validates each event against `packages/contracts`, logs `flight_created_consumed` / `booking_held_consumed` (reference and passenger count, no names) / `booking_created_consumed` with the `correlationId`, and acks/nacks manually. `booking-cancelled` is published but has no consumer yet.
 
 `flight-created` evolves additively (Day 46): the payload gained `originAirportId`, `destinationAirportId`, `aircraftId` and `status`, while `origin`/`destination` (IATA codes) and `availableSeats` stay. The new fields are optional in the parser, because old-shape messages may still sit in the outbox, queue or DLQ, and rejected only when present but empty. The producer maps the payload field by field, so a field added to `Flight` is never published by accident. Making them required, or dropping the old fields, is a later contract step.
 
@@ -329,6 +348,10 @@ The application runs TypeORM migrations (`api/src/postgres/migrations/`) on star
 | `CreateAirportsAndAircraft` | `airports` (unique code), `aircraft` (unique registration), `seats` (PK `aircraft_id, row, letter`) |
 | `ExpandFlightReferences` / `BackfillFlightReferences` / `ContractFlightReferences` | `flights.origin_airport_id`, `destination_airport_id`, `aircraft_id`, `status`: add nullable, backfill airports from the old codes (status `OPEN`), then refuse with a list of the flights still missing a reference, or make them `NOT NULL` with FKs and CHECKs and drop the text columns |
 | `AddAircraftScheduleExclusion` | `btree_gist`, the `IMMUTABLE` `flight_aircraft_occupancy()` range and `EXCL_flights_aircraft_schedule` |
+| `MoveBookingsToLifecycle` | booking status `active`/`cancelled` → `CONFIRMED`/`CANCELLED`, CHECK `HELD`/`CONFIRMED`/`CANCELLED`/`EXPIRED`, `hold_expires_at` required while `HELD` |
+| `AddBookingReference` | `bookings.reference`: backfilled from `gen_random_uuid()` bytes, then `NOT NULL`, `UQ_bookings_reference` and a format CHECK |
+| `CreateBookingPassengers` / `ContractBookingPassengers` | `booking_passengers` (1–9 positions, a seat once per booking), backfilled one per booking; the contract refuses with a list if a `CONFIRMED` booking's seats and passengers disagree, else drops `bookings.passenger_name` |
+| `AllowHeldSeats` | seat status `HELD`; `UQ_flight_seats_booking_id` replaced by the partial index `idx_flight_seats_booking_id` (a booking now holds several seats) |
 
 Since Day 46 each migration runs in its own transaction (`migrationsTransactionMode: "each"`): a refused contract migration keeps the expand and backfill, so the missing data can be fixed by hand and the migrations re-run. The aircraft of an existing flight cannot be guessed, so it is assigned by hand, e.g. `UPDATE flights SET aircraft_id = (SELECT id FROM aircraft WHERE registration = 'VN-A321') WHERE flight_number = 'VN123';`.
 
@@ -376,12 +399,12 @@ Request
   → observability middleware (requestId + logs)
   → express.json / routes
   → JWT verify + role check (flight and reference-data writes, every booking route)
-  → CreateFlight | OpenFlight | ListFlights | GetFlight | CreateBooking | CancelBooking | GetBooking | ListBookings
+  → CreateFlight | OpenFlight | ListFlights | GetFlight | CreateBooking | CancelBooking | GetBooking | GetBookingByReference | ListBookings
     | RegisterAirport | ListAirports | RegisterAircraft
   → TransactionRunner (every write)
       ├── Flight / Booking / Airport / Aircraft repositories → Postgres
       ├── AuditRecorder → Postgres audit_logs
-      └── OutboxRepository → Postgres outbox (booking-created | flight-created)
+      └── OutboxRepository → Postgres outbox (booking-held | booking-cancelled | flight-created)
 ```
 
 Every response includes header `x-request-id` (generated or echoed from the client).
@@ -435,9 +458,11 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No route cancels a flight yet (phase D step 9); a status change other than the creation has no event
 - `Flight` is both the write model and the read shape; only `status` is mapped to a separate `FlightView`
 - Two overlapping flights of one aircraft inserted at the same instant can deadlock (`40P01`) instead of failing the exclusion constraint; the loser is answered `409 AIRCRAFT_UNAVAILABLE`, which is safe to retry if the winner also rolled back
-- The system picks the seat (lowest free one); a user cannot choose, hold or change a seat yet (phase D step 5)
+- **No payment yet: a `HELD` booking never becomes `CONFIRMED`** (payment is phase D step 6), and **nothing expires a hold yet**: `holdExpiresAt` is stored but no job releases the seats after 15 minutes (Day 48B). Until then a held seat stays `HELD` until its booking is cancelled. There is deliberately no shortcut route to confirm a booking (Decision 11)
+- No price per passenger or booking total yet (BR-BOOK-03, fare class snapshot at hold time)
+- A seat cannot be changed after booking (phase D step 7)
+- Two system-picked multi-seat holds racing for the last seats could in theory both find fewer seats than needed (each skips rows the other just locked) and both answer `409 NOT_ENOUGH_SEATS`; not observed in 200 measured rounds (Day 48A race test A)
 - The flight list counts seats for every row the `OFFSET` skips, so deep pages get slower (measured Day 47: 1.4 ms on page 1, 52 ms on page 100 of 2000 flights); flights have no index on `(departure_at, id)`
-- `booking-created` does not carry the seat code yet (only the API response and the audit entry do)
 - Seat layouts cannot be edited (BR-REF-05); there are no read routes for a single airport or aircraft
 - Roles are a single `user` | `admin` claim — no permission tables, no refresh tokens
 - A role change takes effect only at the next login: a token keeps the role it was issued with until it expires, both after promotion (still `403`) and after demotion (still admin)

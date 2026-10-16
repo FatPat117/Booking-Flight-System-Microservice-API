@@ -5,7 +5,11 @@ import type { DataSource } from "typeorm";
 
 import { formatSeatPosition } from "../../src/aircraft/seat-position.js";
 import { createPostgresAuditRecorder } from "../../src/audit/postgres/postgres-audit-recorder.js";
-import type { BookingRepository } from "../../src/bookings/booking-repository.js";
+import type {
+  BookingRepository,
+  HoldSeatsResult,
+  SeatHoldRequest,
+} from "../../src/bookings/booking-repository.js";
 import { createCancelBooking } from "../../src/bookings/cancel-booking.js";
 import { createCreateBooking } from "../../src/bookings/create-booking.js";
 import { createPostgresBookingRepository } from "../../src/bookings/postgres/postgres-booking-repository.js";
@@ -15,6 +19,7 @@ import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { resolveEntityManager } from "../../src/postgres/transaction-context.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
+import { nextBookingReference } from "../fixtures/bookings.js";
 import { makeFlight } from "../fixtures/flights.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
@@ -33,6 +38,7 @@ const OWNER_ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
 const OWNER_SCOPE = { kind: "owner", accountId: OWNER_ACCOUNT_ID } as const;
 const OWNER_ACTOR = { accountId: OWNER_ACCOUNT_ID };
 const NOW = new Date("2026-07-20T00:00:00.000Z");
+const ONE_SEAT = { kind: "auto", count: 1 } as const;
 
 let dataSource: DataSource;
 
@@ -45,6 +51,7 @@ function createCreateBookingUseCase(
     outboxRepository: createPostgresOutboxRepository(dataSource),
     transactionRunner: createPostgresTransactionRunner(dataSource),
     generateId: () => crypto.randomUUID(),
+    generateReference: nextBookingReference,
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => undefined,
@@ -79,33 +86,36 @@ async function bookConcurrently(
 ) {
   const results = await Promise.all(
     Array.from({ length: callers }, (_, i) =>
-      createBooking(flightId, { passengerName: `Passenger ${i}` }, OWNER_ACTOR),
+      createBooking(flightId, { passengers: [{ name: `Passenger ${i}` }] }, OWNER_ACTOR),
     ),
   );
   const seats = results.flatMap((r) =>
-    r.outcome === "created" && r.booking.seat !== null ? [r.booking.seat] : [],
+    r.outcome === "created"
+      ? r.booking.passengers.flatMap((p) => (p.seat === null ? [] : [p.seat]))
+      : [],
   );
   return {
     created: results.filter((r) => r.outcome === "created").length,
-    soldOut: results.filter((r) => r.outcome === "sold-out").length,
+    soldOut: results.filter((r) => r.outcome === "not-enough-seats").length,
     seats,
   };
 }
 
 /**
  * The invariant every race below must keep, read straight from the tables:
- * each active booking holds exactly one BOOKED seat and each BOOKED seat
- * belongs to an active booking.
+ * each HELD booking holds exactly one HELD seat and each HELD seat belongs to
+ * a HELD booking (every booking in this file has one passenger; several are
+ * covered in postgres-booking-hold-race.integration.test.ts).
  */
 async function seatState(flightId: string) {
   const [row] = (await dataSource.query(
     `SELECT
-       (SELECT count(*)::int FROM "bookings" WHERE "flight_id" = $1 AND "status" = 'active') AS "active",
-       (SELECT count(*)::int FROM "flight_seats" WHERE "flight_id" = $1 AND "status" = 'BOOKED') AS "booked",
+       (SELECT count(*)::int FROM "bookings" WHERE "flight_id" = $1 AND "status" = 'HELD') AS "active",
+       (SELECT count(*)::int FROM "flight_seats" WHERE "flight_id" = $1 AND "status" = 'HELD') AS "booked",
        (SELECT count(*)::int FROM "flight_seats" WHERE "flight_id" = $1 AND "status" = 'AVAILABLE') AS "available",
        (SELECT count(*)::int FROM "flight_seats" seat
           JOIN "bookings" booking ON booking."id" = seat."booking_id"
-          WHERE seat."flight_id" = $1 AND booking."status" = 'active') AS "paired"`,
+          WHERE seat."flight_id" = $1 AND booking."status" = 'HELD') AS "paired"`,
     [flightId],
   )) as Array<{ active: number; booked: number; available: number; paired: number }>;
   assert.ok(row);
@@ -113,8 +123,8 @@ async function seatState(flightId: string) {
 }
 
 function assertConsistent(state: Awaited<ReturnType<typeof seatState>>) {
-  assert.equal(state.booked, state.active, "BOOKED seats must equal active bookings");
-  assert.equal(state.paired, state.active, "every BOOKED seat must belong to an active booking");
+  assert.equal(state.booked, state.active, "HELD seats must equal HELD bookings");
+  assert.equal(state.paired, state.active, "every HELD seat must belong to a HELD booking");
 }
 
 before(async () => {
@@ -167,7 +177,7 @@ test("Test B — 20 concurrent bookings on a 50-seat flight: all 20 created on 2
  * here, never in src/. Every caller picks the same lowest seat and waits on
  * its lock. It does NOT end in a false sold-out on Postgres: LockRows sits
  * under Limit in the plan, so a row that fails the READ COMMITTED re-check
- * (now BOOKED) is dropped and the next row of the sort is tried — the waiter
+ * (now taken) is dropped and the next row of the sort is tried — the waiter
  * walks 1A, 1B, ... waiting on each in turn. The cost is the queue: every
  * booking waits for the in-flight transactions in front of it (Test C2).
  */
@@ -175,7 +185,8 @@ function createRepositoryWithoutSkipLocked(): BookingRepository {
   const repository = createPostgresBookingRepository(dataSource);
   return {
     ...repository,
-    async reserveSeat(flightId, bookingId, now) {
+    async holdSeats(flightId, bookingId, request, now) {
+      assertOneAutoSeat(request);
       const [rows] = (await resolveEntityManager(dataSource).query(
         `WITH picked AS (
            SELECT seat."flight_id", seat."row", seat."letter"
@@ -190,19 +201,28 @@ function createRepositoryWithoutSkipLocked(): BookingRepository {
            FOR SHARE OF flight
          )
          UPDATE "flight_seats" seat
-         SET "status" = 'BOOKED', "booking_id" = $2
+         SET "status" = 'HELD', "booking_id" = $2
          FROM picked
          WHERE (seat."flight_id", seat."row", seat."letter")
              = (picked."flight_id", picked."row", picked."letter")
          RETURNING seat."row", seat."letter"`,
         [flightId, bookingId, now],
       )) as [Array<{ row: number; letter: string }>, number];
-      const [claimed] = rows;
-      return claimed === undefined
-        ? { outcome: "sold-out" }
-        : { outcome: "reserved", seat: formatSeatPosition(claimed) };
+      return oneSeatResult(rows);
     },
   };
+}
+
+/** The controls replicate the one-seat statement only. */
+function assertOneAutoSeat(request: SeatHoldRequest): void {
+  assert.deepEqual(request, { kind: "auto", count: 1 });
+}
+
+function oneSeatResult(rows: Array<{ row: number; letter: string }>): HoldSeatsResult {
+  const [claimed] = rows;
+  return claimed === undefined
+    ? { outcome: "not-enough-seats" }
+    : { outcome: "held", seats: [formatSeatPosition(claimed)] };
 }
 
 test("Test C1 — control: without SKIP LOCKED, Test B still books 20 distinct seats (no false sold-out on Postgres)", async (t) => {
@@ -224,6 +244,63 @@ test("Test C1 — control: without SKIP LOCKED, Test B still books 20 distinct s
   assertConsistent(await seatState(flightId));
 });
 
+/**
+ * Control C3 (Day 48A): no row lock at all — the optimistic version the
+ * ADR-004 addendum describes but Day 47 never built. The pick is a plain
+ * snapshot read; the outer UPDATE re-checks `status = 'AVAILABLE'` (OCC).
+ * Every caller that read the same lowest seat aims at it; after the first
+ * commits, the rest re-check against a taken row, match nothing and report
+ * sold-out although 30 seats are free. Exists only here, never in src/.
+ */
+function createRepositoryWithoutRowLock(): BookingRepository {
+  const repository = createPostgresBookingRepository(dataSource);
+  return {
+    ...repository,
+    async holdSeats(flightId, bookingId, request, now) {
+      assertOneAutoSeat(request);
+      const [rows] = (await resolveEntityManager(dataSource).query(
+        `UPDATE "flight_seats" seat
+         SET "status" = 'HELD', "booking_id" = $2
+         WHERE (seat."flight_id", seat."row", seat."letter") = (
+             SELECT candidate."flight_id", candidate."row", candidate."letter"
+             FROM "flight_seats" candidate
+             JOIN "flights" flight ON flight."id" = candidate."flight_id"
+             WHERE candidate."flight_id" = $1 AND candidate."status" = 'AVAILABLE'
+               AND flight."status" = 'OPEN'
+               AND flight."departure_at" - interval '1 hour' > $3
+             ORDER BY candidate."row", candidate."letter"
+             LIMIT 1)
+           AND seat."status" = 'AVAILABLE'
+         RETURNING seat."row", seat."letter"`,
+        [flightId, bookingId, now],
+      )) as [Array<{ row: number; letter: string }>, number];
+      return oneSeatResult(rows);
+    },
+  };
+}
+
+test("Test C3 — control: with no row lock (pick, then conditional UPDATE), Test B reports false sold-outs but never double-books", async (t) => {
+  const flightId = await createFlightWithSeats(50);
+
+  const { created, soldOut, seats } = await bookConcurrently(
+    flightId,
+    20,
+    createCreateBookingUseCase(createRepositoryWithoutRowLock()),
+  );
+  t.diagnostic(
+    `without any row lock: ${created} created, ${soldOut} false sold-out of 20 (50 seats)`,
+  );
+
+  // Measured Day 48A: 15–16 of 20 every run (10 runs). Asserted only as
+  // "some", so the control fails if Postgres stops producing the effect.
+  assert.ok(soldOut > 0, "expected false sold-outs without a row lock");
+  assert.equal(created + soldOut, 20);
+  assert.equal(new Set(seats).size, created);
+  const state = await seatState(flightId);
+  assert.equal(state.available, 50 - created);
+  assertConsistent(state);
+});
+
 class Rollback extends Error {}
 
 function lockTimedOut(error: unknown): boolean {
@@ -241,8 +318,8 @@ test("Test C2 — control: while one booking holds seat 1A, the next waits on it
 
   const holder = runner
     .run(async () => {
-      const result = await repository.reserveSeat(flightId, crypto.randomUUID(), NOW);
-      assert.deepEqual(result, { outcome: "reserved", seat: "1A" });
+      const result = await repository.holdSeats(flightId, crypto.randomUUID(), ONE_SEAT, NOW);
+      assert.deepEqual(result, { outcome: "held", seats: ["1A"] });
       claimed();
       await holderReleased;
       throw new Rollback();
@@ -259,7 +336,7 @@ test("Test C2 — control: while one booking holds seat 1A, the next waits on it
     await runner
       .run(async () => {
         await resolveEntityManager(dataSource).query(`SET LOCAL lock_timeout = '300ms'`);
-        outcome = await candidate.reserveSeat(flightId, crypto.randomUUID(), NOW);
+        outcome = await candidate.holdSeats(flightId, crypto.randomUUID(), ONE_SEAT, NOW);
         throw new Rollback();
       })
       .catch((error: unknown) => {
@@ -271,7 +348,7 @@ test("Test C2 — control: while one booking holds seat 1A, the next waits on it
 
   try {
     assert.equal(await claimWhileHeld(createRepositoryWithoutSkipLocked()), "lock-timeout");
-    assert.deepEqual(await claimWhileHeld(repository), { outcome: "reserved", seat: "1B" });
+    assert.deepEqual(await claimWhileHeld(repository), { outcome: "held", seats: ["1B"] });
   } finally {
     release();
     await holder;
@@ -300,13 +377,13 @@ test("Test D — on a full flight, a cancel racing a new booking never leaves tw
     const [cancelled, newcomer] = await Promise.all([
       cancelBooking(victim.id, OWNER_SCOPE, OWNER_ACTOR),
       sleep(STAGGER_MS[round % STAGGER_MS.length] ?? 0).then(() =>
-        createBooking(flightId, { passengerName: "Newcomer" }, OWNER_ACTOR),
+        createBooking(flightId, { passengers: [{ name: "Newcomer" }] }, OWNER_ACTOR),
       ),
     ]);
 
     assert.equal(cancelled.outcome, "cancelled");
     assert.ok(
-      newcomer.outcome === "created" || newcomer.outcome === "sold-out",
+      newcomer.outcome === "created" || newcomer.outcome === "not-enough-seats",
       `unexpected outcome ${newcomer.outcome}`,
     );
     tally[newcomer.outcome === "created" ? "rebooked" : "soldOut"] += 1;

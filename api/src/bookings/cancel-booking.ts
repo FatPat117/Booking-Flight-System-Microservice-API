@@ -37,10 +37,12 @@ type CancelBookingDependencies = {
 };
 
 /**
- * Cancel an active booking and release its seat.
+ * Cancel a HELD or CONFIRMED booking and release all its seats. A HELD one
+ * is never time-restricted (BR-BOOK-06 covers CONFIRMED only, and arrives
+ * with step 7).
  *
- * BookingRepository.cancel() releases the seat in the same statement, only
- * when it wins the OCC race (first active→cancelled).
+ * BookingRepository.cancel() releases the seats in the same statement, only
+ * when it wins the OCC race (first HELD|CONFIRMED→CANCELLED).
  * booking-cancelled stays in outbox only — no contracts entry until a consumer exists.
  */
 export function createCancelBooking(

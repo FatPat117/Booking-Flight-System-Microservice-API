@@ -3,7 +3,8 @@ import type { SeatPosition } from "../aircraft/seat-position.js";
 import type { Flight } from "../types.js";
 import type { StoredFlightStatus } from "./flight-lifecycle.js";
 
-export type FlightSeatStatus = "AVAILABLE" | "BOOKED";
+/** HELD since Day 48A: a booking holds it until paid, cancelled or expired. */
+export type FlightSeatStatus = "AVAILABLE" | "HELD" | "BOOKED";
 
 /**
  * One seat of a flight's inventory as anyone may see it. Deliberately

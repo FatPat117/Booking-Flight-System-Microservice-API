@@ -10,6 +10,7 @@ import { createVerifyJwtMiddleware } from "./auth/verify-jwt.js";
 import type { CancelBooking } from "./bookings/cancel-booking.js";
 import type { CreateBooking } from "./bookings/create-booking.js";
 import type { GetBooking } from "./bookings/get-booking.js";
+import type { GetBookingByReference } from "./bookings/get-booking-by-reference.js";
 import type { ListBookings } from "./bookings/list-bookings.js";
 import type { CreateFlight } from "./flights/create-flight.js";
 import type { GetFlight } from "./flights/get-flight.js";
@@ -37,6 +38,7 @@ export type AppDependencies = {
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
   getBooking: GetBooking;
+  getBookingByReference: GetBookingByReference;
   listBookings: ListBookings;
   listFlights: ListFlights;
   registerAirport: RegisterAirport;
@@ -76,6 +78,7 @@ export function createApp(dependencies: AppDependencies) {
     createBooking,
     cancelBooking,
     getBooking,
+    getBookingByReference,
     listBookings,
     listFlights,
     registerAirport,
@@ -275,10 +278,37 @@ export function createApp(dependencies: AppDependencies) {
         });
       }
 
-      if (result.outcome === "sold-out") {
+      // All or nothing (BR-SEAT-02): nothing was held in any case below.
+      if (result.outcome === "not-enough-seats") {
         return sendApiError(res, 409, {
-          code: "FLIGHT_SOLD_OUT",
-          message: "No seats available for this flight",
+          code: "NOT_ENOUGH_SEATS",
+          message: "Not enough seats available for every passenger",
+        });
+      }
+
+      // Only which seats; never who holds them (the seat map already shows
+      // their status publicly).
+      if (result.outcome === "seats-unavailable") {
+        return sendApiError(res, 409, {
+          code: "SEATS_UNAVAILABLE",
+          message: "Some requested seats are already held or booked",
+          details: result.seats.map((seat) => ({
+            field: "seat",
+            code: "SEAT_UNAVAILABLE",
+            message: seat,
+          })),
+        });
+      }
+
+      if (result.outcome === "unknown-seats") {
+        return sendApiError(res, 422, {
+          code: "VALIDATION_FAILED",
+          message: "Some requested seats do not exist on this flight",
+          details: result.seats.map((seat) => ({
+            field: "seat",
+            code: "UNKNOWN_SEAT",
+            message: seat,
+          })),
         });
       }
 
@@ -314,6 +344,25 @@ export function createApp(dependencies: AppDependencies) {
       pagination: result.pagination,
     });
   });
+
+  // Registered before /api/bookings/:id only for readability: the extra path
+  // segment means the two can never match the same URL.
+  app.get(
+    "/api/bookings/by-reference/:reference",
+    requireJwt,
+    async (req: Request<{ reference: string }>, res) => {
+      const result = await getBookingByReference(
+        req.params.reference,
+        toBookingAccessScope(currentUser()),
+      );
+
+      if (result.outcome === "not-found") {
+        return sendApiError(res, 404, BOOKING_NOT_FOUND);
+      }
+
+      return res.status(200).json(result.booking);
+    },
+  );
 
   // Another account's booking answers exactly like a missing one (BR-AUTH-02).
   app.get(

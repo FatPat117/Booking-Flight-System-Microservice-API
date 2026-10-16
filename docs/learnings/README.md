@@ -24,6 +24,7 @@ Personal notes on techniques and mechanisms this project actually uses — writt
 | [flight-lifecycle-state-machine.md](./flight-lifecycle-state-machine.md) | State machine as a lookup table, guards, stored vs time-derived status, compare-and-set on status change |
 | [exclusion-constraints.md](./exclusion-constraints.md) | Overlap rules across rows, GiST + `btree_gist`, `IMMUTABLE` wrapper, `40P01` deadlock on concurrent inserts |
 | [evolving-event-contracts.md](./evolving-event-contracts.md) | Expand → contract for messages, optional fields, explicit payload mapping |
+| [all-or-nothing-holds-and-lock-ordering.md](./all-or-nothing-holds-and-lock-ordering.md) | Multi-row holds in one statement, the half-commit trap, `SKIP LOCKED` vs waiting, global lock order against `40P01` |
 
 Add a row here whenever you add a note.
 

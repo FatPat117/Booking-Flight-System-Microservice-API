@@ -27,11 +27,16 @@ import {
   type GetBooking,
 } from "../bookings/get-booking.js";
 import {
+  createGetBookingByReference,
+  type GetBookingByReference,
+} from "../bookings/get-booking-by-reference.js";
+import {
   createListBookings,
   type ListBookings,
 } from "../bookings/list-bookings.js";
 import { createPostgresBookingRepository } from "../bookings/postgres/postgres-booking-repository.js";
 import type { BookingRepository } from "../bookings/booking-repository.js";
+import { generateBookingReference } from "../bookings/booking-reference.js";
 import {
   createCreateFlight,
   type CreateFlight,
@@ -83,6 +88,7 @@ export type Application = Readonly<{
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
   getBooking: GetBooking;
+  getBookingByReference: GetBookingByReference;
   listBookings: ListBookings;
   getFlight: GetFlight;
   getFlightSeatMap: GetFlightSeatMap;
@@ -174,6 +180,7 @@ export async function createApplication(
     outboxRepository,
     transactionRunner,
     generateId: () => crypto.randomUUID(),
+    generateReference: () => generateBookingReference(),
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
@@ -192,6 +199,9 @@ export async function createApplication(
   });
 
   const getBooking = createGetBooking({ bookingRepository });
+  const getBookingByReference = createGetBookingByReference({
+    bookingRepository,
+  });
   const listBookings = createListBookings({ bookingRepository });
 
   const getFlight = createGetFlight({
@@ -253,6 +263,7 @@ export async function createApplication(
     createBooking,
     cancelBooking,
     getBooking,
+    getBookingByReference,
     listBookings,
     getFlight,
     getFlightSeatMap,

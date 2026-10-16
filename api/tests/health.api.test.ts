@@ -58,6 +58,7 @@ function createTestCreateBooking(
     outboxRepository: createNoopOutboxRepository(),
     transactionRunner: createPassthroughTransactionRunner(),
     generateId: () => "fixed-booking-id",
+    generateReference: () => "K7Q4PZ",
     generateAuditId: () => "fixed-audit-id",
     generateOutboxId: () => "fixed-outbox-id",
     getRequestId: () => "fixed-request-id",

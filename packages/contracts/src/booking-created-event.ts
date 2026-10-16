@@ -1,3 +1,8 @@
+/**
+ * No longer produced since Day 48A (replaced by `booking.held`, domain-model
+ * Decision 11). Kept so the notifier can still consume messages written
+ * before then that sit in the outbox, the queue or the DLQ.
+ */
 export type BookingCreatedEvent = {
   eventId: string;
   correlationId: string;

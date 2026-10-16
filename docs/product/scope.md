@@ -120,6 +120,7 @@ As a logged-in user, I want to book seats for several passengers on one flight a
 - Given `12B` was just held by someone else, when I book `12A`, `12B`, then **no** seat is held and I get `409 SEATS_UNAVAILABLE` listing `12B` (all-or-nothing, BR-SEAT-02).
 - Given 10 passengers, then `422` (BR-BOOK-01).
 - Given the same seat twice in one request, then `422` (BR-BOOK-02).
+- Given 3 passengers and no seats named, then the 3 lowest free seats (row, then letter) are held. Given one passenger names a seat and another does not, then `422` (BR-BOOK-09).
 - Given `VN123` departs in 50 minutes, then `409 SALES_CLOSED` (BR-FLT-06).
 - Given no JWT, then `401`.
 

@@ -21,6 +21,7 @@ Select the **Booking Microservices — Local** environment before sending reques
 | `requestId` | `investigate-001` | Sent as `x-request-id` → becomes Day 29 `correlationId` |
 | `day46FlightId`, `day46ScheduledFlightId` | empty | Auto-set by the Day 46 folder: the flight it opens and the one it leaves `SCHEDULED` |
 | `day47FlightId`, `day47BookingId`, `day47Seat` | empty | Auto-set by the Day 47 folder: VN471, bob's booking on it and the seat it got |
+| `day48FlightId`, `day48BookingId`, `day48Reference` | empty | Auto-set by the Day 48A folder: VN481, bob's 3-passenger booking and its reference |
 
 ## Auth reminder
 
@@ -47,16 +48,19 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 3. **JWT** → `GET /api/whoami` (optional probe; returns `userId`, `email`, `role`)
 4. **Flights (Write)** → `POST /api/flights` (saves `flightId`), then `POST /api/flights/:id/open`. Since Day 46 the body names an `aircraftRegistration` instead of `availableSeats` (run the seed first, see step 11), and a new flight is `SCHEDULED`: until it is opened, every booking answers `409 SALES_CLOSED`
 5. **Identity** → register + login `bob` and `carol` (saves `userAccessToken`, `userBAccessToken`)
-6. **Bookings** → `POST /api/flights/:flightId/bookings` as bob (saves `bookingId`; the body shows its `seat`); `GET /api/bookings/:id` follows the `Location`. **Flights (Read)** → `GET /api/flights/:id/seats` shows that seat `BOOKED`
-7. Wait ~5s → check flight-notifier for `booking_created_consumed` + same `correlationId` as `x-request-id`
+6. **Bookings** → `POST /api/flights/:flightId/bookings` as bob (saves `bookingId`; the body is `HELD` with a `reference` and each passenger's `seat`); `GET /api/bookings/:id` follows the `Location`. **Flights (Read)** → `GET /api/flights/:id/seats` shows that seat `HELD`
+7. Wait ~5s → check flight-notifier for `booking_held_consumed` + same `correlationId` as `x-request-id`
 8. Folder **Day 44 — Booking ownership (BOLA)** → carol and admin are refused without learning whether bob's booking exists
 9. **Bookings** → `DELETE /api/bookings/:id` twice as bob → `204` then `409`; the seat is `AVAILABLE` again in the seat map
 10. Folder **Day 29 — Correlation investigate** → auto-generates a fresh `requestId` for log grep; creates VN29 (admin), opens it (`1b`), then books it as bob. VN29 can be created once per database
 11. Folder **Day 45 — Reference data** → register an airport and an aircraft as admin; run it on a fresh database (the first requests answer `409` on a second run). `npm run seed:reference --workspace=@booking-flight-system/api` adds 25 airports (12 in Vietnam, 13 abroad incl. DST zones) and 8 aircraft (A320neo to A350, plus an ATR 72) and can run any number of times
 12. Folder **Day 46 — Flight lifecycle** → needs the seed, alice's `accessToken` and bob's `userAccessToken`; run top to bottom on a database without VN461/VN462 on 2026-11-20
 13. Folder **Day 47 — Seat inventory** → same prerequisites; run top to bottom on a database without VN471 on 2026-12-01. Also runs headless: `npx newman run postman/Booking-microservices.postman_collection.json -e postman/Booking-microservices.local.postman_environment.json --folder "Day 47 — Seat inventory" --env-var accessToken=… --env-var userAccessToken=…`
+14. Folder **Day 48A — Multi-passenger hold** → same prerequisites plus carol's `userBAccessToken`; run top to bottom on a database without VN481 on 2026-12-05. Headless like step 13, adding `--env-var userBAccessToken=…`
 
-## Coverage (through Day 47)
+**Booking body since Day 48A:** `{ "passengers": [{ "name": "…", "seat": "12A" }] }` — 1 to 9 passengers, `seat` on every passenger or on none. The old `{ "passengerName": … }` answers `422 UNSUPPORTED_FIELD`. A new booking is `HELD` (seats `HELD` on the map) and the notifier logs `booking_held_consumed`.
+
+## Coverage (through Day 48A)
 
 - Health: `/live`, `/health`, `/ready` (booking api `:3000`; `/ready` checks Postgres)
 - Flights / bookings / cancel / correlation probes
@@ -66,4 +70,5 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 - **Booking ownership (Day 44)**: my bookings list, get by id, BOLA checks (404 for another account, 403 for admin create/cancel, 401 without token)
 - **Reference data (Day 45)**: `POST /api/airports` (code normalized, 409, IANA time zone 422, 403 for users), public `GET /api/airports`, `POST /api/aircraft` (seat counts, overlapping cabins 422 naming the seat, size limit 422); `GET /api/flights/not-a-uuid` → 404
 - **Flight lifecycle (Day 46)**: create with IATA codes + `aircraftRegistration` (seats from the aircraft, `SCHEDULED`), `409 AIRCRAFT_UNAVAILABLE` inside arrival + 45 min and `201` exactly at it, `422 UNSUPPORTED_FIELD` for `availableSeats`, `422` unknown airports/aircraft at once, `POST /api/flights/:id/open` (`200`, `409 INVALID_FLIGHT_STATUS`, `403` for users), booking a `SCHEDULED` flight → `409 SALES_CLOSED`
-- **Seat inventory (Day 47)**: a new flight's `availableSeats` = its aircraft's seats; public `GET /api/flights/:id/seats` (all `AVAILABLE`, 8 business + 168 economy, only seat-map keys at any depth); booking answers its `seat` (`1A`), the map shows it `BOOKED` and `availableSeats` drops by 1; cancel makes it `AVAILABLE` again, the count returns, the cancelled booking reads `seat: null`; malformed id → `404`
+- **Seat inventory (Day 47)**: a new flight's `availableSeats` = its aircraft's seats; public `GET /api/flights/:id/seats` (all `AVAILABLE`, 8 business + 168 economy, only seat-map keys at any depth); booking answers its seat (`1A`, since Day 48A in `passengers[0].seat`), the map shows it `HELD` and `availableSeats` drops by 1; cancel makes it `AVAILABLE` again, the count returns, the cancelled booking reads `CANCELLED` and keeps the seat it had as history; malformed id → `404`
+- **Multi-passenger hold (Day 48A)**: 3 passengers without seats → `201 HELD` on `1A 1C 1D` with a 6-character reference and a 15-minute `holdExpiresAt`; chosen `[12B, 12A]` paired in order; an overlapping request → `409 SEATS_UNAVAILABLE` naming only `12B`, and `12C` stays `AVAILABLE`; `99K` → `422 UNKNOWN_SEAT`; 10 passengers → one `INVALID_PASSENGER_COUNT` issue; mixed → `MIXED_SEAT_SELECTION`; `passengerName` → `UNSUPPORTED_FIELD`; `GET /api/bookings/by-reference/:reference` (`200` owner, `404` another account); cancelling the `HELD` booking releases all three seats

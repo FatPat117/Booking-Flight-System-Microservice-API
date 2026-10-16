@@ -9,6 +9,7 @@ import { createApp } from "../src/app.js";
 import { createCancelBooking } from "../src/bookings/cancel-booking.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
 import { createGetBooking } from "../src/bookings/get-booking.js";
+import { createGetBookingByReference } from "../src/bookings/get-booking-by-reference.js";
 import { createListBookings } from "../src/bookings/list-bookings.js";
 import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createGetFlight } from "../src/flights/get-flight.js";
@@ -17,6 +18,7 @@ import { createListFlights } from "../src/flights/list-flights.js";
 import { createOpenFlight } from "../src/flights/open-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { Logger } from "../src/observability/logger.js";
+import { nextBookingReference } from "./fixtures/bookings.js";
 import { makeSeats, TEST_AIRPORTS } from "./fixtures/flights.js";
 import {
   createInMemoryAircraftRepository,
@@ -95,9 +97,11 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
       ...common,
       bookingRepository,
       generateId: () => crypto.randomUUID(),
+      generateReference: nextBookingReference,
     }),
     cancelBooking: createCancelBooking({ ...common, bookingRepository }),
     getBooking: createGetBooking({ bookingRepository }),
+    getBookingByReference: createGetBookingByReference({ bookingRepository }),
     listBookings: createListBookings({ bookingRepository }),
     listFlights: createListFlights({ flightRepository, getCurrentTime: () => FIXED_TIME }),
     ...createUnusedReferenceData(),
@@ -162,11 +166,31 @@ async function seedFlight(
   return flightId;
 }
 
-function book(app: Express, accessToken: string, flightId: string, passengerName = "Alice") {
+type PassengerBody = { name: string; seat?: string };
+
+function book(
+  app: Express,
+  accessToken: string,
+  flightId: string,
+  passengers: PassengerBody[] = [{ name: "Alice" }],
+) {
   return request(app)
     .post(`/api/flights/${flightId}/bookings`)
     .set("Authorization", `Bearer ${accessToken}`)
-    .send({ passengerName });
+    .send({ passengers });
+}
+
+/** Seat code → status, from the public seat map. */
+async function seatStatuses(app: Express, flightId: string) {
+  const response = await request(app).get(`/api/flights/${flightId}/seats`);
+  assert.equal(response.status, 200);
+  const statuses: Record<string, string> = {};
+  for (const row of response.body.rows as Array<{ seats: Array<{ code: string; status: string }> }>) {
+    for (const seat of row.seats) {
+      statuses[seat.code] = seat.status;
+    }
+  }
+  return statuses;
 }
 
 async function seedBooking(app: Express, accessToken: string): Promise<string> {
@@ -188,13 +212,16 @@ test("POST booking returns 201 owned by the caller, with a Location that GET res
   const { app } = createContext();
   const flightId = await seedFlight(app, 2);
 
-  const created = await book(app, USER_A, flightId, "Alice Nguyen");
+  const created = await book(app, USER_A, flightId, [{ name: "Alice Nguyen" }]);
 
   assert.equal(created.status, 201);
   assert.equal(created.body.flightId, flightId);
   assert.equal(created.body.ownerAccountId, ACCOUNT_A);
-  assert.equal(created.body.passengerName, "Alice Nguyen");
-  assert.equal(created.body.seat, "1A");
+  assert.deepEqual(created.body.passengers, [{ name: "Alice Nguyen", seat: "1A" }]);
+  assert.equal(created.body.status, "HELD");
+  // BR-BOOK-04: fifteen minutes after FIXED_TIME.
+  assert.equal(created.body.holdExpiresAt, "2026-07-20T00:15:00.000Z");
+  assert.match(created.body.reference, /^[A-HJ-NP-Z2-9]{6}$/);
   assert.equal(created.headers.location, `/api/bookings/${created.body.id}`);
 
   const fetched = await request(app).get(created.headers.location ?? "").set(as(USER_A));
@@ -202,15 +229,156 @@ test("POST booking returns 201 owned by the caller, with a Location that GET res
   assert.deepEqual(fetched.body, created.body);
 });
 
-test("POST booking returns 409 when flight is sold out", async () => {
+test("POST booking returns 409 NOT_ENOUGH_SEATS when the flight has no seat left", async () => {
   const { app } = createContext();
   const flightId = await seedFlight(app, 1);
 
   assert.equal((await book(app, USER_A, flightId)).status, 201);
-  const second = await book(app, USER_B, flightId, "Bob");
+  const second = await book(app, USER_B, flightId, [{ name: "Bob" }]);
 
   assert.equal(second.status, 409);
-  assert.equal(second.body.error.code, "FLIGHT_SOLD_OUT");
+  assert.equal(second.body.error.code, "NOT_ENOUGH_SEATS");
+});
+
+test("POST booking without seats holds the lowest free seats in row-then-letter order, one per passenger", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app, 8);
+  assert.equal((await book(app, USER_B, flightId, [{ name: "Zed", seat: "1B" }])).status, 201);
+
+  const created = await book(app, USER_A, flightId, [
+    { name: "Alice" },
+    { name: "Bob" },
+    { name: "Carol" },
+  ]);
+
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.body.passengers, [
+    { name: "Alice", seat: "1A" },
+    { name: "Bob", seat: "1C" },
+    { name: "Carol", seat: "1D" },
+  ]);
+  const statuses = await seatStatuses(app, flightId);
+  assert.deepEqual(
+    ["1A", "1B", "1C", "1D", "1E"].map((code) => statuses[code]),
+    ["HELD", "HELD", "HELD", "HELD", "AVAILABLE"],
+  );
+});
+
+test("POST booking with chosen seats pairs each passenger with the seat they named", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app, 6);
+
+  const created = await book(app, USER_A, flightId, [
+    { name: "Alice", seat: "1F" },
+    { name: "Bob", seat: "1A" },
+  ]);
+
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.body.passengers, [
+    { name: "Alice", seat: "1F" },
+    { name: "Bob", seat: "1A" },
+  ]);
+});
+
+test("POST booking with one chosen seat already held is 409 SEATS_UNAVAILABLE naming only that seat, and holds nothing", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app, 6);
+  assert.equal((await book(app, USER_B, flightId, [{ name: "Zed", seat: "1B" }])).status, 201);
+
+  const response = await book(app, USER_A, flightId, [
+    { name: "Alice", seat: "1A" },
+    { name: "Bob", seat: "1B" },
+  ]);
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error.code, "SEATS_UNAVAILABLE");
+  assert.deepEqual(response.body.error.details, [
+    { field: "seat", code: "SEAT_UNAVAILABLE", message: "1B" },
+  ]);
+  // Nothing about who holds it.
+  assert.ok(!JSON.stringify(response.body).includes(ACCOUNT_B));
+  // All or nothing (BR-SEAT-02): 1A was not held on the way.
+  assert.equal((await seatStatuses(app, flightId))["1A"], "AVAILABLE");
+});
+
+test("POST booking for more passengers than free seats is 409 NOT_ENOUGH_SEATS and holds nothing", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app, 2);
+
+  const response = await book(app, USER_A, flightId, [
+    { name: "Alice" },
+    { name: "Bob" },
+    { name: "Carol" },
+  ]);
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error.code, "NOT_ENOUGH_SEATS");
+  assert.deepEqual(await seatStatuses(app, flightId), { "1A": "AVAILABLE", "1B": "AVAILABLE" });
+});
+
+test("POST booking naming a seat the flight does not have is 422 UNKNOWN_SEAT", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app, 6);
+
+  const response = await book(app, USER_A, flightId, [
+    { name: "Alice", seat: "1A" },
+    { name: "Bob", seat: "30K" },
+  ]);
+
+  assert.equal(response.status, 422);
+  assert.deepEqual(response.body.error.details, [
+    { field: "seat", code: "UNKNOWN_SEAT", message: "30K" },
+  ]);
+  assert.equal((await seatStatuses(app, flightId))["1A"], "AVAILABLE");
+});
+
+test("POST booking rejects body shapes the rules forbid with 422 and the rule's code", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app, 6);
+  const send = (body: unknown) =>
+    request(app).post(`/api/flights/${flightId}/bookings`).set(as(USER_A)).send(body as object);
+
+  const cases: Array<{ body: unknown; codes: string[] }> = [
+    // BR-BOOK-01: counted before any passenger is read, so the invalid
+    // passengers inside produce no issue of their own.
+    { body: { passengers: Array.from({ length: 10 }, () => ({})) }, codes: ["INVALID_PASSENGER_COUNT"] },
+    { body: { passengers: [] }, codes: ["INVALID_PASSENGER_COUNT"] },
+    { body: {}, codes: ["INVALID_PASSENGER_COUNT"] },
+    // BR-BOOK-09.
+    {
+      body: { passengers: [{ name: "Alice", seat: "1A" }, { name: "Bob" }] },
+      codes: ["MIXED_SEAT_SELECTION"],
+    },
+    // BR-BOOK-02.
+    {
+      body: { passengers: [{ name: "Alice", seat: "1A" }, { name: "Bob", seat: "1A" }] },
+      codes: ["DUPLICATE_SEAT"],
+    },
+    { body: { passengers: [{ name: "Alice", seat: "1a" }] }, codes: ["INVALID_SEAT"] },
+    { body: { passengers: [{ name: "  " }] }, codes: ["REQUIRED"] },
+    { body: { passengers: ["Alice"] }, codes: ["INVALID_PASSENGER"] },
+    // The Day 44 body names what replaced it.
+    {
+      body: { passengerName: "Alice", passengers: [{ name: "Alice" }] },
+      codes: ["UNSUPPORTED_FIELD"],
+    },
+    { body: { passengerName: "Alice" }, codes: ["UNSUPPORTED_FIELD", "INVALID_PASSENGER_COUNT"] },
+  ];
+
+  for (const { body, codes } of cases) {
+    const response = await send(body);
+    assert.equal(response.status, 422, JSON.stringify(body));
+    assert.equal(response.body.error.code, "VALIDATION_FAILED");
+    assert.deepEqual(
+      response.body.error.details.map((issue: { code: string }) => issue.code),
+      codes,
+      JSON.stringify(body),
+    );
+  }
+
+  // None of them held a seat.
+  const statuses = await seatStatuses(app, flightId);
+  assert.ok(Object.values(statuses).every((status) => status === "AVAILABLE"));
 });
 
 test("POST booking on a flight not yet opened for sale is 409 SALES_CLOSED, and no seat is taken", async () => {
@@ -242,7 +410,7 @@ test("POST booking returns 422 for invalid passenger name", async () => {
   const { app } = createContext();
   const flightId = await seedFlight(app);
 
-  const response = await book(app, USER_A, flightId, "  ");
+  const response = await book(app, USER_A, flightId, [{ name: "  " }]);
 
   assert.equal(response.status, 422);
   assert.equal(response.body.error.code, "VALIDATION_FAILED");
@@ -268,9 +436,10 @@ test("every booking endpoint returns 401 without a token", async () => {
   const bookingId = await seedBooking(app, USER_A);
 
   const responses = await Promise.all([
-    request(app).post(`/api/flights/${flightId}/bookings`).send({ passengerName: "Alice" }),
+    request(app).post(`/api/flights/${flightId}/bookings`).send({ passengers: [{ name: "Alice" }] }),
     request(app).get("/api/bookings"),
     request(app).get(`/api/bookings/${bookingId}`),
+    request(app).get("/api/bookings/by-reference/K7Q4PZ"),
     request(app).delete(`/api/bookings/${bookingId}`),
   ]);
 
@@ -297,7 +466,31 @@ test("another account's booking answers GET exactly like a missing one: 404 with
   assert.equal(otherAccount.body.error.code, "BOOKING_NOT_FOUND");
 });
 
-test("another account cannot cancel the booking: 404, and the owner still sees it active", async () => {
+test("GET by-reference returns the owner's booking; another account's, a missing and a malformed reference are the same 404", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app);
+  const created = await book(app, USER_A, flightId);
+  const { reference } = created.body as { reference: string };
+
+  const own = await request(app).get(`/api/bookings/by-reference/${reference}`).set(as(USER_A));
+  const admin = await request(app).get(`/api/bookings/by-reference/${reference}`).set(as(ADMIN));
+  const otherAccount = await request(app)
+    .get(`/api/bookings/by-reference/${reference}`)
+    .set(as(USER_B));
+  const missing = await request(app).get("/api/bookings/by-reference/ZZZZZZ").set(as(USER_B));
+  const malformed = await request(app).get("/api/bookings/by-reference/k7q4p0").set(as(USER_A));
+
+  assert.equal(own.status, 200);
+  assert.deepEqual(own.body, created.body);
+  assert.equal(admin.status, 200);
+  for (const response of [otherAccount, missing, malformed]) {
+    assert.equal(response.status, 404);
+    assert.deepEqual(response.body, otherAccount.body);
+  }
+  assert.equal(otherAccount.body.error.code, "BOOKING_NOT_FOUND");
+});
+
+test("another account cannot cancel the booking: 404, and the owner still sees it HELD", async () => {
   const { app } = createContext();
   const bookingOfA = await seedBooking(app, USER_A);
 
@@ -308,7 +501,7 @@ test("another account cannot cancel the booking: 404, and the owner still sees i
   assert.deepEqual(attempt.body, missing.body);
 
   const stillThere = await request(app).get(`/api/bookings/${bookingOfA}`).set(as(USER_A));
-  assert.equal(stillThere.body.status, "active");
+  assert.equal(stillThere.body.status, "HELD");
 });
 
 test("cancelling another account's already-cancelled booking is still 404, never 409", async () => {
@@ -379,10 +572,11 @@ test("a malformed booking id is 404 on GET and DELETE, not 500", async () => {
 // Cancelling and audit
 // ---------------------------------------------------------------------------
 
-test("DELETE booking returns 204 then 409 on the owner's second cancel, and releases the seat once", async () => {
+test("DELETE a HELD booking returns 204 then 409 on the owner's second cancel, and releases every seat once", async () => {
   const { app } = createContext();
   const flightId = await seedFlight(app, 3);
-  const created = await book(app, USER_A, flightId);
+  const created = await book(app, USER_A, flightId, [{ name: "Alice" }, { name: "Bob" }]);
+  assert.equal(created.status, 201);
   const bookingId = created.body.id as string;
 
   const first = await request(app).delete(`/api/bookings/${bookingId}`).set(as(USER_A));

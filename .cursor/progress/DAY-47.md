@@ -190,6 +190,20 @@ CancelBooking use cases (pool max 10). Every test ends with the same table check
 | D | full 5-seat flight, `[cancel X, new booking]` × 20 rounds, start staggered 0–8 ms | consistent every round; rebooked 8–11, sold-out 9–12 per run |
 | E | 10 concurrent cancels of one booking | 1 cancelled / 9 already-cancelled, seat released once |
 
+**What the controls are** (test-only repositories in the race file, never in `src/`):
+
+- **C1** — the real claim statement with `SKIP LOCKED` removed; the pick still takes
+  `FOR UPDATE OF seat`. Run as Test B (50 seats, 20 concurrent bookings).
+- **C2** — deterministic: one transaction claims `1A` and stays open; a second claim with
+  `lock_timeout = 300ms` is tried without `SKIP LOCKED` (→ `55P03`, it queued behind `1A`)
+  and with it (→ `1B` at once).
+- **C3** (added Day 48A Step 0) — **no row lock at all**: a plain snapshot pick (`LIMIT 1`
+  in a subquery) and an outer `UPDATE ... AND status = 'AVAILABLE'` (OCC). Run as Test B,
+  10 runs: **15–16 false sold-outs of 20 every run** (4–5 created while 30 seats stayed
+  free), never a double booking. This is the false refusal the brief predicted for C1 —
+  it belongs to OCC, not to a missing `SKIP LOCKED`. The test asserts "some" false
+  sold-outs, so the control fails if Postgres stops producing the effect.
+
 **Finding — the brief's control prediction was wrong on Postgres.** Expected: without
 `SKIP LOCKED`, waiters on `1A` find it BOOKED after the wait and report sold-out although seats are
 free. Observed: 0 false sold-outs. `EXPLAIN` of the claim shows `Limit → LockRows → Sort`:

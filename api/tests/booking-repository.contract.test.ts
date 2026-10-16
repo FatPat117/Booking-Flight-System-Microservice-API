@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { formatSeatPosition } from "../src/aircraft/seat-position.js";
 import { runBookingRepositoryContract } from "./contracts/booking-repository.contract.js";
 import {
   createInMemoryBookingRepository,
@@ -18,6 +19,13 @@ runBookingRepositoryContract("in-memory", async () => {
     transaction: (work) => transactionRunner.run(work),
     async insertFlight(flight) {
       assert.deepEqual(await flightRepository.create(flight), { outcome: "created" });
+    },
+    async seats(flightId) {
+      return (flights.seats.get(flightId) ?? []).map((seat) => ({
+        seat: formatSeatPosition(seat.position),
+        status: seat.status,
+        bookingId: seat.bookingId,
+      }));
     },
   };
 });

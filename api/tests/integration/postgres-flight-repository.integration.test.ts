@@ -14,6 +14,7 @@ import {
   FIXTURE_OTHER_AIRCRAFT_ID,
   makeFlight as makeFixtureFlight,
 } from "../fixtures/flights.js";
+import { makeBooking } from "../fixtures/bookings.js";
 import { failSeatInserts } from "./failing-seat-inserts.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
@@ -234,17 +235,9 @@ test("findPage keeps a sold-out flight and a flight with no seats at all, counti
   }
   await keepFirstSeats(dataSource, soldOut.id, 1);
   await keepFirstSeats(dataSource, seatless.id, 0);
-  const booking = {
-    id: crypto.randomUUID(),
-    flightId: soldOut.id,
-    ownerAccountId: "11111111-1111-4111-8111-111111111111",
-    passengerName: "Alice",
-    createdAt: "2026-07-20T00:00:00.000Z",
-    status: "active" as const,
-    seat: null,
-  };
+  const booking = makeBooking({ flightId: soldOut.id });
   await createPostgresTransactionRunner(dataSource).run(async () => {
-    await bookingRepository.reserveSeat(soldOut.id, booking.id, new Date("2026-07-20T00:00:00.000Z"));
+    await bookingRepository.holdSeats(soldOut.id, booking.id, { kind: "auto", count: 1 }, new Date("2026-07-20T00:00:00.000Z"));
     await bookingRepository.create(booking);
   });
 
@@ -259,29 +252,21 @@ test("findPage keeps a sold-out flight and a flight with no seats at all, counti
   assert.deepEqual(await repository.findSeats(seatless.id), []);
 });
 
-test("findSeats reports a claimed seat as BOOKED", async () => {
+test("findSeats reports a held seat as HELD", async () => {
   const repository = createPostgresFlightRepository(dataSource);
   const bookingRepository = createPostgresBookingRepository(dataSource);
   const flight = makeFlight();
   await repository.create(flight);
-  const booking = {
-    id: crypto.randomUUID(),
-    flightId: flight.id,
-    ownerAccountId: "11111111-1111-4111-8111-111111111111",
-    passengerName: "Alice",
-    createdAt: "2026-07-20T00:00:00.000Z",
-    status: "active" as const,
-    seat: null,
-  };
+  const booking = makeBooking({ flightId: flight.id });
   await createPostgresTransactionRunner(dataSource).run(async () => {
-    await bookingRepository.reserveSeat(flight.id, booking.id, new Date("2026-07-20T00:00:00.000Z"));
+    await bookingRepository.holdSeats(flight.id, booking.id, { kind: "auto", count: 1 }, new Date("2026-07-20T00:00:00.000Z"));
     await bookingRepository.create(booking);
   });
 
   const seats = await repository.findSeats(flight.id);
 
   assert.deepEqual(seats?.slice(0, 2), [
-    { position: { row: 1, letter: "A" }, fareClass: "ECONOMY", status: "BOOKED" },
+    { position: { row: 1, letter: "A" }, fareClass: "ECONOMY", status: "HELD" },
     { position: { row: 1, letter: "B" }, fareClass: "ECONOMY", status: "AVAILABLE" },
   ]);
 });

@@ -52,6 +52,18 @@
     {
       "key": "day47Seat",
       "value": ""
+    },
+    {
+      "key": "day48FlightId",
+      "value": ""
+    },
+    {
+      "key": "day48BookingId",
+      "value": ""
+    },
+    {
+      "key": "day48Reference",
+      "value": ""
     }
   ],
   "item": [
@@ -224,7 +236,7 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/api/flights/{{flightId}}/seats",
-            "description": "Day 47 (US-SEAT-01): public seat map of {{flightId}}. 200 + { flightId, rows: [{ row, seats: [{ code, fareClass, status }] }] }, status AVAILABLE | BOOKED. Never a booking id, owner or passenger.\n404 FLIGHT_NOT_FOUND for an unknown or malformed id."
+            "description": "Day 47 (US-SEAT-01): public seat map of {{flightId}}. 200 + { flightId, rows: [{ row, seats: [{ code, fareClass, status }] }] }, status AVAILABLE | HELD | BOOKED. Never a booking id, owner or passenger.\n404 FLIGHT_NOT_FOUND for an unknown or malformed id."
           },
           "response": [],
           "event": [
@@ -383,10 +395,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengerName\": \"Alice Nguyen\"\n}"
+              "raw": "{\n  \"passengers\": [{ \"name\": \"Alice Nguyen\" }]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
-            "description": "role=user JWT (bob). Owner = token sub.\n201 created (Location: /api/bookings/:id), body includes seat (Day 47: the lowest free seat, e.g. \"1A\") | 409 FLIGHT_SOLD_OUT | 409 SALES_CLOSED (flight not OPEN or departing within 1 h) | 404 FLIGHT_NOT_FOUND | 422 validation | 401 no token | 403 admin token.\nSaves {{bookingId}}. Wait ~5s → booking_created_consumed with same correlationId."
+            "description": "role=user JWT (bob). Owner = token sub.\n201 created (Location: /api/bookings/:id), body is a HELD booking with reference, holdExpiresAt (15 min) and passengers [{ name, seat }] (Day 48A: no seat named → the lowest free seats) | 409 NOT_ENOUGH_SEATS | 409 SEATS_UNAVAILABLE | 409 SALES_CLOSED (flight not OPEN or departing within 1 h) | 404 FLIGHT_NOT_FOUND | 422 validation / UNKNOWN_SEAT | 401 no token | 403 admin token.\nSaves {{bookingId}}. Wait ~5s → booking_held_consumed with same correlationId."
           },
           "response": []
         },
@@ -414,7 +426,7 @@
               "mode": "raw",
               "raw": "{}"
             },
-            "description": "Expect 422 VALIDATION_FAILED (passengerName required)."
+            "description": "Expect 422 VALIDATION_FAILED (INVALID_PASSENGER_COUNT: passengers must be an array of 1 to 9)."
           },
           "response": []
         },
@@ -440,7 +452,7 @@
             "url": "{{baseUrl}}/api/flights/00000000-0000-0000-0000-000000000000/bookings",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengerName\": \"Ghost\"\n}"
+              "raw": "{\n  \"passengers\": [{ \"name\": \"Ghost\" }]\n}"
             },
             "description": "Expect 404 FLIGHT_NOT_FOUND."
           },
@@ -646,7 +658,7 @@
             "description": "Admins do not book on someone's behalf (BR-AUTH-03).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengerName\": \"Alice Nguyen\"\n}"
+              "raw": "{\n  \"passengers\": [{ \"name\": \"Alice Nguyen\" }]\n}"
             }
           },
           "response": [],
@@ -1290,7 +1302,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengerName\": \"Bob Tran\"\n}"
+              "raw": "{\n  \"passengers\": [{ \"name\": \"Bob Tran\" }]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{day46FlightId}}/bookings"
           },
@@ -1323,7 +1335,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengerName\": \"Bob Tran\"\n}"
+              "raw": "{\n  \"passengers\": [{ \"name\": \"Bob Tran\" }]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{day46ScheduledFlightId}}/bookings",
             "description": "BR-FLT-06: a seat can be held only while the effective status is OPEN — not before opening, not after cancellation, not within 1 hour of departure. Checked inside the seat-hold UPDATE itself."
@@ -1455,7 +1467,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengerName\": \"Bob Tran\"\n}"
+              "raw": "{\n  \"passengers\": [{ \"name\": \"Bob Tran\" }]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{day47FlightId}}/bookings",
             "description": "The system picks the lowest free seat in (row, letter) order."
@@ -1468,16 +1480,16 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('201', () => pm.response.to.have.status(201));",
-                  "pm.test('booking carries its seat', () => pm.expect(pm.response.json().seat).to.eql('1A'));",
+                  "pm.test('booking carries its seat', () => pm.expect(pm.response.json().passengers[0].seat).to.eql('1A'));",
                   "pm.collectionVariables.set('day47BookingId', pm.response.json().id);",
-                  "pm.collectionVariables.set('day47Seat', pm.response.json().seat);"
+                  "pm.collectionVariables.set('day47Seat', pm.response.json().passengers[0].seat);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "GET /api/flights/:id/seats (bob's seat → BOOKED)",
+          "name": "GET /api/flights/:id/seats (bob's seat → HELD)",
           "request": {
             "method": "GET",
             "header": [],
@@ -1492,7 +1504,7 @@
                 "exec": [
                   "pm.test('200', () => pm.response.to.have.status(200));",
                   "const seats = pm.response.json().rows.flatMap((row) => row.seats);",
-                  "pm.test('the booked seat shows BOOKED', () => pm.expect(seats.find((seat) => seat.code === pm.collectionVariables.get('day47Seat')).status).to.eql('BOOKED'));",
+                  "pm.test('the held seat shows HELD (Day 48A: a booking holds before payment)', () => pm.expect(seats.find((seat) => seat.code === pm.collectionVariables.get('day47Seat')).status).to.eql('HELD'));",
                   "pm.test('nothing says who booked it', () => pm.expect(pm.response.text()).to.not.include(pm.collectionVariables.get('day47BookingId')));"
                 ]
               }
@@ -1604,7 +1616,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('cancelled, no seat', () => { const body = pm.response.json(); pm.expect(body.status).to.eql('cancelled'); pm.expect(body.seat).to.eql(null); });"
+                  "pm.test('CANCELLED, the passenger keeps the seat they had as history (Day 48A)', () => { const body = pm.response.json(); pm.expect(body.status).to.eql('CANCELLED'); pm.expect(body.passengers[0].seat).to.eql(pm.collectionVariables.get('day47Seat')); });"
                 ]
               }
             }
@@ -1625,6 +1637,354 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('404 FLIGHT_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error.code).to.eql('FLIGHT_NOT_FOUND'); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Day 48A — Multi-passenger hold",
+      "description": "Needs the dev seed (VN-A321: rows 1–2 business ACDF, rows 3–30 economy A–F), alice's accessToken (admin), bob's userAccessToken and carol's userBAccessToken.\nRun top to bottom on a database without VN481 on 2026-12-05.\nA booking now holds 1–9 seats for 15 minutes (HELD), all or nothing, and gets a 6-character reference. Either every passenger names a seat or none does.",
+      "item": [
+        {
+          "name": "POST /api/flights (VN481 on VN-A321 → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN481\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-05T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-05T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day48FlightId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (→ 200 OPEN)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 OPEN', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('OPEN'); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking, 3 passengers, no seats named (bob → 201 HELD on 1A 1C 1D)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    { \"name\": \"Bob Tran\" },\n    { \"name\": \"Lan Tran\" },\n    { \"name\": \"Minh Tran\" }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/bookings",
+            "description": "BR-BOOK-09: no seat named → the lowest free seats in (row, letter) order. Row 1 is ACDF."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('201 HELD', () => { pm.response.to.have.status(201); pm.expect(body.status).to.eql('HELD'); });",
+                  "pm.test('a reference from the unambiguous alphabet', () => pm.expect(body.reference).to.match(/^[A-HJ-NP-Z2-9]{6}$/));",
+                  "pm.test('held for 15 minutes', () => pm.expect(Date.parse(body.holdExpiresAt) - Date.parse(body.createdAt)).to.eql(15 * 60 * 1000));",
+                  "pm.test('seats in passenger order', () => pm.expect(body.passengers.map((p) => p.seat)).to.eql(['1A', '1C', '1D']));",
+                  "pm.collectionVariables.set('day48BookingId', body.id);",
+                  "pm.collectionVariables.set('day48Reference', body.reference);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking with chosen seats [12A, 12B] (bob → 201, paired in order)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    { \"name\": \"Bob Tran\", \"seat\": \"12B\" },\n    { \"name\": \"Lan Tran\", \"seat\": \"12A\" }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/bookings"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('each passenger on the seat they named', () => pm.expect(pm.response.json().passengers).to.eql([{ name: 'Bob Tran', seat: '12B' }, { name: 'Lan Tran', seat: '12A' }]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking [12C, 12B] (carol → 409 SEATS_UNAVAILABLE naming 12B only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userBAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    { \"name\": \"Carol Le\", \"seat\": \"12C\" },\n    { \"name\": \"Duc Le\", \"seat\": \"12B\" }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/bookings",
+            "description": "All or nothing (BR-SEAT-02): 12C is not held on the way. Only which seat — never who holds it."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 SEATS_UNAVAILABLE', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().error.code).to.eql('SEATS_UNAVAILABLE'); });",
+                  "pm.test('names 12B only', () => pm.expect(pm.response.json().error.details).to.eql([{ field: 'seat', code: 'SEAT_UNAVAILABLE', message: '12B' }]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id/seats (12A 12B HELD, 12C still AVAILABLE)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const seats = Object.fromEntries(pm.response.json().rows.flatMap((row) => row.seats).map((seat) => [seat.code, seat.status]));",
+                  "pm.test('held seats show HELD', () => ['1A', '1C', '1D', '12A', '12B'].forEach((code) => pm.expect(seats[code]).to.eql('HELD')));",
+                  "pm.test('the refused request held nothing', () => pm.expect(seats['12C']).to.eql('AVAILABLE'));",
+                  "pm.test('no reference in the public map', () => pm.expect(pm.response.text()).to.not.include(pm.collectionVariables.get('day48Reference')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking [99K] (carol → 422 UNKNOWN_SEAT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userBAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [{ \"name\": \"Carol Le\", \"seat\": \"99K\" }]\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/bookings",
+            "description": "A valid seat code this flight does not have: 422, not 409 — nobody holds it, it does not exist."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('422 UNKNOWN_SEAT 99K', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details).to.eql([{ field: 'seat', code: 'UNKNOWN_SEAT', message: '99K' }]); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking with 10 passengers (bob → 422 INVALID_PASSENGER_COUNT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}]\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/bookings",
+            "description": "BR-BOOK-01, counted before any passenger is read: ten invalid passengers still give exactly one issue."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('422 with one issue', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details.map((d) => d.code)).to.eql(['INVALID_PASSENGER_COUNT']); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking mixing named and unnamed seats (bob → 422 MIXED_SEAT_SELECTION)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    { \"name\": \"Bob Tran\", \"seat\": \"14A\" },\n    { \"name\": \"Lan Tran\" }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/bookings",
+            "description": "BR-BOOK-09."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('422 MIXED_SEAT_SELECTION', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details.map((d) => d.code)).to.eql(['MIXED_SEAT_SELECTION']); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking with the old passengerName body (bob → 422 UNSUPPORTED_FIELD)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengerName\": \"Bob Tran\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/bookings",
+            "description": "The Day 44 body is rejected by name, so a client still sending it learns what replaced it."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('422 UNSUPPORTED_FIELD', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details[0].code).to.eql('UNSUPPORTED_FIELD'); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/bookings/by-reference/:reference (bob → 200)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/api/bookings/by-reference/{{day48Reference}}",
+            "description": "US-BOOK-04."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200, the same booking', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('day48BookingId')); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/bookings/by-reference/:reference (carol → 404)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userBAccessToken}}" }],
+            "url": "{{baseUrl}}/api/bookings/by-reference/{{day48Reference}}",
+            "description": "BR-AUTH-02: another account's reference answers like a missing one."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('404 BOOKING_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error.code).to.eql('BOOKING_NOT_FOUND'); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the 3-passenger HELD booking (bob → 204)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/api/bookings/{{day48BookingId}}",
+            "description": "A HELD booking can always be cancelled (BR-BOOK-06 applies to CONFIRMED only)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('204', () => pm.response.to.have.status(204));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id/seats (1A 1C 1D AVAILABLE again)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const seats = Object.fromEntries(pm.response.json().rows.flatMap((row) => row.seats).map((seat) => [seat.code, seat.status]));",
+                  "pm.test('every seat of the cancelled booking released', () => ['1A', '1C', '1D'].forEach((code) => pm.expect(seats[code]).to.eql('AVAILABLE')));"
                 ]
               }
             }
@@ -1769,7 +2129,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengerName\": \"Correlation Probe\"\n}"
+              "raw": "{\n  \"passengers\": [{ \"name\": \"Correlation Probe\" }]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
             "description": "Uses flightId from step 1 (opened in 1b). Grep {{requestId}}-booking in both logs after ~5s."

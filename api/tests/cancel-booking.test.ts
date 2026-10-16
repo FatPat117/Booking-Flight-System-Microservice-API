@@ -88,6 +88,7 @@ test("cancels booking, releases seat, audits and enqueues outbox", async () => {
     outboxRepository,
     transactionRunner,
     generateId: () => BOOKING_ID,
+    generateReference: () => "K7Q4PZ",
     generateAuditId: () => "create-audit-id",
     generateOutboxId: () => "create-outbox-id",
     getRequestId: () => "fixed-request-id",
@@ -105,7 +106,7 @@ test("cancels booking, releases seat, audits and enqueues outbox", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const created = await createBooking(FLIGHT_ID, { passengerName: "Alice" }, ACTOR_A);
+  const created = await createBooking(FLIGHT_ID, { passengers: [{ name: "Alice" }] }, ACTOR_A);
   assert.equal(created.outcome, "created");
   assert.equal(
     (await flightRepository.findById(FLIGHT_ID))?.availableSeats,
@@ -136,6 +137,7 @@ test("second cancel is already-cancelled and does not release another seat", asy
     outboxRepository,
     transactionRunner,
     generateId: () => BOOKING_ID,
+    generateReference: () => "K7Q4PZ",
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => undefined,
@@ -153,7 +155,7 @@ test("second cancel is already-cancelled and does not release another seat", asy
     getCurrentTime: () => FIXED_TIME,
   });
 
-  await createBooking(FLIGHT_ID, { passengerName: "Alice" }, ACTOR_A);
+  await createBooking(FLIGHT_ID, { passengers: [{ name: "Alice" }] }, ACTOR_A);
   const first = await cancelBooking(BOOKING_ID, SCOPE_A, ACTOR_A);
   const second = await cancelBooking(BOOKING_ID, SCOPE_A, ACTOR_A);
 
@@ -210,6 +212,7 @@ test("another account cannot cancel the booking: not-found, booking stays active
     outboxRepository,
     transactionRunner,
     generateId: () => BOOKING_ID,
+    generateReference: () => "K7Q4PZ",
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => undefined,
@@ -227,12 +230,12 @@ test("another account cannot cancel the booking: not-found, booking stays active
     getCurrentTime: () => FIXED_TIME,
   });
 
-  await createBooking(FLIGHT_ID, { passengerName: "Alice" }, ACTOR_A);
+  await createBooking(FLIGHT_ID, { passengers: [{ name: "Alice" }] }, ACTOR_A);
 
   const result = await cancelBooking(BOOKING_ID, SCOPE_B, ACTOR_B);
 
   assert.deepEqual(result, { outcome: "not-found" });
-  assert.equal(bookingRepository.peek(BOOKING_ID)?.status, "active");
+  assert.equal(bookingRepository.peek(BOOKING_ID)?.status, "HELD");
   assert.equal((await flightRepository.findById(FLIGHT_ID))?.availableSeats, 4);
   assert.equal(records.filter((r) => r.action === "BOOKING_CANCELLED").length, 0);
   assert.equal(entries.filter((e) => e.eventType === "booking-cancelled").length, 0);
@@ -249,6 +252,7 @@ test("cancel records the acting account in the audit log", async () => {
     outboxRepository,
     transactionRunner,
     generateId: () => BOOKING_ID,
+    generateReference: () => "K7Q4PZ",
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => undefined,
@@ -266,7 +270,7 @@ test("cancel records the acting account in the audit log", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  await createBooking(FLIGHT_ID, { passengerName: "Alice" }, ACTOR_A);
+  await createBooking(FLIGHT_ID, { passengers: [{ name: "Alice" }] }, ACTOR_A);
   await cancelBooking(BOOKING_ID, SCOPE_A, ACTOR_A);
 
   const cancelRecord = records.find((r) => r.action === "BOOKING_CANCELLED");

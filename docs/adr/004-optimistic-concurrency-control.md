@@ -117,3 +117,52 @@ behind the others, which is the worse trade.
 **Fake vs. Postgres.** The in-memory fake allocates in the same (row, letter) order, so the
 contract tests pin the sequential behavior on both. Concurrency is proven only on Postgres
 (ADR-005): the race tests in `postgres-booking-race.integration.test.ts`.
+
+## Addendum (Day 48A): holding several seats — all or nothing, in one lock order
+
+A booking now holds 1–9 seats (`BookingRepository.holdSeats`). Two new failure modes appear
+that one seat could not have.
+
+**1. Half-commit.** "Update the seats we found, then report not-enough" commits those seats as
+`HELD` for a booking that is never created: the use case returns the outcome, so its transaction
+commits. The verdict therefore lives inside the writing statement. System-picked holds:
+`candidates` (`SKIP LOCKED`, `LIMIT n`) → `enough` (`count(*) = n`) → `UPDATE … WHERE enough.ok`.
+Chosen holds: `locked` → `verdict` (`count(*) = n AND bool_and(status = 'AVAILABLE')`) →
+`UPDATE … WHERE verdict.ok`. Fewer seats than asked → the `UPDATE` matches no row. Mutating
+`enough.ok` away fails the half-commit test — and showed a second net: the deferred FK
+`FK_flight_seats_booking_id` rejects the COMMIT of seats pointing at a booking that never
+existed. That net turns a `409` into a `500`, so the statement must still refuse on its own.
+
+**2. Lock order (chosen seats).** `SKIP LOCKED` is wrong here: skipping a seat the customer
+named would silently drop it. Waiting is right, but two requests waiting on each other's seats
+deadlock. Rule: **every statement that locks several seats locks them in (row, letter) order,
+whatever order the request lists them in** — `ORDER BY seat.row, seat.letter FOR UPDATE OF seat`,
+with `LockRows` above the `Sort` in the plan. Two requests for `[12A, 12B]` and `[12B, 12A]` both
+queue on `12A`; the second then sees `12A` taken and answers `seats-unavailable`.
+
+Measured (race file `postgres-booking-hold-race.integration.test.ts`, 10 runs in a row):
+
+| Test | Scenario | Result |
+| --- | --- | --- |
+| B | `[12A, 12B]` vs `[12B, 12A]`, 20 rounds | 1 created / 1 `seats-unavailable` every round, never `40P01` |
+| C | control: lock seat by seat in request order, barrier after the first lock | `40P01` 10/10, one victim, the other created |
+| C (no barrier) | same control, timing alone | 98 of 100 rounds deadlocked |
+| mutation | real statement ordered by request position | Test B fails at once with `40P01` — one statement is enough to deadlock |
+
+**The `ORDER BY` is the guarantee, not the plan.** Removing it leaves Test B green today: the
+planner dedupes the `IN` list with `Unique` over `Sort (row, letter)` and locks through the PK in
+that order. A different plan (a hash semi-join for larger requests, other statistics) promises
+nothing. The order is written down, not inherited.
+
+**System-picked seats keep `SKIP LOCKED`.** They are interchangeable, so skipping is correct and
+avoids queues; a skipping statement never waits on a seat, so it cannot be part of a cycle. The
+accepted edge widens slightly: two multi-seat holds racing for the last seats could each lock
+some and skip the other's, and both find fewer than needed (both `NOT_ENOUGH_SEATS`). Race test A
+(4 seats, two 3-passenger holds) produced exactly one booking in 200 of 200 rounds; the outcome
+is recorded, not asserted, and a client retry would succeed.
+
+**Booking reference clashes** use `INSERT … ON CONFLICT ON CONSTRAINT "UQ_bookings_reference" DO
+NOTHING`, not a caught `23505`: a caught error aborts the transaction (Day 38 addendum) and takes
+the held seats with it. Ten concurrent bookings forced to draw the same reference first were all
+created with distinct references (race test D) — the second inserter waits for the first's
+transaction, then redraws.

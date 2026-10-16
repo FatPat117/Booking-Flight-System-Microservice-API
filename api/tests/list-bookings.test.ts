@@ -11,6 +11,7 @@ import {
   createInMemoryFlightRepository,
   createInMemoryFlightStore,
 } from "./fakes/in-memory.js";
+import { makeBooking as makeFixtureBooking } from "./fixtures/bookings.js";
 import { makeFlight } from "./fixtures/flights.js";
 
 const FLIGHT_ID = "f1f1f1f1-0000-4000-8000-000000000001";
@@ -19,15 +20,17 @@ const ACCOUNT_B = "22222222-2222-4222-8222-222222222222";
 const SCOPE_A: BookingAccessScope = { kind: "owner", accountId: ACCOUNT_A };
 
 function makeBooking(n: number, ownerAccountId: string): Booking {
-  return {
+  return makeFixtureBooking({
     id: `b0b0b0b0-0000-4000-8000-00000000000${n}`,
     flightId: FLIGHT_ID,
     ownerAccountId,
-    passengerName: `Passenger ${n}`,
+    passengers: [{ name: `Passenger ${n}`, seat: null }],
     createdAt: `2026-07-2${n}T00:00:00.000Z`,
-    status: "active",
-    seat: null,
-  };
+  });
+}
+
+function firstPassenger(booking: Booking): string | undefined {
+  return booking.passengers[0]?.name;
 }
 
 async function createRuntime() {
@@ -54,7 +57,7 @@ test("an owner lists only their own bookings, newest first, with pagination", as
     return;
   }
   assert.deepEqual(
-    result.items.map((booking) => booking.passengerName),
+    result.items.map(firstPassenger),
     ["Passenger 3", "Passenger 1"],
   );
   assert.deepEqual(result.pagination, {
@@ -85,7 +88,7 @@ test("page and pageSize use the shared pagination rules", async () => {
 
   assert.equal(second.outcome, "success");
   if (second.outcome === "success") {
-    assert.deepEqual(second.items.map((b) => b.passengerName), ["Passenger 1"]);
+    assert.deepEqual(second.items.map(firstPassenger), ["Passenger 1"]);
     assert.equal(second.pagination.totalPages, 2);
   }
   assert.equal(invalid.outcome, "validation_failed");

@@ -17,6 +17,7 @@ import { createOpenFlight } from "../src/flights/open-flight.js";
 import type { HealthChecks } from "../src/health/health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 import { getRequestContext } from "../src/observability/request-context.js";
+import { nextBookingReference } from "./fixtures/bookings.js";
 import { TEST_AIRCRAFT, TEST_AIRPORTS } from "./fixtures/flights.js";
 import {
   createInMemoryAircraftRepository,
@@ -165,6 +166,7 @@ function createAppWithRepository(
     outboxRepository: createNoopOutboxRepository(),
     transactionRunner,
     generateId: () => crypto.randomUUID(),
+    generateReference: nextBookingReference,
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
@@ -613,23 +615,23 @@ test("GET /api/flights/:id/seats is public: every seat grouped by row, in order,
   assert.equal(response.body.rows.at(-1).row, 20);
 });
 
-test("the seat map shows a booked seat as BOOKED and no key anywhere says who booked it", async () => {
+test("the seat map shows a held seat as HELD and no key anywhere says who holds it", async () => {
   const { app } = createTestContext();
   const flightId = await createScheduledFlight(app);
   assert.equal((await postOpen(app, flightId)).status, 200);
   const booking = await request(app)
     .post(`/api/flights/${flightId}/bookings`)
     .set("Authorization", `Bearer ${signAccessToken("user")}`)
-    .send({ passengerName: "Alice Nguyen" });
+    .send({ passengers: [{ name: "Alice Nguyen" }] });
   assert.equal(booking.status, 201);
 
   const response = await request(app).get(`/api/flights/${flightId}/seats`);
 
   assert.equal(response.status, 200);
   assert.deepEqual(response.body.rows[0].seats[0], {
-    code: booking.body.seat,
+    code: booking.body.passengers[0].seat,
     fareClass: "ECONOMY",
-    status: "BOOKED",
+    status: "HELD",
   });
   // An allow-list of keys, not a check for a few forbidden ones: a field
   // added later (bookingId, ownerAccountId, passenger...) fails here.
@@ -639,6 +641,7 @@ test("the seat map shows a booked seat as BOOKED and no key anywhere says who bo
   );
   const body = JSON.stringify(response.body);
   assert.ok(!body.includes(booking.body.id));
+  assert.ok(!body.includes(booking.body.reference));
   assert.ok(!body.includes("Alice"));
   assert.ok(!body.includes("test-user-id"));
 });

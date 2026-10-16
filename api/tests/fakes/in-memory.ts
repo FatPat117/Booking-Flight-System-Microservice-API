@@ -24,12 +24,16 @@ import type {
   BookingRepository,
 } from "../../src/bookings/booking-repository.js";
 import type { GetBooking } from "../../src/bookings/get-booking.js";
+import type { GetBookingByReference } from "../../src/bookings/get-booking-by-reference.js";
 import type { ListBookings } from "../../src/bookings/list-bookings.js";
 import {
   AIRCRAFT_TURNAROUND_MS,
   isBookable,
 } from "../../src/flights/flight-lifecycle.js";
-import type { FlightRepository } from "../../src/flights/flight-repository.js";
+import type {
+  FlightRepository,
+  FlightSeatStatus,
+} from "../../src/flights/flight-repository.js";
 import type { GetFlightSeatMap } from "../../src/flights/get-flight-seat-map.js";
 import type { OpenFlight } from "../../src/flights/open-flight.js";
 import type {
@@ -56,9 +60,11 @@ import type { Flight } from "../../src/types.js";
  * test mutating a returned object must not change what is "stored".
  */
 
+/** Mirrors CHK_flight_seats_booking: AVAILABLE exactly when bookingId is null. */
 type InMemoryFlightSeat = {
   position: SeatPosition;
   fareClass: FareClass;
+  status: FlightSeatStatus;
   bookingId: string | null;
 };
 
@@ -91,6 +97,7 @@ function generateSeats(count: number): InMemoryFlightSeat[] {
   return Array.from({ length: count }, (_, index) => ({
     position: { row: Math.floor(index / 6) + 1, letter: "ABCDEF"[index % 6] as string },
     fareClass: "ECONOMY",
+    status: "AVAILABLE",
     bookingId: null,
   }));
 }
@@ -103,7 +110,7 @@ export function createInMemoryFlightRepository(
   const read = (flight: Omit<Flight, "availableSeats">): Flight => ({
     ...structuredClone(flight),
     availableSeats: (seats.get(flight.id) ?? []).filter(
-      (seat) => seat.bookingId === null,
+      (seat) => seat.status === "AVAILABLE",
     ).length,
   });
 
@@ -134,7 +141,7 @@ export function createInMemoryFlightRepository(
       return (seats.get(flightId) ?? []).map((seat) => ({
         position: { ...seat.position },
         fareClass: seat.fareClass,
-        status: seat.bookingId === null ? "AVAILABLE" : "BOOKED",
+        status: seat.status,
       }));
     },
 
@@ -223,18 +230,13 @@ export function createInMemoryBookingRepository(deps: {
   const { flights, seats } = deps.flights;
   const bookings = new Map<string, Booking>();
 
-  // Like Postgres, the seat is read from the seat side, never from the
-  // stored booking: create() ignores the argument's `seat`.
-  const read = (booking: Booking): Booking => {
-    const held = seats.get(booking.flightId)?.find((seat) => seat.bookingId === booking.id);
-    return {
-      ...structuredClone(booking),
-      seat: held === undefined ? null : formatSeatPosition(held.position),
-    };
-  };
+  const read = (booking: Booking): Booking => structuredClone(booking);
 
   return {
-    async reserveSeat(flightId, bookingId, now) {
+    // Same order of checks as the Postgres adapter: flight, sales window,
+    // then (chosen) unknown seats before unavailable ones. Nothing is
+    // written unless every requested seat is held.
+    async holdSeats(flightId, bookingId, request, now) {
       const flight = flights.get(flightId);
 
       if (flight === undefined) {
@@ -244,13 +246,42 @@ export function createInMemoryBookingRepository(deps: {
         return { outcome: "sales-closed" };
       }
 
-      const free = seats.get(flightId)?.find((seat) => seat.bookingId === null);
-      if (free === undefined) {
-        return { outcome: "sold-out" };
+      const flightSeats = seats.get(flightId) ?? [];
+      let picked: InMemoryFlightSeat[];
+
+      if (request.kind === "auto") {
+        picked = flightSeats
+          .filter((seat) => seat.status === "AVAILABLE")
+          .slice(0, request.count);
+        if (picked.length < request.count) {
+          return { outcome: "not-enough-seats" };
+        }
+      } else {
+        const codes = request.seats.map(formatSeatPosition);
+        const byCode = new Map(
+          flightSeats.map((seat) => [formatSeatPosition(seat.position), seat]),
+        );
+        const unknown = codes.filter((code) => !byCode.has(code));
+        if (unknown.length > 0) {
+          return { outcome: "unknown-seats", seats: unknown };
+        }
+        const unavailable = codes.filter(
+          (code) => byCode.get(code)?.status !== "AVAILABLE",
+        );
+        if (unavailable.length > 0) {
+          return { outcome: "seats-unavailable", seats: unavailable };
+        }
+        picked = codes.map((code) => byCode.get(code) as InMemoryFlightSeat);
       }
 
-      free.bookingId = bookingId;
-      return { outcome: "reserved", seat: formatSeatPosition(free.position) };
+      for (const seat of picked) {
+        seat.status = "HELD";
+        seat.bookingId = bookingId;
+      }
+      return {
+        outcome: "held",
+        seats: picked.map((seat) => formatSeatPosition(seat.position)),
+      };
     },
 
     async create(booking) {
@@ -262,12 +293,26 @@ export function createInMemoryBookingRepository(deps: {
       if (!flights.has(booking.flightId)) {
         throw new Error(`booking references unknown flight: ${booking.flightId}`);
       }
+      // Mirrors ON CONFLICT ON CONSTRAINT "UQ_bookings_reference" DO NOTHING.
+      if ([...bookings.values()].some((stored) => stored.reference === booking.reference)) {
+        return { outcome: "reference-taken" };
+      }
 
       bookings.set(booking.id, structuredClone(booking));
+      return { outcome: "created" };
     },
 
     async findById(bookingId, scope) {
       const booking = bookings.get(bookingId);
+      return booking === undefined || !isInScope(booking, scope)
+        ? undefined
+        : read(booking);
+    },
+
+    async findByReference(reference, scope) {
+      const booking = [...bookings.values()].find(
+        (stored) => stored.reference === reference,
+      );
       return booking === undefined || !isInScope(booking, scope)
         ? undefined
         : read(booking);
@@ -297,13 +342,14 @@ export function createInMemoryBookingRepository(deps: {
       if (booking === undefined || !isInScope(booking, scope)) {
         return { outcome: "not-found" };
       }
-      if (booking.status === "cancelled") {
+      if (booking.status !== "HELD" && booking.status !== "CONFIRMED") {
         return { outcome: "already-cancelled" };
       }
 
-      bookings.set(bookingId, { ...booking, status: "cancelled" });
+      bookings.set(bookingId, { ...booking, status: "CANCELLED" });
       for (const seat of seats.get(booking.flightId) ?? []) {
         if (seat.bookingId === bookingId) {
+          seat.status = "AVAILABLE";
           seat.bookingId = null;
         }
       }
@@ -532,10 +578,12 @@ export function createUnusedReferenceData(): {
  */
 export function createUnusedBookingReads(): {
   getBooking: GetBooking;
+  getBookingByReference: GetBookingByReference;
   listBookings: ListBookings;
 } {
   return {
     getBooking: async () => ({ outcome: "not-found" }),
+    getBookingByReference: async () => ({ outcome: "not-found" }),
     listBookings: async () => ({
       outcome: "success",
       items: [],

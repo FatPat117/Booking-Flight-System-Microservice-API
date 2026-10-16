@@ -24,12 +24,15 @@ export class BookingEntity {
   @Column({ type: "uuid", name: "owner_account_id" })
   ownerAccountId!: string;
 
-  @Column({ type: "varchar", name: "passenger_name" })
-  passengerName!: string;
+  @Column({ type: "text" })
+  reference!: string;
 
   @Column({ type: "timestamptz", name: "created_at" })
   createdAt!: Date;
 
   @Column({ type: "varchar" })
   status!: string;
+
+  @Column({ type: "timestamptz", name: "hold_expires_at", nullable: true })
+  holdExpiresAt!: Date | null;
 }

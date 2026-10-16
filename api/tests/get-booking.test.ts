@@ -11,6 +11,7 @@ import {
   createInMemoryFlightRepository,
   createInMemoryFlightStore,
 } from "./fakes/in-memory.js";
+import { makeBooking } from "./fixtures/bookings.js";
 import { makeFlight } from "./fixtures/flights.js";
 
 const FLIGHT_ID = "f1f1f1f1-0000-4000-8000-000000000001";
@@ -26,15 +27,11 @@ async function createRuntimeWithBookingOfA() {
   );
   const bookingRepository = createInMemoryBookingRepository({ flights });
 
-  const booking: Booking = {
+  const booking: Booking = makeBooking({
     id: "b0b0b0b0-0000-4000-8000-000000000001",
     flightId: FLIGHT_ID,
     ownerAccountId: ACCOUNT_A,
-    passengerName: "Alice",
-    createdAt: "2026-07-20T00:00:00.000Z",
-    status: "active",
-    seat: null,
-  };
+  });
   await bookingRepository.create(booking);
 
   return { getBooking: createGetBooking({ bookingRepository }), booking };

@@ -43,5 +43,12 @@ runBookingRepositoryContract("postgres", async () => {
       assert.deepEqual(await flightRepository.create(flight), { outcome: "created" });
       await keepFirstSeats(dataSource, flight.id, flight.availableSeats);
     },
+    async seats(flightId) {
+      return (await dataSource.query(
+        `SELECT "row" || "letter" AS "seat", "status", "booking_id" AS "bookingId"
+         FROM "flight_seats" WHERE "flight_id" = $1 ORDER BY "row", "letter"`,
+        [flightId],
+      )) as Array<{ seat: string; status: string; bookingId: string | null }>;
+    },
   };
 });

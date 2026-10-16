@@ -4,10 +4,13 @@ import {
   redactAmqpUrl,
 } from "./messaging/connect-with-retry.js";
 import { createBookingCreatedConsumer } from "./messaging/booking-created-consumer.js";
+import { createBookingHeldConsumer } from "./messaging/booking-held-consumer.js";
 import { createFlightCreatedConsumer } from "./messaging/flight-created-consumer.js";
 
 export const FLIGHT_CREATED_QUEUE = "flight-created";
+/** No longer produced (Day 48A); still drained for messages sent before. */
 export const BOOKING_CREATED_QUEUE = "booking-created";
+export const BOOKING_HELD_QUEUE = "booking-held";
 
 const logger = createConsoleLogger();
 
@@ -33,6 +36,10 @@ async function main() {
   await consumer.subscribe(
     BOOKING_CREATED_QUEUE,
     createBookingCreatedConsumer({ logger }),
+  );
+  await consumer.subscribe(
+    BOOKING_HELD_QUEUE,
+    createBookingHeldConsumer({ logger }),
   );
 
   logger.info("flight_notifier_ready", {});

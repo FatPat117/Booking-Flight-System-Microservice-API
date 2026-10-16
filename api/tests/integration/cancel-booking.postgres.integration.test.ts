@@ -11,6 +11,7 @@ import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import type { Flight } from "../../src/types.js";
+import { makeBooking } from "../fixtures/bookings.js";
 import { makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
@@ -64,17 +65,13 @@ test("cancelled then already-cancelled: seat count increases by exactly 1, no ex
   await flightRepository.create(flight);
   await keepFirstSeats(dataSource, flight.id, 1);
 
-  const booking = {
-    id: crypto.randomUUID(),
+  const booking = makeBooking({
     flightId: flight.id,
     ownerAccountId: OWNER_ACCOUNT_ID,
-    passengerName: "Alice",
-    createdAt: "2026-07-20T00:00:00.000Z",
-    status: "active" as const,
-    seat: null,
-  };
+    passengers: [{ name: "Alice", seat: "1A" }],
+  });
   await createPostgresTransactionRunner(dataSource).run(async () => {
-    await bookingRepository.reserveSeat(flight.id, booking.id, new Date("2026-07-20T00:00:00.000Z"));
+    await bookingRepository.holdSeats(flight.id, booking.id, { kind: "auto", count: 1 }, new Date("2026-07-20T00:00:00.000Z"));
     await bookingRepository.create(booking);
   });
   assert.equal((await flightRepository.findById(flight.id))?.availableSeats, 0);
