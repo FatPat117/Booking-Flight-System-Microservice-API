@@ -64,6 +64,18 @@
     {
       "key": "day48Reference",
       "value": ""
+    },
+    {
+      "key": "day48bFlightId",
+      "value": ""
+    },
+    {
+      "key": "day48bBookingId",
+      "value": ""
+    },
+    {
+      "key": "day48bReference",
+      "value": ""
     }
   ],
   "item": [
@@ -1986,6 +1998,289 @@
                   "const seats = Object.fromEntries(pm.response.json().rows.flatMap((row) => row.seats).map((seat) => [seat.code, seat.status]));",
                   "pm.test('every seat of the cancelled booking released', () => ['1A', '1C', '1D'].forEach((code) => pm.expect(seats[code]).to.eql('AVAILABLE')));"
                 ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Day 48B — Hold expiry (1 of 2: hold)",
+      "description": "Needs the dev seed (VN-A321), alice's accessToken (admin) and bob's userAccessToken. Run on a database without VN482 on 2026-12-06.\nHolds [10C, 10D] for bob. A hold lasts 15 minutes and the duration is not configurable (Decision 12), so before folder 2 move its deadline into the past with psql — the last request's console prints the command:\n  docker compose exec -T postgres psql -U booking -d booking_db -c \"UPDATE bookings SET hold_expires_at = now() - interval '1 second' WHERE reference = '<reference>'\"",
+      "item": [
+        {
+          "name": "POST /api/flights (VN482 on VN-A321 → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN482\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-06T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-06T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day48bFlightId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (→ 200 OPEN)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": "{{baseUrl}}/api/flights/{{day48bFlightId}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 OPEN', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('OPEN'); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking [10C, 10D] (bob → 201 HELD for 15 minutes)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    { \"name\": \"Bob Tran\", \"seat\": \"10C\" },\n    { \"name\": \"Lan Tran\", \"seat\": \"10D\" }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day48bFlightId}}/bookings"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('201 HELD', () => { pm.response.to.have.status(201); pm.expect(body.status).to.eql('HELD'); });",
+                  "pm.test('deadline 15 minutes ahead', () => pm.expect(Date.parse(body.holdExpiresAt) - Date.parse(body.createdAt)).to.eql(15 * 60 * 1000));",
+                  "pm.collectionVariables.set('day48bBookingId', body.id);",
+                  "pm.collectionVariables.set('day48bReference', body.reference);",
+                  "console.log(`Before folder 2: docker compose exec -T postgres psql -U booking -d booking_db -c \"UPDATE bookings SET hold_expires_at = now() - interval '1 second' WHERE reference = '${body.reference}'\"`);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/bookings/:id (bob → HELD: the deadline has not passed)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/api/bookings/{{day48bBookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 HELD', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('HELD'); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id/seats (10C 10D HELD)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day48bFlightId}}/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const seats = Object.fromEntries(pm.response.json().rows.flatMap((row) => row.seats).map((seat) => [seat.code, seat.status]));",
+                  "pm.test('10C and 10D HELD', () => ['10C', '10D'].forEach((code) => pm.expect(seats[code]).to.eql('HELD')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Day 48B — Hold expiry (2 of 2: after the deadline)",
+      "description": "Run after folder 1 and the psql command it prints, with bob's userAccessToken and carol's userBAccessToken. Finds bob's hold as his newest booking, so it also runs on its own (newman --folder).\nA lapsed hold reads EXPIRED at once (Decision 12); its seats come back when the expiry job runs (every 60 s) — the seat-map request waits 65 s first. Cancelling a lapsed hold is 409 BOOKING_EXPIRED (BR-BOOK-10), before and after the job.",
+      "item": [
+        {
+          "name": "GET /api/bookings (bob → newest booking reads EXPIRED, before or after the job)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/api/bookings?pageSize=1"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const [newest] = pm.response.json().items;",
+                  "pm.test('newest booking is EXPIRED', () => pm.expect(newest.status).to.eql('EXPIRED'));",
+                  "pm.test('its deadline has passed', () => pm.expect(Date.parse(newest.holdExpiresAt)).to.be.below(Date.now()));",
+                  "pm.collectionVariables.set('day48bBookingId', newest.id);",
+                  "pm.collectionVariables.set('day48bReference', newest.reference);",
+                  "pm.collectionVariables.set('day48bFlightId', newest.flightId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/bookings/by-reference/:reference (bob → EXPIRED)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/api/bookings/by-reference/{{day48bReference}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 EXPIRED', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('EXPIRED'); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the lapsed hold (bob → 409 BOOKING_EXPIRED)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/api/bookings/{{day48bBookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('409 BOOKING_EXPIRED', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().error.code).to.eql('BOOKING_EXPIRED'); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the lapsed hold (carol → 404, not 409)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userBAccessToken}}" }],
+            "url": "{{baseUrl}}/api/bookings/{{day48bBookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('404 BOOKING_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error.code).to.eql('BOOKING_NOT_FOUND'); });"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id/seats after 65 s (10C 10D AVAILABLE: the job ran)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day48bFlightId}}/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["// The expiry job runs every 60 s (Decision 12).", "setTimeout(() => {}, 65000);"]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const seats = Object.fromEntries(pm.response.json().rows.flatMap((row) => row.seats).map((seat) => [seat.code, seat.status]));",
+                  "pm.test('10C and 10D released by the job', () => ['10C', '10D'].forEach((code) => pm.expect(seats[code]).to.eql('AVAILABLE')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking [10C, 10D] (carol → 201 HELD on the released seats)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userBAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    { \"name\": \"Carol Le\", \"seat\": \"10C\" },\n    { \"name\": \"Dan Le\", \"seat\": \"10D\" }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day48bFlightId}}/bookings"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('201 HELD', () => { pm.response.to.have.status(201); pm.expect(body.status).to.eql('HELD'); });",
+                  "pm.test('the same two seats', () => pm.expect(body.passengers.map((p) => p.seat)).to.eql(['10C', '10D']));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the expired booking again (bob → still 409 BOOKING_EXPIRED)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "url": "{{baseUrl}}/api/bookings/{{day48bBookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('409 BOOKING_EXPIRED', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().error.code).to.eql('BOOKING_EXPIRED'); });"]
               }
             }
           ]

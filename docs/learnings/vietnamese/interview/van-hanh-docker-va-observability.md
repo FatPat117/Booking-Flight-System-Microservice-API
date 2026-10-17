@@ -26,7 +26,9 @@ truyền object, không đụng `process.env`. `process.env` chỉ đọc một 
 
 **Trả lời:** SIGTERM/SIGINT → `httpServer.close()` (ngừng nhận request, chờ request đang chạy) →
 `runtime.close()`: **dừng job trước**, đóng publisher, rồi mới đóng DB — để tick job đang dở
-không đụng DB đã đóng. Đo được ~5 ms ở Day 40.
+không đụng DB đã đóng. Đo được ~5 ms ở Day 40. Day 48B: "dừng job" trước đó chỉ xoá timer — một
+lượt job hết hạn (là một transaction) có thể đang chạy khi DataSource bị huỷ. Giờ
+`JobScheduler.stop()` trả `Promise` và **chờ lượt đang chạy** xong; có unit test và mutation.
 
 ### 4. Liveness khác readiness?
 
@@ -82,5 +84,6 @@ migration như một bước deploy riêng. Có script chạy riêng:
 
 ### 10. Giới hạn vận hành hiện tại (nói thật)?
 
-**Trả lời:** Job in-process chạy trùng nếu nhiều instance; chưa có metrics/tracing; DLQ xem tay,
+**Trả lời:** Job in-process chạy trùng nếu nhiều instance (job hết hạn giữ ghế thì an toàn nhờ
+`SKIP LOCKED`, outbox relay thì chưa); sơ đồ ghế có thể còn `HELD` tới ~60 s sau hạn; chưa có metrics/tracing; DLQ xem tay,
 chưa cảnh báo; credentials RabbitMQ `guest` chỉ cho local; chưa có CI (phase H).

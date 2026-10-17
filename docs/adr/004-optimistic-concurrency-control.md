@@ -166,3 +166,48 @@ NOTHING`, not a caught `23505`: a caught error aborts the transaction (Day 38 ad
 the held seats with it. Ten concurrent bookings forced to draw the same reference first were all
 created with distinct references (race test D) — the second inserter waits for the first's
 transaction, then redraws.
+
+## Addendum (Day 48B): hold expiry — a batched sweep, a time boundary, one release lock order
+
+A `HELD` booking now expires (domain-model Decision 12). Three concurrency rules come with it.
+
+**1. The sweep skips, never waits.** `expireDueHolds` takes its batch with
+`… WHERE status = 'HELD' AND hold_expires_at <= $now ORDER BY hold_expires_at, id LIMIT $n
+FOR UPDATE SKIP LOCKED`, served in order by the partial index `idx_bookings_held_expiry`. A booking
+another transaction holds right now (a cancel, another sweeper) is left for the next run. Several
+API instances can run the job at once. Without `SKIP LOCKED` they would still be *correct* — a
+waiting sweeper re-checks `status = 'HELD'` after the lock is freed and drops the row — but they
+would queue behind each other. One transaction per batch: the status, the released seats, one
+audit entry and one outbox row per booking commit together.
+
+**2. Exclusive transitions come from complementary conditions plus the row lock.** Expiry updates
+`WHERE status = 'HELD' AND hold_expires_at <= $now`; cancel (and payment, step 6) `WHERE status =
+'HELD' AND hold_expires_at > $now`. For one `now` at most one matches. With two clocks a few
+milliseconds apart both may match the snapshot; the second writer waits on the row lock, re-checks
+its `WHERE` against the committed row and matches nothing. Every booking gets one end. The cancel's
+`> $now` lives in its own statement: a decision never relies on the job having run.
+
+**3. Releasing seats follows the hold's lock order.** A chosen-seat hold locks seats in
+`(row, letter)` order *whatever their status* — including seats another booking holds. Before
+Day 48B, cancel released with `UPDATE flight_seats … WHERE booking_id = $1`, which locks in scan
+order. Release now locks first (`locked AS (… ORDER BY flight_id, row, letter FOR UPDATE)`) and
+updates exactly those rows; cancel and the sweep share it (`releaseSeatsOf`).
+
+Measured (race file `postgres-booking-expiry-race.integration.test.ts`, 10 runs in a row):
+
+| Test | Scenario | Result |
+| --- | --- | --- |
+| A | 4 sweepers, batches of 7, 50 due holds, each batch kept open 100 ms | 50 expired once each, 12–13 overlapping batch pairs, ~250 ms |
+| B | control: the same sweep with plain `FOR UPDATE` | 50 expired once each, 0 overlapping batches, ~910 ms |
+| C | cancel and sweep at the deadline, 20 rounds | expiry every round, cancel `expired`, one end each |
+| C (clocks apart) | cancel at deadline − 1 ms, sweep at the deadline | one end each round; split varied (e.g. 16/4, 20/0) |
+| D | sweep vs a new hold on the only seat it frees | never shared; the new hold usually skips the still-locked seat (`NOT_ENOUGH_SEATS`) |
+| E | control: release locking 12B before 12A vs a hold on `[12A, 12B]`, gate on 12A | `40P01` 5/5 |
+| E | the real cancel / sweep, same gate | no deadlock 10/10; the hold answers `seats-unavailable`, then the release runs |
+| F | a batch whose audit write fails | that batch rolls back whole, the earlier one stays, the next run retries |
+
+Mutations: `SKIP LOCKED` removed → A fails (no overlap); release ordered `DESC` → both real E
+tests fail with `40P01`; the boundary moved (`<` for the sweep, `>=` for cancel) → the repository
+contract fails at the exact instant. **Not caught:** removing the release `ORDER BY` altogether —
+the physical order is `(row, letter)` today. As for the hold (Day 48A), the clause is the
+guarantee, the plan is not.

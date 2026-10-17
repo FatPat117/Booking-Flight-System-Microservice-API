@@ -72,7 +72,7 @@ test("scheduler runs registered job after interval", async (t) => {
     ),
   );
 
-  scheduler.stop();
+  await scheduler.stop();
 });
 
 test("scheduler does not overlap while a long handler is running", async (t) => {
@@ -118,7 +118,9 @@ test("scheduler does not overlap while a long handler is running", async (t) => 
   assert.equal(runs, 2);
   assert.equal(maxConcurrent, 1);
 
-  scheduler.stop();
+  // stop() waits for the run in progress (Day 48B), so let it finish.
+  release();
+  await scheduler.stop();
 });
 
 test("scheduler logs job failure and keeps scheduling the same job", async (t) => {
@@ -156,7 +158,7 @@ test("scheduler logs job failure and keeps scheduling the same job", async (t) =
   await flushAsyncWork();
   assert.equal(runs, 2);
 
-  scheduler.stop();
+  await scheduler.stop();
 });
 
 test("job A failure does not stop job B from running on its next tick", async (t) => {
@@ -210,7 +212,7 @@ test("job A failure does not stop job B from running on its next tick", async (t
   assert.equal(jobARuns, 2);
   assert.equal(jobBRuns, 2);
 
-  scheduler.stop();
+  await scheduler.stop();
 });
 
 test("stop prevents further runs and is idempotent when called twice", async (t) => {
@@ -233,14 +235,57 @@ test("stop prevents further runs and is idempotent when called twice", async (t)
   await flushAsyncWork();
   assert.equal(runs, 1);
 
-  assert.doesNotThrow(() => {
-    scheduler.stop();
-  });
-  assert.doesNotThrow(() => {
-    scheduler.stop();
-  });
+  await assert.doesNotReject(scheduler.stop());
+  await assert.doesNotReject(scheduler.stop());
 
   t.mock.timers.tick(200);
+  await flushAsyncWork();
+  assert.equal(runs, 1);
+});
+
+test("stop waits for the run in progress to finish, and starts no new one", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+
+  const { logger, entries } = createMemoryLogger();
+  const scheduler = createInMemoryJobScheduler(logger);
+  let runs = 0;
+  let release!: () => void;
+
+  scheduler.register({
+    name: "in-flight-job",
+    intervalMs: 30,
+    handler: async () => {
+      runs += 1;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    },
+  });
+
+  scheduler.start();
+  t.mock.timers.tick(30);
+  await flushAsyncWork();
+  assert.equal(runs, 1);
+
+  let stopped = false;
+  const stopping = scheduler.stop().then(() => {
+    stopped = true;
+  });
+  await flushAsyncWork();
+  // The handler is still awaiting: close() must not destroy the DataSource yet.
+  assert.equal(stopped, false);
+
+  release();
+  await stopping;
+  assert.equal(stopped, true);
+  assert.ok(
+    entries.some(
+      (entry) =>
+        entry.message === "job_completed" && entry.fields?.job === "in-flight-job",
+    ),
+  );
+
+  t.mock.timers.tick(300);
   await flushAsyncWork();
   assert.equal(runs, 1);
 });

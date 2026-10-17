@@ -28,7 +28,8 @@ validate input (ngoài transaction)  →  transactionRunner.run(
 | `GET /api/bookings` | user/admin | ListBookings | 200 | 422 | [bookings](./bookings.md) |
 | `GET /api/bookings/:id` | user/admin | GetBooking | 200 | 404 | [bookings](./bookings.md) |
 | `GET /api/bookings/by-reference/:ref` | user/admin | GetBookingByReference | 200 | 404 | [bookings](./bookings.md) |
-| `DELETE /api/bookings/:id` | user (chủ) | CancelBooking | 204 | 404, 409 `BOOKING_ALREADY_CANCELLED` | [bookings](./bookings.md) |
+| `DELETE /api/bookings/:id` | user (chủ) | CancelBooking | 204 | 404, 409 `BOOKING_ALREADY_CANCELLED` / `BOOKING_EXPIRED` | [bookings](./bookings.md) |
+| (job 60 s, không route) | system | ExpireHolds | — | lô lỗi → rollback, log `job_failed` | [bookings](./bookings.md), [background](./background-jobs-va-consumer.md) |
 | `POST /api/airports` | admin | RegisterAirport | 201 | 422, 409 `AIRPORT_ALREADY_EXISTS` | [reference-data](./reference-data.md) |
 | `GET /api/airports` | public | ListAirports | 200 | 422 | [reference-data](./reference-data.md) |
 | `POST /api/aircraft` | admin | RegisterAircraft | 201 | 422, 409 `AIRCRAFT_ALREADY_EXISTS` | [reference-data](./reference-data.md) |
@@ -49,5 +50,6 @@ Lỗi chung cho mọi route: `400 MALFORMED_JSON`, `401` (thiếu/sai/hết hạ
 | OpenFlight | `FLIGHT_OPENED` | — |
 | CreateBooking | `BOOKING_CREATED` | `booking-held` (trước Day 48A: `booking-created`) |
 | CancelBooking | `BOOKING_CANCELLED` | `booking-cancelled` (chưa có consumer) |
+| ExpireHolds (job) | `BOOKING_EXPIRED`, actor `system/booking-hold-expiry` | `booking-expired` |
 | RegisterAirport | `AIRPORT_REGISTERED` | — |
 | RegisterAircraft | `AIRCRAFT_REGISTERED` | — |

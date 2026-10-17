@@ -22,6 +22,7 @@ import {
   createCreateBooking,
   type CreateBooking,
 } from "../bookings/create-booking.js";
+import { createExpireHolds } from "../bookings/expire-holds.js";
 import {
   createGetBooking,
   type GetBooking,
@@ -55,6 +56,7 @@ import { createOpenFlight, type OpenFlight } from "../flights/open-flight.js";
 import { createPostgresFlightRepository } from "../flights/postgres/postgres-flight-repository.js";
 import type { HealthChecks } from "../health/health-checks.js";
 import { createPostgresHealthChecks } from "../health/postgres/postgres-health-checks.js";
+import { createBookingHoldExpiryJob } from "../jobs/booking-hold-expiry-job.js";
 import { createFlightsSummaryJob } from "../jobs/flights-summary-job.js";
 import { createInMemoryJobScheduler } from "../jobs/in-memory-job-scheduler.js";
 import { connectPublisherWithRetry } from "../messaging/connect-with-retry.js";
@@ -71,6 +73,13 @@ import { createPostgresTransactionRunner } from "../transactions/postgres-transa
 
 const DEFAULT_FLIGHTS_SUMMARY_INTERVAL_MS = 60_000;
 const DEFAULT_OUTBOX_RELAY_INTERVAL_MS = 5_000;
+/**
+ * Decision 12: a seat is freed at most ~60 s after its hold lapses; one run
+ * expires at most 50 × 20 = 1 000 bookings, in transactions of 50.
+ */
+const DEFAULT_HOLD_EXPIRY_INTERVAL_MS = 60_000;
+const HOLD_EXPIRY_BATCH_SIZE = 50;
+const HOLD_EXPIRY_MAX_BATCHES = 20;
 
 /**
  * Fully wired application graph.
@@ -107,6 +116,8 @@ export type CreateApplicationOptions = {
   flightsSummaryIntervalMs?: number;
   /** Override for tests; production default is 5s */
   outboxRelayIntervalMs?: number;
+  /** Override for tests; production default is 60s */
+  holdExpiryIntervalMs?: number;
   /**
    * Tests inject a noop publisher so the suite does not need RabbitMQ.
    * Production omits this and connects via config.rabbitmqUrl.
@@ -126,6 +137,8 @@ export async function createApplication(
     options.flightsSummaryIntervalMs ?? DEFAULT_FLIGHTS_SUMMARY_INTERVAL_MS;
   const outboxRelayIntervalMs =
     options.outboxRelayIntervalMs ?? DEFAULT_OUTBOX_RELAY_INTERVAL_MS;
+  const holdExpiryIntervalMs =
+    options.holdExpiryIntervalMs ?? DEFAULT_HOLD_EXPIRY_INTERVAL_MS;
 
   const dataSource = createBookingDataSource(config.postgres);
   await dataSource.initialize();
@@ -198,11 +211,30 @@ export async function createApplication(
     getCurrentTime: () => new Date(),
   });
 
-  const getBooking = createGetBooking({ bookingRepository });
+  const expireHolds = createExpireHolds({
+    bookingRepository,
+    auditRecorder,
+    outboxRepository,
+    transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
+    getCurrentTime: () => new Date(),
+    batchSize: HOLD_EXPIRY_BATCH_SIZE,
+    maxBatches: HOLD_EXPIRY_MAX_BATCHES,
+  });
+
+  const getBooking = createGetBooking({
+    bookingRepository,
+    getCurrentTime: () => new Date(),
+  });
   const getBookingByReference = createGetBookingByReference({
     bookingRepository,
+    getCurrentTime: () => new Date(),
   });
-  const listBookings = createListBookings({ bookingRepository });
+  const listBookings = createListBookings({
+    bookingRepository,
+    getCurrentTime: () => new Date(),
+  });
 
   const getFlight = createGetFlight({
     flightRepository,
@@ -251,6 +283,13 @@ export async function createApplication(
       intervalMs: outboxRelayIntervalMs,
     }),
   );
+  jobScheduler.register(
+    createBookingHoldExpiryJob({
+      expireHolds,
+      logger,
+      intervalMs: holdExpiryIntervalMs,
+    }),
+  );
   jobScheduler.start();
 
   return {
@@ -274,8 +313,9 @@ export async function createApplication(
     healthChecks,
     async close() {
       // Same order as before (Day 17): stop the job before closing what it
-      // depends on. dataSource.destroy() replaces database.close().
-      jobScheduler.stop();
+      // depends on. dataSource.destroy() replaces database.close(). Awaited
+      // since Day 48B: a run in progress finishes its transaction first.
+      await jobScheduler.stop();
       await messagePublisher.close();
       await dataSource.destroy();
     },

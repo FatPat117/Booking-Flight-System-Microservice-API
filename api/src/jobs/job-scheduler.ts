@@ -15,6 +15,11 @@ export type JobScheduler = Readonly<{
   register(job: Job): void;
   /** Start all registered jobs */
   start(): void;
-  /** Stop all jobs — must be called on shutdown to avoid leaking timers */
-  stop(): void;
+  /**
+   * Stop all jobs — must be called on shutdown to avoid leaking timers.
+   * Resolves once every run already in progress has finished, so the caller
+   * can close what the jobs use (DB, publisher) without cutting a run off
+   * mid-transaction. Starts no new run.
+   */
+  stop(): Promise<void>;
 }>;

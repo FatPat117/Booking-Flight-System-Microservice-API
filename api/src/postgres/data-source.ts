@@ -30,6 +30,7 @@ import { AddBookingReference1790479600000 } from "./migrations/1790479600000-Add
 import { CreateBookingPassengers1790483200000 } from "./migrations/1790483200000-CreateBookingPassengers.js";
 import { ContractBookingPassengers1790486800000 } from "./migrations/1790486800000-ContractBookingPassengers.js";
 import { AllowHeldSeats1790490400000 } from "./migrations/1790490400000-AllowHeldSeats.js";
+import { AddBookingHoldExpiryIndex1790494000000 } from "./migrations/1790494000000-AddBookingHoldExpiryIndex.js";
 
 /**
  * Day 36+ — dev-complete only. Entities/migrations are added per Strangler
@@ -82,6 +83,7 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
       CreateBookingPassengers1790483200000,
       ContractBookingPassengers1790486800000,
       AllowHeldSeats1790490400000,
+      AddBookingHoldExpiryIndex1790494000000,
     ],
   });
 }

@@ -31,6 +31,7 @@ import {
   createInMemoryTransactionRunner,
   createUnusedReferenceData,
   type InMemoryAuditRecorder,
+  type InMemoryBookingRepository,
 } from "./fakes/in-memory.js";
 
 const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
@@ -64,7 +65,18 @@ function createMemoryLogger(): Logger {
 /** Per-app access to the aircraft fake seedFlight registers aircraft in. */
 const seedAccess = new WeakMap<Express, AircraftRepository>();
 
-function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
+/** One clock for every use case of an app; tests move it to lapse holds. */
+type TestClock = { now: Date };
+
+function createContext(): {
+  app: Express;
+  audit: InMemoryAuditRecorder;
+  clock: TestClock;
+  /** For the expiry job's sweep, which no route exposes. */
+  bookingRepository: InMemoryBookingRepository;
+} {
+  const clock: TestClock = { now: FIXED_TIME };
+  const getCurrentTime = () => clock.now;
   const flights = createInMemoryFlightStore();
   const flightRepository = createInMemoryFlightRepository(flights);
   const airportRepository = createInMemoryAirportRepository(TEST_AIRPORTS);
@@ -79,11 +91,11 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => undefined,
-    getCurrentTime: () => FIXED_TIME,
+    getCurrentTime,
   };
 
   const app = createApp({
-    getFlight: createGetFlight({ flightRepository, getCurrentTime: () => FIXED_TIME }),
+    getFlight: createGetFlight({ flightRepository, getCurrentTime }),
     getFlightSeatMap: createGetFlightSeatMap({ flightRepository }),
     createFlight: createCreateFlight({
       ...common,
@@ -100,10 +112,10 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
       generateReference: nextBookingReference,
     }),
     cancelBooking: createCancelBooking({ ...common, bookingRepository }),
-    getBooking: createGetBooking({ bookingRepository }),
-    getBookingByReference: createGetBookingByReference({ bookingRepository }),
-    listBookings: createListBookings({ bookingRepository }),
-    listFlights: createListFlights({ flightRepository, getCurrentTime: () => FIXED_TIME }),
+    getBooking: createGetBooking({ bookingRepository, getCurrentTime }),
+    getBookingByReference: createGetBookingByReference({ bookingRepository, getCurrentTime }),
+    listBookings: createListBookings({ bookingRepository, getCurrentTime }),
+    listFlights: createListFlights({ flightRepository, getCurrentTime }),
     ...createUnusedReferenceData(),
     logger: createMemoryLogger(),
     healthChecks: createInMemoryHealthChecks(),
@@ -111,7 +123,7 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
   });
 
   seedAccess.set(app, aircraftRepository);
-  return { app, audit };
+  return { app, audit, clock, bookingRepository };
 }
 
 let flightSequence = 0;
@@ -605,4 +617,80 @@ test("audit records the acting accounts: admin for creating and opening the flig
     BOOKING_CREATED: { type: "account", id: ACCOUNT_A },
     BOOKING_CANCELLED: { type: "account", id: ACCOUNT_A },
   });
+});
+
+// ---------------------------------------------------------------------------
+// Hold expiry (Day 48B, Decision 12, BR-BOOK-10). No job runs in these apps:
+// every case is the window between the deadline and the job's next sweep.
+// ---------------------------------------------------------------------------
+
+/** HOLD_DURATION_MS after FIXED_TIME: the deadline of every hold made here. */
+const HOLD_DEADLINE = new Date(FIXED_TIME.getTime() + 15 * 60 * 1000);
+
+test("a lapsed hold reads EXPIRED by id, by reference and in the list before the job runs; its seat still shows HELD", async () => {
+  const { app, clock } = createContext();
+  const flightId = await seedFlight(app);
+  const created = await book(app, USER_A, flightId);
+  assert.equal(created.status, 201);
+  assert.equal(created.body.status, "HELD");
+
+  clock.now = HOLD_DEADLINE;
+
+  const byId = await request(app).get(`/api/bookings/${created.body.id}`).set(as(USER_A));
+  const byReference = await request(app)
+    .get(`/api/bookings/by-reference/${created.body.reference}`)
+    .set(as(USER_A));
+  const list = await request(app).get("/api/bookings").set(as(USER_A));
+
+  assert.equal(byId.body.status, "EXPIRED");
+  assert.equal(byReference.body.status, "EXPIRED");
+  assert.deepEqual(list.body.items.map((item: { status: string }) => item.status), ["EXPIRED"]);
+  // Inventory is the job's (Decision 12): up to one interval late, accepted.
+  assert.equal((await seatStatuses(app, flightId))["1A"], "HELD");
+});
+
+test("DELETE a lapsed hold is 409 BOOKING_EXPIRED, writes nothing, and leaves the seat for the job", async () => {
+  const { app, audit, clock } = createContext();
+  const flightId = await seedFlight(app);
+  const created = await book(app, USER_A, flightId);
+  clock.now = HOLD_DEADLINE;
+
+  const response = await request(app).delete(`/api/bookings/${created.body.id}`).set(as(USER_A));
+
+  assert.equal(response.status, 409);
+  assert.deepEqual(response.body, {
+    error: { code: "BOOKING_EXPIRED", message: "Booking hold has expired" },
+  });
+  assert.equal((await seatStatuses(app, flightId))["1A"], "HELD");
+  assert.ok(audit.records.every((record) => record.action !== "BOOKING_CANCELLED"));
+});
+
+test("DELETE a booking the job already expired is the same 409 BOOKING_EXPIRED", async () => {
+  const { app, clock, bookingRepository } = createContext();
+  const flightId = await seedFlight(app);
+  const created = await book(app, USER_A, flightId);
+  clock.now = HOLD_DEADLINE;
+  assert.equal((await bookingRepository.expireDueHolds(HOLD_DEADLINE, 50)).length, 1);
+
+  const response = await request(app).delete(`/api/bookings/${created.body.id}`).set(as(USER_A));
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error.code, "BOOKING_EXPIRED");
+  assert.equal((await seatStatuses(app, flightId))["1A"], "AVAILABLE");
+});
+
+test("another account's lapsed hold is 404 on DELETE; the owner 1 ms before the deadline still cancels with 204", async () => {
+  const { app, clock } = createContext();
+  const flightId = await seedFlight(app, 2);
+  const lapsing = await book(app, USER_A, flightId);
+  const valid = await book(app, USER_A, flightId);
+
+  clock.now = new Date(HOLD_DEADLINE.getTime() - 1);
+  const owner = await request(app).delete(`/api/bookings/${valid.body.id}`).set(as(USER_A));
+  clock.now = HOLD_DEADLINE;
+  const other = await request(app).delete(`/api/bookings/${lapsing.body.id}`).set(as(USER_B));
+
+  assert.equal(owner.status, 204);
+  assert.equal(other.status, 404);
+  assert.equal(other.body.error.code, "BOOKING_NOT_FOUND");
 });

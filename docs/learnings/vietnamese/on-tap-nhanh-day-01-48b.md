@@ -1,9 +1,8 @@
-# Ôn tập nhanh: Day 1 → Day 48A
+# Ôn tập nhanh: Day 1 → Day 48B
 
 > Sổ tay tiếng Việt để đọc lại nhanh. Mỗi mục gồm: **vấn đề → cách xử lý → vì sao**, kèm đường dẫn tới code thật.
-> Các note tiếng Anh trong `docs/learnings/` đi sâu từng chủ đề; file này là bản đồ tổng.
-> Xem thêm trong cùng thư mục: `race-conditions/`, `interview/`, `use-cases/`.
-> Cập nhật đến: **Day 48A** (2026-10-16). Số test hiện tại: api unit 351, integration 122, notifier 8, identity 12.
+> Các note tiếng Anh khác trong `docs/learnings/` đi sâu từng chủ đề; file này là bản đồ tổng.
+> Cập nhật đến: **Day 48B** (2026-10-17). Số test hiện tại: api unit 377, integration 140, notifier 10, identity 12.
 
 ---
 
@@ -11,8 +10,8 @@
 
 ```text
 npm workspaces
-├── packages/contracts      kiểu event dùng chung + parser (flight-created, booking-held, booking-created cũ)
-├── api                     Express: flights, airports, aircraft, bookings; outbox relay; Postgres booking_db
+├── packages/contracts      kiểu event dùng chung + parser (flight-created, booking-held, booking-expired, booking-created cũ)
+├── api                     Express: flights, airports, aircraft, bookings; outbox relay; job hết hạn giữ ghế; Postgres booking_db
 ├── services/identity       register/login, phát JWT (Postgres identity_db)
 └── services/flight-notifier  consumer RabbitMQ (log event, DLQ)
 
@@ -97,6 +96,7 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 | 46 | Flight tham chiếu + lifecycle | Status dẫn xuất từ đồng hồ; exclusion constraint; deadlock `40P01` khi insert đồng thời |
 | 47 | Tồn kho ghế mỗi chuyến | `SKIP LOCKED`; đếm ghế lúc đọc; FK deferred |
 | 48A | Nhiều hành khách + mã đặt chỗ | Giữ ghế tất cả-hoặc-không trong 1 câu lệnh; thứ tự khoá toàn cục |
+| 48B | Job hết hạn giữ ghế | Job trả ghế, đọc thì suy ra `EXPIRED`, quyết định tự kiểm hạn; biên `<=`/`>` bổ sung chính xác; nhả ghế cũng theo thứ tự khoá |
 
 ---
 
@@ -115,7 +115,7 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 
 - **Repository không biết HTTP**: trả `outcome`, route mới dịch ra status (Day 6).
 - **Use case nhận dependency qua một object**, kể cả đồng hồ và bộ sinh id → test xác định (Day 13).
-- **`AsyncLocalStorage`** dùng 3 lần: requestId (Day 10), user đã xác thực (Day 33), **transaction hiện tại** (Day 37) — để repository tự tham gia transaction mà port không lộ kiểu TypeORM. `api/src/postgres/transaction-context.ts`.
+- `**AsyncLocalStorage**` dùng 3 lần: requestId (Day 10), user đã xác thực (Day 33), **transaction hiện tại** (Day 37) — để repository tự tham gia transaction mà port không lộ kiểu TypeORM. `api/src/postgres/transaction-context.ts`.
 - **Mapping entity ↔ domain** nằm riêng trong adapter (`mapFlight`, `mapBooking`): domain chỉ thấy ISO string, không thấy `Date`/snake_case.
 
 ### 2.3 Transaction & bẫy Postgres
@@ -123,19 +123,19 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 - **Lỗi DB bị bắt bên trong transaction phải kết thúc công việc của transaction đó** (ADR-004 phụ lục Day 38): sau một câu lỗi, mọi câu sau báo "transaction is aborted", còn COMMIT thì âm thầm thành ROLLBACK.
 - **Dùng `ON CONFLICT DO NOTHING RETURNING id` thay vì bắt `23505`** khi cần tiếp tục transaction (mã đặt chỗ, Day 48A): kết quả rỗng = trùng → sinh lại, ghế đã giữ vẫn còn.
 - **TypeORM không chặn transaction lồng nhau** → tự viết `NestedTransactionError` (Day 37).
-- **`.returning()` của TypeORM nhận tên property** (`flightId`), truyền tên cột thì nó lặng lẽ bỏ RETURNING (Day 39).
+- `**.returning()` của TypeORM nhận tên property** (`flightId`), truyền tên cột thì nó lặng lẽ bỏ RETURNING (Day 39).
 - **FK `DEFERRABLE INITIALLY DEFERRED`** (Day 47): giữ ghế trỏ tới booking id **trước** khi insert booking → giữ ghế thất bại thì không có gì để hoàn tác. Ngoài transaction, FK được kiểm cuối câu lệnh.
 
 ### 2.4 Concurrency — phần quan trọng nhất
 
-| Kỹ thuật | Dùng khi | Ở đâu |
-|---|---|---|
-| **OCC: `UPDATE ... WHERE <điều kiện>`** | Chuyển trạng thái **một dòng** (huỷ booking, mở chuyến) | `cancel`, `changeStatus` |
-| **Compare-and-set** `AND status = :expected` | Thay đổi trạng thái có thể bị tranh | Day 46 `open-flight` (bỏ đi → 10 chuyến cùng mở thay vì 1) |
-| **`UNIQUE` / exclusion constraint** | Luật giữa **nhiều dòng** (trùng email, lịch máy bay chồng nhau) | `EXCL_flights_aircraft_schedule` (GiST + `btree_gist`) |
-| **`FOR UPDATE SKIP LOCKED`** | Chọn 1 trong nhiều tài nguyên **thay thế được** | Giữ ghế tự động |
-| **Chờ khoá + thứ tự khoá toàn cục** | Tài nguyên khách **đã chọn đích danh** | Giữ ghế chỉ định: `ORDER BY row, letter FOR UPDATE` |
-| **`FOR SHARE OF flight`** | Đọc điều kiện ở dòng khác mà không cho nó đổi | Cửa sổ bán vé lúc giữ ghế |
+| Kỹ thuật                                     | Dùng khi                                                        | Ở đâu                                                      |
+| -------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------- |
+| **OCC: `UPDATE ... WHERE <điều kiện>`**      | Chuyển trạng thái **một dòng** (huỷ booking, mở chuyến)         | `cancel`, `changeStatus`                                   |
+| **Compare-and-set** `AND status = :expected` | Thay đổi trạng thái có thể bị tranh                             | Day 46 `open-flight` (bỏ đi → 10 chuyến cùng mở thay vì 1) |
+| `**UNIQUE` / exclusion constraint**          | Luật giữa **nhiều dòng** (trùng email, lịch máy bay chồng nhau) | `EXCL_flights_aircraft_schedule` (GiST + `btree_gist`)     |
+| `**FOR UPDATE SKIP LOCKED**`                 | Chọn 1 trong nhiều tài nguyên **thay thế được**                 | Giữ ghế tự động                                            |
+| **Chờ khoá + thứ tự khoá toàn cục**          | Tài nguyên khách **đã chọn đích danh**                          | Giữ ghế chỉ định: `ORDER BY row, letter FOR UPDATE`        |
+| `**FOR SHARE OF flight**`                    | Đọc điều kiện ở dòng khác mà không cho nó đổi                   | Cửa sổ bán vé lúc giữ ghế                                  |
 
 Những điều **đo được** (không đoán):
 
@@ -150,10 +150,23 @@ Hai bẫy khi giữ **nhiều** dòng (Day 48A):
 1. **Commit một nửa**: phán quyết (đủ ghế chưa?) phải nằm **trong `WHERE` của chính câu UPDATE** (`WHERE enough.ok`), không phải kiểm sau.
 2. **Deadlock**: mọi câu khoá nhiều ghế phải khoá theo **(row, letter)**. Mutation bỏ `ORDER BY` vẫn xanh vì plan *tình cờ* sort — **plan không phải lời hứa, `ORDER BY` mới là**.
 
+Hết hạn giữ ghế (Day 48B) — ba câu hỏi "hold này hết chưa?", ba cách trả lời:
+
+| Ai hỏi | Cách | Vì sao |
+|---|---|---|
+| Tồn kho ghế | **Job** 60 s, lô 50, tối đa 20 lô, `SKIP LOCKED` | Suy ra khi đọc thì mỗi lần đếm ghế phải join `bookings`, và câu giữ ghế phải "cướp" ghế còn ghi `HELD` |
+| Hiển thị | **Suy ra khi đọc** (`withEffectiveStatus`) | Chủ booking không bao giờ thấy hold đã hết, kể cả trước khi job chạy |
+| Quyết định (huỷ, thanh toán) | **Kiểm hạn trong chính `WHERE`** (`hold_expires_at > $now`) | Kết quả chỉ phụ thuộc đồng hồ, không phụ thuộc job đã chạy chưa |
+
+- **Biên bổ sung** (BR-BOOK-10): hết hạn `<= now`, còn hiệu lực `> now`. Test **đúng tại thời điểm hạn** và trước 1 ms — test cách xa 1 phút không phân biệt được `<` với `<=`.
+- **Huỷ vs hết hạn cùng lúc**: hai điều kiện loại trừ nhau + row lock → mỗi booking đúng **một** kết thúc. Đồng hồ lệch vài ms thì người ghi sau re-check `status = 'HELD'` và không khớp.
+- **Nhả ghế cũng phải theo thứ tự khoá**: giữ ghế chỉ định khoá ghế **bất kể trạng thái**; huỷ cũ nhả bằng `UPDATE … WHERE booking_id` (thứ tự quét) → có thể vòng chờ. Giờ khoá trước `ORDER BY flight_id, row, letter FOR UPDATE` rồi mới update (`releaseSeatsOf`, dùng chung).
+- Đo: 4 sweeper song song ~250 ms, có batch chạy chồng nhau; bỏ `SKIP LOCKED` vẫn đúng nhưng **xếp hàng** ~910 ms, 0 batch chồng. Nhả ghế ngược thứ tự + cổng khoá 12A → deadlock **5/5**; code thật → 0.
+
 ### 2.5 Migration an toàn
 
 - **Expand → backfill → contract** (Day 44, 46, 47, 48A): thêm cột nullable → điền dữ liệu → khối `DO` **đối soát và từ chối kèm danh sách + HINT** thay vì xoá dữ liệu, rồi mới `NOT NULL`/drop.
-- **`migrationsTransactionMode: "each"`** (Day 46): contract bị từ chối thì expand + backfill vẫn được giữ, người sửa dữ liệu tay rồi chạy lại.
+- `**migrationsTransactionMode: "each"**` (Day 46): contract bị từ chối thì expand + backfill vẫn được giữ, người sửa dữ liệu tay rồi chạy lại.
 - Luôn thử trên **dữ liệu dev cố tình làm lệch** (chuyến bán quá số ghế, booking không có ghế…) để chứng minh contract biết từ chối.
 - `IMMUTABLE` khai báo cho hàm dùng trong index chỉ đúng khi interval **không có phần ngày/tháng** (`'1440 minutes'`, không `'1 day'`).
 - Sinh ngẫu nhiên trong SQL không cần extension: byte của `gen_random_uuid()` `% 32` (backfill mã đặt chỗ).
@@ -164,7 +177,8 @@ Hai bẫy khi giữ **nhiều** dòng (Day 48A):
 - **DLQ** với fanout DLX; consumer sở hữu topology; publisher phải assert **cùng argument**.
 - **Consumer**: `prefetch(1)`, ack tay, `nack(requeue:false)`; validate event trên dây bằng parser trong `packages/contracts`.
 - **Tiến hoá contract**: thêm trường optional (expand); **không đổi nghĩa tên event** → tạo `booking-held` mới thay vì để `booking-created` mang nghĩa khác; giữ consumer cũ đọc message còn tồn.
-- **Không log PII**: consumer `booking-held` log reference + số hành khách, không log tên.
+- **Không log PII**: consumer `booking-held` log reference + số hành khách, không log tên; `booking-expired` (Day 48B) log reference + số ghế.
+- **Event do job sinh ra** (Day 48B) không có request phía sau → `correlationId` = chính `eventId`. Actor audit là `system/booking-hold-expiry`.
 - **Reconnect lười trong process** (Day 41): app không crash nên Docker không có tín hiệu restart → publisher tự nối lại khi publish tiếp theo.
 
 ### 2.7 Bảo mật
@@ -183,12 +197,16 @@ Hai bẫy khi giữ **nhiều** dòng (Day 48A):
 - **Race test** qua use case thật, pool 10 connection; **barrier** để ép thứ tự xen kẽ thay vì `sleep`; luôn kết thúc bằng **kiểm bất biến trên bảng**.
 - **Control test**: dựng biến thể sai (không `SKIP LOCKED`, không khoá, khoá sai thứ tự) **chỉ trong test** để đo cái mình đang được bảo vệ khỏi.
 - **Mutation**: sửa hỏng code có chủ đích → đúng test tương ứng phải fail → hoàn tác, `grep MUTATION` = 0. Mutation sống sót = một phát hiện (Day 48A `ORDER BY`).
-- **Đối chiếu số test** sau mỗi thay đổi; đừng tin "xanh" mà không nhìn số (`tests **` bỏ sót 23 file ở Day 36).
+- **Mutation phải giữ SQL hợp lệ** (Day 48B): bỏ điều kiện `> $2` làm `$2` không còn được dùng → Postgres không suy được kiểu → 14 test fail vì lỗi cú pháp, **không phải bằng chứng**. Giữ tham số, chỉ đổi hành vi.
+- **Race test cần "cổng"** (Day 48B): câu lệnh đơn chạy quá nhanh, race không bao giờ xảy ra; giữ khoá 12A ở một transaction thứ ba để ép hold xếp hàng trước release → thứ tự xen kẽ xác định.
+- **Đồng hồ giả nhảy ngay sau khi bị đọc**: bắt được code đọc `now` nhiều lần trong một lần chạy.
+- **Đối chiếu số test** sau mỗi thay đổi; đừng tin "xanh" mà không nhìn số (`tests `** bỏ sót 23 file ở Day 36).
 - `--test-concurrency=1` cho integration: các file `TRUNCATE` chéo nhau.
 
 ### 2.9 Vận hành
 
 - Liveness `/live` cho restart, readiness `/ready` (`SELECT 1`) cho traffic.
+- **`JobScheduler.stop()` chờ lượt đang chạy** (Day 48B): trước đó chỉ xoá timer, `close()` có thể huỷ DataSource dưới một transaction đang dở.
 - Trước `docker compose down -v`: kiểm `ps aux | grep tsx` — xoá volume dưới process đang chạy.
 - WSL đôi khi dừng container Postgres (exit 255) → `docker compose start postgres`, **không** `-v`.
 - Image monorepo: build context ở root, build `contracts` trước, `npm ci --ignore-scripts`.
@@ -207,6 +225,9 @@ Hai bẫy khi giữ **nhiều** dòng (Day 48A):
 8. Bảng vừa `TRUNCATE` sau autovacuum → planner chọn Seq Scan, test index fail (Day 47).
 9. Bỏ `ORDER BY` khi khoá mà test vẫn xanh — do plan, không do code (Day 48A).
 10. Commit một nửa khi giữ nhiều ghế; FK deferred biến 409 thành 500 (Day 48A).
+11. `UPDATE … SET booking_id = NULL … RETURNING booking_id` trả giá trị **mới** (NULL) → join rỗng (Day 48B, câu đối chứng).
+12. Nhiều hold cùng hạn được quét theo `id` (UUID ngẫu nhiên), không theo thứ tự tạo trong test (Day 48B).
+13. Index chỉ có `hold_expires_at` mà query `ORDER BY hold_expires_at, id` → vẫn Incremental Sort; cần `(hold_expires_at, id)` (Day 48B).
 
 ---
 
@@ -220,11 +241,13 @@ Hai bẫy khi giữ **nhiều** dòng (Day 48A):
 6. Expand/backfill/contract khác gì một migration `ALTER ... NOT NULL` thẳng? Vì sao contract nên **từ chối** thay vì xoá?
 7. Vì sao `CLOSED`/`DEPARTED` không lưu vào DB mà dẫn xuất từ đồng hồ?
 8. Một mutation sống sót nói lên điều gì?
+9. Vì sao tồn kho ghế do job xử lý, còn trạng thái booking thì suy ra khi đọc?
+10. Huỷ đúng tại giây hết hạn trả gì? Vì sao không để "huỷ thắng khi dòng còn ghi HELD"?
 
 ---
 
 ## 5. Tiếp theo
 
-**Day 48B**: job hết hạn giữ ghế (`HELD → EXPIRED`, nhả mọi ghế) và race giữa hết hạn với huỷ. Job nhả nhiều ghế → phải theo đúng luật thứ tự khoá (mục 2.4).
+**Bước 6 phase D**: thanh toán giả lập với Idempotency-Key. Câu `HELD → CONFIRMED` dùng phía `hold_expires_at > now` của BR-BOOK-10 và có race test thanh toán vs hết hạn (mục 2.4).
 
-Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008, `.cursor/progress/DAY-*.md`.
+Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008, `.cursor/progress/DAY-*.md`.

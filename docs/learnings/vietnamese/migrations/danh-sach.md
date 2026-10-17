@@ -1,9 +1,9 @@
-# Danh sách migration (đến Day 48A)
+# Danh sách migration (đến Day 48B)
 
 Thư mục: `api/src/postgres/migrations/` (database `booking_db`) và
 `services/identity/src/migrations/` (database `identity_db`). Tên file = timestamp + tên lớp.
 
-## `booking_db` — 19 migration
+## `booking_db` — 20 migration
 
 | # | Migration | Day | Làm gì | Điểm hay / lý do |
 |---|---|---|---|---|
@@ -26,6 +26,7 @@ Thư mục: `api/src/postgres/migrations/` (database `booking_db`) và
 | 17 | `CreateBookingPassengers` | 48A | Bảng `booking_passengers` (vị trí 1–9, tên, bản sao ghế); backfill mỗi booking cũ thành 1 hành khách | Phải chạy trước #19 (join dựa vào "một ghế mỗi booking") |
 | 18 | `ContractBookingPassengers` | 48A | Đối soát rồi xoá `bookings.passenger_name` | Từ chối booking CONFIRMED lệch ghế/hành khách, booking CANCELLED còn giữ ghế |
 | 19 | `AllowHeldSeats` | 48A | Status ghế thêm `HELD`; xoá `UQ_flight_seats_booking_id`; thêm partial index `idx_flight_seats_booking_id` | Index thay thế cái UQ từng cho "miễn phí" — cancel và job hết hạn tìm ghế theo `booking_id` |
+| 20 | `AddBookingHoldExpiryIndex` | 48B | Partial index `idx_bookings_held_expiry` trên `(hold_expires_at, id) WHERE status = 'HELD'` | Chỉ chứa hold đang mở (nhỏ, bảng thì lớn mãi). Có `id` để khớp `ORDER BY hold_expires_at, id` → đọc theo thứ tự, dừng ở `LIMIT`, không Sort (chỉ `hold_expires_at` → Incremental Sort). Đo 100 000 booking: 104 buffer / 0,06 ms so với 2 990 / 8 ms. `CREATE INDEX` thường (chặn ghi lúc tạo) — bảng lớn đang chạy thì cần `CONCURRENTLY`, không chạy được trong transaction của migration |
 
 ## `identity_db` — 2 migration
 

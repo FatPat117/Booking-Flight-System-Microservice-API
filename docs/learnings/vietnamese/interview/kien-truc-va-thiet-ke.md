@@ -63,3 +63,11 @@ tôi không đổi nghĩa event cũ — consumer gửi email "đã xác nhận" 
 **Trả lời:** Trường cũ bị từ chối **có tên** (`422 UNSUPPORTED_FIELD` kèm "passengerName đã được
 thay bằng passengers"), không lặng lẽ bỏ qua — client biết ngay phải sửa gì. Ghi vào README và
 Postman.
+
+### 10. Hết hạn: lưu trạng thái hay suy ra khi đọc?
+
+**Trả lời:** Cả hai, tuỳ ai hỏi (Decision 12). Tồn kho ghế do **job** đổi thật, vì suy ra thì mỗi
+lần đếm ghế phải join `bookings` và câu giữ ghế phải "cướp" ghế còn ghi `HELD`. Trạng thái booking
+thì **suy ra khi đọc** (`HELD` quá hạn hiển thị `EXPIRED`), giống `CLOSED` của chuyến bay. Còn quyết
+định (huỷ, thanh toán) **tự kiểm hạn trong `WHERE`**, không tin job. Đánh đổi chấp nhận: sơ đồ ghế
+trễ tới ~60 s — ghế vẫn không bán hai lần được.

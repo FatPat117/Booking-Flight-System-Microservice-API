@@ -45,7 +45,12 @@ async function createRuntimeWithBookingOfA() {
   await bookingRepository.create(booking);
 
   return {
-    getBookingByReference: createGetBookingByReference({ bookingRepository }),
+    // Before the fixture hold lapses (2026-07-20T00:15Z); the lapsed read
+    // is covered in get-booking.test.ts and bookings.api.test.ts.
+    getBookingByReference: createGetBookingByReference({
+      bookingRepository,
+      getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+    }),
     booking,
     lookups,
   };

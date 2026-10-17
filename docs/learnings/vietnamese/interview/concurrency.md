@@ -64,3 +64,28 @@ nhất sau khi chờ khoá. Không cần SERIALIZABLE và retry khắp nơi.
 **Trả lời:** Chạy trên Postgres thật, có **control test** bỏ từng cơ chế để thấy nó hỏng, có
 **mutation** để chắc test fail khi code sai, dùng **barrier** để ép thứ tự xen kẽ, chạy 10 lần
 liên tiếp. Xem [../race-conditions/06-cach-test-race-condition.md](../race-conditions/06-cach-test-race-condition.md).
+
+### 10. Job hết hạn giữ ghế chạy trên 2 instance cùng lúc thì sao?
+
+**Trả lời:** Mỗi lô là `… ORDER BY hold_expires_at, id LIMIT 50 FOR UPDATE SKIP LOCKED` trong một
+transaction: instance thứ hai bỏ qua dòng đang bị khoá và lấy lô kế. Không có booking nào hết hạn
+hai lần. Tôi còn đo đối chứng: bỏ `SKIP LOCKED` **vẫn đúng** (người chờ re-check `status = 'HELD'`
+sau khi được khoá) nhưng các sweeper xếp hàng — ~910 ms so với ~250 ms, 0 lô chạy chồng. Tức là
+`SKIP LOCKED` ở đây mua **không chờ**, không phải tính đúng. (Outbox relay thì chưa an toàn đa
+instance — tôi nói rõ giới hạn đó.)
+
+### 11. Huỷ và hết hạn xảy ra cùng mili-giây?
+
+**Trả lời:** Hai câu UPDATE có điều kiện **bổ sung**: huỷ `hold_expires_at > now`, hết hạn
+`hold_expires_at <= now`. Cùng `now` thì chỉ một khớp; đúng lúc hạn thì hết hạn thắng 20/20 và huỷ
+trả `409 BOOKING_EXPIRED`. Nếu hai bên đọc đồng hồ lệch vài ms thì row lock cho một bên qua, bên kia
+re-check trên dòng đã commit và không khớp → mỗi booking đúng một kết thúc, một audit, một event.
+Quan trọng: câu huỷ **tự kiểm hạn**, không dựa vào việc job đã chạy.
+
+### 12. Một deadlock bạn tìm ra bằng phân tích, không phải từ bug?
+
+**Trả lời:** Khi lập bảng thứ tự khoá cho giữ ghế / huỷ / hết hạn (Day 48B), tôi thấy giữ ghế chỉ
+định khoá ghế theo (row, letter) **bất kể trạng thái**, còn huỷ nhả ghế bằng
+`UPDATE … WHERE booking_id` — thứ tự quét. Tôi tái hiện bằng một transaction "cổng" giữ 12A: hold
+xếp hàng trước, release tới sau → nhả ngược thứ tự deadlock 5/5. Sửa: CTE khoá trước có
+`ORDER BY flight_id, row, letter FOR UPDATE`, dùng chung cho huỷ và hết hạn → 0 deadlock.

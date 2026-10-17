@@ -88,9 +88,26 @@ export type CreateBookingRepositoryResult =
   | { outcome: "created" }
   | { outcome: "reference-taken" };
 
+/** A HELD booking that expireDueHolds moved to EXPIRED, with the seats it released. */
+export type ExpiredHold = Readonly<{
+  bookingId: string;
+  reference: string;
+  flightId: string;
+  ownerAccountId: string;
+  /** The deadline that passed (ISO), not the time of the sweep. */
+  holdExpiresAt: string;
+  /** Seat codes the booking held, (row, letter) order; now AVAILABLE. */
+  seats: readonly string[];
+}>;
+
+/**
+ * - expired: the booking is EXPIRED, or still HELD with a lapsed hold
+ *   (BR-BOOK-10). Nothing was written: the expiry job ends it (Decision 12).
+ */
 export type CancelBookingRepositoryResult =
   | { outcome: "cancelled"; flightId: string }
   | { outcome: "already-cancelled" }
+  | { outcome: "expired" }
   | { outcome: "not-found" };
 
 /**
@@ -147,13 +164,38 @@ export type BookingRepository = Readonly<{
     request: BookingPageRequest,
   ): Promise<BookingPage>;
   /**
-   * HELD or CONFIRMED → CANCELLED, only inside the scope (OCC), and release
+   * CONFIRMED, or HELD with a hold still valid at `now` (`holdExpiresAt >
+   * now`, BR-BOOK-10) → CANCELLED, only inside the scope (OCC), and release
    * every seat of the booking (AVAILABLE, no booking) in the same statement —
-   * so only the call that wins the transition releases them. CANCELLED (or
-   * EXPIRED) answers already-cancelled.
+   * so only the call that wins the transition releases them. The deadline is
+   * checked in the statement itself, never by trusting that the expiry job
+   * has run.
+   *
+   * CANCELLED answers already-cancelled; EXPIRED or a lapsed HELD answers
+   * expired. Seats are locked in (row, letter) order, like expireDueHolds.
    */
   cancel(
     bookingId: string,
     scope: BookingAccessScope,
+    now: Date,
   ): Promise<CancelBookingRepositoryResult>;
+  /**
+   * The expiry job's batch (Decision 12): up to `limit` HELD bookings whose
+   * hold has lapsed at `now` — `holdExpiresAt <= now` (BR-BOOK-10), oldest
+   * deadline first, then id — become EXPIRED, and every seat they held is
+   * released, all in one statement. Returned in that order; an empty array
+   * means nothing was due.
+   *
+   * No scope: the system acts on every account's bookings.
+   *
+   * Concurrency: a booking another transaction has locked right now (a
+   * cancel, a second sweeper) is skipped, not waited for — the next run
+   * picks it up if it is still due. Released seats are locked in (row,
+   * letter) order, the order a chosen-seat hold locks them in, so a sweep
+   * and a hold on the same seats cannot deadlock.
+   *
+   * Callers pair each result with an audit entry and an event; they run it
+   * inside a transaction so a batch commits with them or not at all.
+   */
+  expireDueHolds(now: Date, limit: number): Promise<ExpiredHold[]>;
 }>;

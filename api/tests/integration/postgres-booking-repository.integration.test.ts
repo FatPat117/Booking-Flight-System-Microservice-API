@@ -24,6 +24,8 @@ import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 let dataSource: DataSource;
 
 const NOW = new Date("2026-10-10T00:00:00.000Z");
+/** Before the fixture holds lapse (2026-07-20T00:15Z), so cancel is allowed. */
+const CANCEL_AT = new Date("2026-07-20T00:00:00.000Z");
 
 const OWNER_ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
 const OWNER: BookingAccessScope = { kind: "owner", accountId: OWNER_ACCOUNT_ID };
@@ -142,13 +144,13 @@ test("cancel: cancelled with flightId, its seat row back to AVAILABLE with no bo
     await bookingRepository.create(booking);
   });
 
-  const first = await bookingRepository.cancel(booking.id, OWNER);
+  const first = await bookingRepository.cancel(booking.id, OWNER, CANCEL_AT);
   assert.deepEqual(first, { outcome: "cancelled", flightId: flight.id });
   assert.deepEqual(await seatRows(flight.id), [
     { seat: "1A", status: "AVAILABLE", booking_id: null },
   ]);
 
-  const second = await bookingRepository.cancel(booking.id, OWNER);
+  const second = await bookingRepository.cancel(booking.id, OWNER, CANCEL_AT);
   assert.deepEqual(second, { outcome: "already-cancelled" });
 });
 
@@ -204,8 +206,31 @@ test("findPage reads a page in the same number of queries whatever its size (no 
 test("cancel: not-found for an unknown booking id", async () => {
   const bookingRepository = createPostgresBookingRepository(dataSource);
 
-  const result = await bookingRepository.cancel(crypto.randomUUID(), OWNER);
+  const result = await bookingRepository.cancel(crypto.randomUUID(), OWNER, CANCEL_AT);
   assert.deepEqual(result, { outcome: "not-found" });
+});
+
+test("the expiry sweep's lookup reads idx_bookings_held_expiry in order, without a Sort", async () => {
+  // Seq scans off, as in the outbox plan test: on a near-empty table the
+  // planner's choice is a cost decision. This asserts the partial index can
+  // serve the predicate *and* the ORDER BY, so a batch stops at LIMIT instead
+  // of sorting every due hold (Day 48B Step 2 measured 104 vs 2 990 buffers
+  // on 100 000 bookings).
+  const rows = (await dataSource.transaction(async (manager) => {
+    await manager.query("SET LOCAL enable_seqscan = off");
+    return manager.query(
+      `EXPLAIN SELECT "id" FROM "bookings"
+       WHERE "status" = 'HELD' AND "hold_expires_at" <= $1
+       ORDER BY "hold_expires_at", "id"
+       LIMIT 50
+       FOR UPDATE SKIP LOCKED`,
+      [NOW],
+    );
+  })) as Array<Record<string, string>>;
+
+  const planText = rows.map((row) => row["QUERY PLAN"]).join("\n");
+  assert.match(planText, /idx_bookings_held_expiry/, planText);
+  assert.doesNotMatch(planText, /Sort/, planText);
 });
 
 test("foreign key: a booking with an unknown flight_id is rejected by Postgres", async () => {

@@ -171,6 +171,45 @@ test("second cancel is already-cancelled and does not release another seat", asy
   );
 });
 
+test("cancelling a hold at its deadline is expired: nothing recorded, the seat stays held for the job", async () => {
+  const { bookingRepository, transactionRunner, flightRepository } =
+    await createTestRuntime();
+  const { auditRecorder, records } = createCapturingAuditRecorder();
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
+  const deadline = new Date(FIXED_TIME.getTime() + 15 * 60 * 1000);
+
+  const createBooking = createCreateBooking({
+    bookingRepository,
+    auditRecorder,
+    outboxRepository,
+    transactionRunner,
+    generateId: () => BOOKING_ID,
+    generateReference: () => "K7Q4PZ",
+    generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
+    getRequestId: () => undefined,
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const cancelBooking = createCancelBooking({
+    bookingRepository,
+    auditRecorder,
+    outboxRepository,
+    transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
+    getRequestId: () => undefined,
+    getCurrentTime: () => deadline,
+  });
+
+  await createBooking(FLIGHT_ID, { passengers: [{ name: "Alice" }] }, ACTOR_A);
+  const writesBefore = { records: records.length, entries: entries.length };
+
+  assert.deepEqual(await cancelBooking(BOOKING_ID, SCOPE_A, ACTOR_A), { outcome: "expired" });
+  assert.deepEqual({ records: records.length, entries: entries.length }, writesBefore);
+  assert.equal((await flightRepository.findById(FLIGHT_ID))?.availableSeats, 4);
+});
+
 test("cancel returns not-found for missing booking", async () => {
   const { bookingRepository, transactionRunner } =
     await createTestRuntime();

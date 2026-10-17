@@ -23,6 +23,10 @@ import type {
   BookingAccessScope,
   BookingRepository,
 } from "../../src/bookings/booking-repository.js";
+import {
+  classifyNotCancelled,
+  isHoldLapsed,
+} from "../../src/bookings/booking-lifecycle.js";
 import type { GetBooking } from "../../src/bookings/get-booking.js";
 import type { GetBookingByReference } from "../../src/bookings/get-booking-by-reference.js";
 import type { ListBookings } from "../../src/bookings/list-bookings.js";
@@ -335,15 +339,22 @@ export function createInMemoryBookingRepository(deps: {
       };
     },
 
-    async cancel(bookingId, scope) {
+    async cancel(bookingId, scope, now) {
       const booking = bookings.get(bookingId);
 
       // Out of scope is not-found, never already-cancelled (BR-AUTH-02).
       if (booking === undefined || !isInScope(booking, scope)) {
         return { outcome: "not-found" };
       }
-      if (booking.status !== "HELD" && booking.status !== "CONFIRMED") {
-        return { outcome: "already-cancelled" };
+      // Same condition as the Postgres UPDATE: CONFIRMED, or HELD still
+      // valid at `now` (BR-BOOK-10).
+      const cancellable =
+        booking.status === "CONFIRMED" ||
+        (booking.status === "HELD" &&
+          booking.holdExpiresAt !== null &&
+          !isHoldLapsed(booking.holdExpiresAt, now));
+      if (!cancellable) {
+        return classifyNotCancelled(booking.status, booking.holdExpiresAt, now);
       }
 
       bookings.set(bookingId, { ...booking, status: "CANCELLED" });
@@ -354,6 +365,46 @@ export function createInMemoryBookingRepository(deps: {
         }
       }
       return { outcome: "cancelled", flightId: booking.flightId };
+    },
+
+    // Same rules as the Postgres sweep: HELD and holdExpiresAt <= now
+    // (BR-BOOK-10), oldest deadline first then id, at most `limit`. Nothing
+    // to skip: a single-threaded fake never sees a locked row.
+    async expireDueHolds(now, limit) {
+      const due = [...bookings.values()]
+        .filter(
+          (booking) =>
+            booking.status === "HELD" &&
+            booking.holdExpiresAt !== null &&
+            toInstant(booking.holdExpiresAt) <= now.getTime(),
+        )
+        .sort(
+          (a, b) =>
+            toInstant(a.holdExpiresAt as string) - toInstant(b.holdExpiresAt as string) ||
+            (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+        )
+        .slice(0, limit);
+
+      return due.map((booking) => {
+        bookings.set(booking.id, { ...booking, status: "EXPIRED" });
+        const released: string[] = [];
+        // Already in (row, letter) order per flight.
+        for (const seat of seats.get(booking.flightId) ?? []) {
+          if (seat.bookingId === booking.id) {
+            seat.status = "AVAILABLE";
+            seat.bookingId = null;
+            released.push(formatSeatPosition(seat.position));
+          }
+        }
+        return {
+          bookingId: booking.id,
+          reference: booking.reference,
+          flightId: booking.flightId,
+          ownerAccountId: booking.ownerAccountId,
+          holdExpiresAt: new Date(booking.holdExpiresAt as string).toISOString(),
+          seats: released,
+        };
+      });
     },
 
     peek(id) {

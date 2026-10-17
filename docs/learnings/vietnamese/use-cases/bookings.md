@@ -62,17 +62,20 @@ khoá; FK deferred cho phép ghế trỏ tới booking chưa tồn tại tới l
 **Code:** `api/src/bookings/cancel-booking.ts`, `cancel()` trong repository
 
 - id sai định dạng → 404.
-- Transaction: **một câu SQL hai CTE** — `cancelled` (`UPDATE … WHERE id AND status IN ('HELD','CONFIRMED')` + scope chủ sở hữu) và `released` (nhả **mọi** ghế của booking). Chỉ người thắng mới nhả ghế.
-- 0 dòng → câu đọc phụ (**cũng có scope**) phân loại `not-found` / `already-cancelled`.
+- `now` đọc **một lần** trước transaction (Day 48B), dùng cho cả quyết định lẫn thời gian audit.
+- Transaction: **một câu SQL** — `cancelled` (`UPDATE … WHERE id AND (status = 'CONFIRMED' OR (status = 'HELD' AND hold_expires_at > $now))` + scope chủ sở hữu), rồi `locked` (khoá ghế `ORDER BY flight_id, row, letter`) và `released` (nhả **mọi** ghế đã khoá). Chỉ người thắng mới nhả ghế.
+- 0 dòng → câu đọc phụ (**cũng có scope**) phân loại qua `classifyNotCancelled`: không có → `not-found`; `CANCELLED` → `already-cancelled`; `EXPIRED` hoặc `HELD` quá hạn → `expired`; còn huỷ được mà không khớp → **throw** (SQL và luật lệch nhau là bug).
 - Audit `BOOKING_CANCELLED`, outbox `booking-cancelled`.
 
 | Outcome | HTTP |
 |---|---|
 | `cancelled` | 204 |
 | `already-cancelled` | 409 `BOOKING_ALREADY_CANCELLED` (cố ý, để phân biệt lần đầu với lần lặp) |
-| `not-found` (gồm booking của người khác) | 404 `BOOKING_NOT_FOUND` |
+| `expired` (hold đã quá hạn, job quét hay chưa đều vậy; không ghi gì) | 409 `BOOKING_EXPIRED` |
+| `not-found` (gồm booking của người khác, kể cả đã quá hạn) | 404 `BOOKING_NOT_FOUND` |
 
-`HELD` huỷ lúc nào cũng được. Luật 24 giờ cho `CONFIRMED` (BR-BOOK-06) chưa làm (bước 7).
+`HELD` huỷ được **tới khi hết hạn** (BR-BOOK-10: còn hiệu lực khi `hold_expires_at > now`); đúng
+thời điểm hạn là đã hết. Luật 24 giờ cho `CONFIRMED` (BR-BOOK-06) chưa làm (bước 7).
 Admin huỷ → 403 (admin chỉ huỷ qua huỷ chuyến bay, sau này).
 Sau huỷ, hành khách vẫn giữ bản sao mã ghế làm lịch sử.
 
@@ -80,6 +83,9 @@ Sau huỷ, hành khách vẫn giữ bản sao mã ghế làm lịch sử.
 
 - User chỉ thấy booking của mình, admin thấy tất cả (`BookingAccessScope`).
 - Của người khác, không tồn tại, id sai định dạng → **cùng một** 404 `BOOKING_NOT_FOUND`.
+- **Trạng thái hiệu lực** (Day 48B, cả 3 use case đọc): `HELD` mà `hold_expires_at <= now` trả về
+  `EXPIRED` dù dòng trong DB còn `HELD` (`withEffectiveStatus`, nhận `getCurrentTime`). List dùng
+  một `now` cho cả trang.
 
 ## GetBookingByReference — `GET /api/bookings/by-reference/:reference`
 
@@ -99,7 +105,22 @@ Sau huỷ, hành khách vẫn giữ bản sao mã ghế làm lịch sử.
 ## Lifecycle booking
 
 ```text
-— → HELD (đặt)        HELD → CANCELLED (huỷ)       CONFIRMED → CANCELLED (huỷ, booking cũ)
-Chưa có: HELD → EXPIRED (Day 48B), HELD → CONFIRMED (thanh toán, bước 6)
+— → HELD (đặt)        HELD → CANCELLED (huỷ, khi hold > now)       CONFIRMED → CANCELLED (huỷ, booking cũ)
+HELD → EXPIRED (job, khi hold <= now; đọc thì thấy EXPIRED ngay từ lúc hạn)
+Chưa có: HELD → CONFIRMED (thanh toán, bước 6)
 ```
 Booking cũ được migrate `active → CONFIRMED`, `cancelled → CANCELLED`.
+
+## ExpireHolds — job, không có route (Day 48B)
+
+**Code:** `api/src/bookings/expire-holds.ts`, `expireDueHolds()` trong repository, job
+`api/src/jobs/booking-hold-expiry-job.ts`.
+
+- `now` đọc **một lần mỗi lần chạy**; tối đa 20 lô × 50; dừng khi một lô trả về ít hơn 50.
+- Mỗi lô một transaction: `due` (`FOR UPDATE SKIP LOCKED`, theo `hold_expires_at, id`, dùng
+  `idx_bookings_held_expiry`) → `expired` → `locked` / `released` (nhả ghế theo thứ tự) → mỗi
+  booking một audit `BOOKING_EXPIRED` (actor `system/booking-hold-expiry`) + một outbox
+  `booking-expired`.
+- Kết quả `{ expired, batches, exhausted }`; `exhausted` = chạm 20 lô → log warn
+  `booking_hold_expiry_backlog`.
+- Lô lỗi → rollback cả lô, lô trước vẫn giữ, lần sau thử lại (head-of-line như outbox relay).

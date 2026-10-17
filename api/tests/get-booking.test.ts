@@ -19,8 +19,10 @@ const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
 const ACCOUNT_B = "22222222-2222-4222-8222-222222222222";
 const SCOPE_A: BookingAccessScope = { kind: "owner", accountId: ACCOUNT_A };
 const SCOPE_B: BookingAccessScope = { kind: "owner", accountId: ACCOUNT_B };
+/** The fixture hold lapses at 2026-07-20T00:15Z; reads happen before that. */
+const READ_AT = new Date("2026-07-20T00:00:00.000Z");
 
-async function createRuntimeWithBookingOfA() {
+async function createRuntimeWithBookingOfA(readAt: Date = READ_AT) {
   const flights = createInMemoryFlightStore();
   await createInMemoryFlightRepository(flights).create(
     makeFlight({ id: FLIGHT_ID }),
@@ -34,8 +36,24 @@ async function createRuntimeWithBookingOfA() {
   });
   await bookingRepository.create(booking);
 
-  return { getBooking: createGetBooking({ bookingRepository }), booking };
+  return {
+    getBooking: createGetBooking({ bookingRepository, getCurrentTime: () => readAt }),
+    bookingRepository,
+    booking,
+  };
 }
+
+test("a hold read at its deadline is EXPIRED before the job has swept it; the stored row stays HELD (Decision 12)", async () => {
+  const { getBooking, bookingRepository, booking } = await createRuntimeWithBookingOfA(
+    new Date("2026-07-20T00:15:00.000Z"),
+  );
+
+  assert.deepEqual(await getBooking(booking.id, SCOPE_A), {
+    outcome: "found",
+    booking: { ...booking, status: "EXPIRED" },
+  });
+  assert.equal(bookingRepository.peek(booking.id)?.status, "HELD");
+});
 
 test("the owner gets their booking", async () => {
   const { getBooking, booking } = await createRuntimeWithBookingOfA();

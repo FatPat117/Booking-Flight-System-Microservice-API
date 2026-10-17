@@ -10,6 +10,7 @@ import {
   toStoredFlightStatus,
 } from "../../flights/flight-lifecycle.js";
 import { FlightEntity } from "../../flights/postgres/flight.entity.js";
+import { classifyNotCancelled } from "../booking-lifecycle.js";
 import {
   isInTransaction,
   resolveEntityManager,
@@ -24,6 +25,7 @@ import type {
   BookingStatus,
   CancelBookingRepositoryResult,
   CreateBookingRepositoryResult,
+  ExpiredHold,
   HoldSeatsResult,
   SeatHoldRequest,
 } from "../booking-repository.js";
@@ -275,6 +277,8 @@ async function holdChosenSeats(
          AND (seat."row", seat."letter"::text) IN (SELECT "row", "letter" FROM requested)
          AND flight."status" = 'OPEN'
          AND flight."departure_at" - interval '1 hour' > $5
+       -- Keep: the global lock order. No test can see it go, because the
+       -- current plan sorts the IN list anyway (Day 48A mutation survived).
        ORDER BY seat."row", seat."letter"
        FOR UPDATE OF seat
        FOR SHARE OF flight
@@ -326,6 +330,36 @@ async function holdChosenSeats(
     outcome: "seats-unavailable",
     seats: codes.filter((code) => found.get(code) !== "AVAILABLE"),
   };
+}
+
+/**
+ * Two CTEs that free every seat of the bookings in CTE `source` (it must
+ * expose "id"), shared by cancel() and expireDueHolds() (Decision 12):
+ * - `locked` locks the seats in (flight, row, letter) order before anything
+ *   updates them — the order a chosen-seat hold locks seats in
+ *   (holdChosenSeats), whatever their status. `UPDATE … WHERE booking_id`
+ *   alone would lock them in scan order, and a hold holding 12A and waiting
+ *   for 12B could meet a release holding 12B and waiting for 12A: 40P01.
+ * - `released` updates exactly the rows `locked` already holds. `letter`
+ *   keeps its column type in `locked`, so this join can use PK_flight_seats
+ *   instead of comparing a cast.
+ * Callers read seats from `locked`, not the table: every CTE sees the
+ * snapshot from before the statement's own writes.
+ */
+function releaseSeatsOf(source: string): string {
+  return `locked AS (
+       SELECT seat."flight_id", seat."row", seat."letter", seat."booking_id"
+       FROM "flight_seats" seat
+       WHERE seat."booking_id" IN (SELECT "id" FROM ${source})
+       ORDER BY seat."flight_id", seat."row", seat."letter"
+       FOR UPDATE
+     ), released AS (
+       UPDATE "flight_seats" seat
+       SET "status" = 'AVAILABLE', "booking_id" = NULL
+       FROM locked
+       WHERE seat."flight_id" = locked."flight_id"
+         AND seat."row" = locked."row" AND seat."letter" = locked."letter"
+     )`;
 }
 
 export function createPostgresBookingRepository(
@@ -412,27 +446,30 @@ export function createPostgresBookingRepository(
     async cancel(
       bookingId: string,
       scope: BookingAccessScope,
+      now: Date,
     ): Promise<CancelBookingRepositoryResult> {
       const manager = resolveEntityManager(dataSource);
 
       // One statement, two writes: the seats are released only for the row
       // the first UPDATE actually cancelled, so a losing concurrent cancel
-      // (which re-checks the status after waiting and matches nothing)
-      // releases nothing either. Every seat of the booking: 1–9 rows.
+      // or a concurrent expiry (the loser re-checks the WHERE after waiting
+      // and matches nothing) releases nothing either. `> $2` is the
+      // still-valid side of BR-BOOK-10; expireDueHolds takes `<=`.
       const ownerCondition =
-        scope.kind === "owner" ? `AND "owner_account_id" = $2` : "";
+        scope.kind === "owner" ? `AND "owner_account_id" = $3` : "";
       const rows = (await manager.query(
         `WITH cancelled AS (
            UPDATE "bookings" SET "status" = 'CANCELLED'
-           WHERE "id" = $1 AND "status" IN ('HELD', 'CONFIRMED') ${ownerCondition}
+           WHERE "id" = $1
+             AND ("status" = 'CONFIRMED'
+                  OR ("status" = 'HELD' AND "hold_expires_at" > $2))
+             ${ownerCondition}
            RETURNING "id", "flight_id"
-         ), released AS (
-           UPDATE "flight_seats" seat
-           SET "status" = 'AVAILABLE', "booking_id" = NULL
-           FROM cancelled WHERE seat."booking_id" = cancelled."id"
-         )
+         ), ${releaseSeatsOf("cancelled")}
          SELECT "flight_id" FROM cancelled`,
-        scope.kind === "owner" ? [bookingId, scope.accountId] : [bookingId],
+        scope.kind === "owner"
+          ? [bookingId, now, scope.accountId]
+          : [bookingId, now],
       )) as Array<{ flight_id: string }>;
 
       const [cancelled] = rows;
@@ -440,6 +477,7 @@ export function createPostgresBookingRepository(
         return { outcome: "cancelled", flightId: cancelled.flight_id };
       }
 
+      // Only picks the error outcome; scoped like every read (BR-AUTH-02).
       const booking = await manager.getRepository(BookingEntity).findOneBy({
         id: bookingId,
         ...scopeFilter(scope),
@@ -449,7 +487,69 @@ export function createPostgresBookingRepository(
         return { outcome: "not-found" };
       }
 
-      return { outcome: "already-cancelled" };
+      return classifyNotCancelled(
+        booking.status as BookingStatus,
+        booking.holdExpiresAt?.toISOString() ?? null,
+        now,
+      );
+    },
+
+    /**
+     * One statement:
+     * - `due` locks the batch with SKIP LOCKED: a booking a cancel or another
+     *   sweeper holds right now is skipped, never waited for. A row that was
+     *   changed and committed after our snapshot is re-checked against the
+     *   WHERE before it is locked, so a just-cancelled booking drops out.
+     *   Served by idx_bookings_held_expiry in order (Day 48B Step 2).
+     * - `expired` flips only the rows `due` locked.
+     * - `locked` / `released` free their seats in lock order (releaseSeatsOf).
+     */
+    async expireDueHolds(now: Date, limit: number): Promise<ExpiredHold[]> {
+      const manager = resolveEntityManager(dataSource);
+
+      const rows = (await manager.query(
+        `WITH due AS (
+           SELECT "id" FROM "bookings"
+           WHERE "status" = 'HELD' AND "hold_expires_at" <= $1
+           ORDER BY "hold_expires_at", "id"
+           LIMIT $2
+           FOR UPDATE SKIP LOCKED
+         ), expired AS (
+           UPDATE "bookings" booking SET "status" = 'EXPIRED'
+           FROM due WHERE booking."id" = due."id"
+           RETURNING booking."id", booking."reference", booking."flight_id",
+                     booking."owner_account_id", booking."hold_expires_at"
+         ), ${releaseSeatsOf("expired")}
+         SELECT expired."id", expired."reference", expired."flight_id",
+                expired."owner_account_id", expired."hold_expires_at",
+                coalesce(
+                  array_agg(locked."row" || locked."letter" ORDER BY locked."row", locked."letter")
+                    FILTER (WHERE locked."row" IS NOT NULL),
+                  '{}'
+                ) AS "seats"
+         FROM expired
+         LEFT JOIN locked ON locked."booking_id" = expired."id"
+         GROUP BY expired."id", expired."reference", expired."flight_id",
+                  expired."owner_account_id", expired."hold_expires_at"
+         ORDER BY expired."hold_expires_at", expired."id"`,
+        [now, limit],
+      )) as Array<{
+        id: string;
+        reference: string;
+        flight_id: string;
+        owner_account_id: string;
+        hold_expires_at: Date;
+        seats: string[];
+      }>;
+
+      return rows.map((row) => ({
+        bookingId: row.id,
+        reference: row.reference,
+        flightId: row.flight_id,
+        ownerAccountId: row.owner_account_id,
+        holdExpiresAt: row.hold_expires_at.toISOString(),
+        seats: row.seats,
+      }));
     },
   };
 }

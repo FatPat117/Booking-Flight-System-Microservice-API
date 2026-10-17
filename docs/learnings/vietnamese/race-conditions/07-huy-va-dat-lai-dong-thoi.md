@@ -48,9 +48,10 @@ Mutation Day 47: bỏ CTE `released` (nhả ghế bằng câu riêng) → 4 cont
 
 ## Liên quan tới Day 48B
 
-Job hết hạn (`HELD → EXPIRED`) sẽ đua với huỷ và (sau này) với thanh toán — cùng mẫu: điều kiện
+Job hết hạn (`HELD → EXPIRED`) đua với huỷ và (sau này) với thanh toán — cùng mẫu: điều kiện
 trạng thái trong `WHERE` của câu đổi trạng thái, nhả ghế trong cùng câu, và nhả nhiều ghế thì theo
-thứ tự (row, letter).
+thứ tự (row, letter). Từ Day 48B câu huỷ còn kiểm `hold_expires_at > now` và khoá ghế theo thứ tự
+trước khi nhả → xem [08](./08-het-han-giu-ghe-va-bien-thoi-gian.md).
 
 ## Câu trả lời phỏng vấn 30 giây
 

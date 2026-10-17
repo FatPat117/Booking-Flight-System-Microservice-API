@@ -533,6 +533,10 @@ test("a malformed flight id is flight-not-found, never sent to the repository", 
       repositoryCalls += 1;
       return { outcome: "not-found" };
     },
+    async expireDueHolds() {
+      repositoryCalls += 1;
+      return [];
+    },
   };
 
   const createBooking = createCreateBooking({

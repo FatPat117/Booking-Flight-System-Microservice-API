@@ -44,7 +44,11 @@ async function createRuntime() {
   await bookingRepository.create(makeBooking(2, ACCOUNT_B));
   await bookingRepository.create(makeBooking(3, ACCOUNT_A));
 
-  return createListBookings({ bookingRepository });
+  // Before any fixture hold lapses (the earliest at 2026-07-20T00:15Z).
+  return createListBookings({
+    bookingRepository,
+    getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
+  });
 }
 
 test("an owner lists only their own bookings, newest first, with pagination", async () => {

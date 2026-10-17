@@ -3,11 +3,19 @@
  * Rows written before Day 44 still carry the legacy `admin_api_key/admin`
  * and `passenger/anonymous` actors — the log is append-only, so they stay
  * as written; no code writes them any more.
+ *
+ * `system` is the process itself acting on a schedule, with no account
+ * behind it; `id` names the job (Day 48B: "booking-hold-expiry").
  */
-export type AuditActor = {
-  type: "account";
-  id: string;
-};
+export type AuditActor =
+  | {
+      type: "account";
+      id: string;
+    }
+  | {
+      type: "system";
+      id: string;
+    };
 
 export type AuditTarget =
   | {
@@ -36,6 +44,7 @@ export type AuditAction =
   | "FLIGHT_OPENED"
   | "BOOKING_CREATED"
   | "BOOKING_CANCELLED"
+  | "BOOKING_EXPIRED"
   | "AIRPORT_REGISTERED"
   | "AIRCRAFT_REGISTERED";
 

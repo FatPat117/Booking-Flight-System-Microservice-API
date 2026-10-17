@@ -56,3 +56,17 @@ Có test allow-list key cho response công khai.
 **Trả lời:** Mỗi ngày kết thúc bằng e2e trên docker compose: gọi HTTP, kiểm bảng bằng psql, đọc log
 notifier, chạy folder Postman bằng newman. Ví dụ Day 48A: 10 request đồng thời 3 khách trên chuyến
 10 ghế → 3×201, 7×409, còn 1 ghế, psql xác nhận không ghế mồ côi.
+
+### 9. Test một thứ phụ thuộc thời gian (hold 15 phút) thế nào?
+
+**Trả lời:** Không làm thời lượng thành config chỉ để test. Unit: đồng hồ inject, test **đúng tại
+thời điểm hạn** và trước 1 ms (cách xa 1 phút không phân biệt `<` với `<=`). Có cả đồng hồ giả
+**nhảy ngay sau khi bị đọc** để bắt code đọc `now` nhiều lần trong một lần chạy job. E2E: lùi
+`hold_expires_at` bằng psql rồi chờ job 60 s; Postman tách 2 folder, bước psql ở giữa.
+
+### 10. Một mutation "fail" nhưng không phải bằng chứng?
+
+**Trả lời:** Day 48B tôi bỏ điều kiện `hold_expires_at > $2` khỏi câu huỷ; 14 test fail — nhưng vì
+`$2` không còn được dùng, Postgres không suy được kiểu tham số, tức là **lỗi SQL**, không phải hành
+vi sai. Làm lại giữ `$2` (`$2::timestamptz IS NOT NULL`) → đúng 1 test biên fail. Ngược lại có
+mutation **sống sót** (bỏ `ORDER BY` khi nhả ghế) và tôi ghi nó lại thay vì giấu.

@@ -22,6 +22,7 @@ Select the **Booking Microservices — Local** environment before sending reques
 | `day46FlightId`, `day46ScheduledFlightId` | empty | Auto-set by the Day 46 folder: the flight it opens and the one it leaves `SCHEDULED` |
 | `day47FlightId`, `day47BookingId`, `day47Seat` | empty | Auto-set by the Day 47 folder: VN471, bob's booking on it and the seat it got |
 | `day48FlightId`, `day48BookingId`, `day48Reference` | empty | Auto-set by the Day 48A folder: VN481, bob's 3-passenger booking and its reference |
+| `day48bFlightId`, `day48bBookingId`, `day48bReference` | empty | Auto-set by the Day 48B folders: VN482 and bob's hold on 10C + 10D (folder 2 re-reads them from bob's newest booking) |
 
 ## Auth reminder
 
@@ -57,10 +58,16 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 12. Folder **Day 46 — Flight lifecycle** → needs the seed, alice's `accessToken` and bob's `userAccessToken`; run top to bottom on a database without VN461/VN462 on 2026-11-20
 13. Folder **Day 47 — Seat inventory** → same prerequisites; run top to bottom on a database without VN471 on 2026-12-01. Also runs headless: `npx newman run postman/Booking-microservices.postman_collection.json -e postman/Booking-microservices.local.postman_environment.json --folder "Day 47 — Seat inventory" --env-var accessToken=… --env-var userAccessToken=…`
 14. Folder **Day 48A — Multi-passenger hold** → same prerequisites plus carol's `userBAccessToken`; run top to bottom on a database without VN481 on 2026-12-05. Headless like step 13, adding `--env-var userBAccessToken=…`
+15. Folders **Day 48B — Hold expiry (1 of 2: hold)** and **(2 of 2: after the deadline)** → same prerequisites, a database without VN482 on 2026-12-06, and the app's expiry job running (docker compose `app` or `npm run dev`). A hold lasts 15 minutes and that is not configurable, so between the two folders move the deadline into the past — folder 1's last request prints the exact command:
+    ```bash
+    docker compose exec -T postgres psql -U booking -d booking_db \
+      -c "UPDATE bookings SET hold_expires_at = now() - interval '1 second' WHERE reference = '<reference>'"
+    ```
+    Folder 2 reads `EXPIRED` at once, gets `409 BOOKING_EXPIRED` on cancel, then waits 65 s for the job (every 60 s) and checks the seats are back. Headless: two `newman run … --folder "<name>"` calls with the psql line between them
 
 **Booking body since Day 48A:** `{ "passengers": [{ "name": "…", "seat": "12A" }] }` — 1 to 9 passengers, `seat` on every passenger or on none. The old `{ "passengerName": … }` answers `422 UNSUPPORTED_FIELD`. A new booking is `HELD` (seats `HELD` on the map) and the notifier logs `booking_held_consumed`.
 
-## Coverage (through Day 48A)
+## Coverage (through Day 48B)
 
 - Health: `/live`, `/health`, `/ready` (booking api `:3000`; `/ready` checks Postgres)
 - Flights / bookings / cancel / correlation probes
@@ -72,3 +79,4 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 - **Flight lifecycle (Day 46)**: create with IATA codes + `aircraftRegistration` (seats from the aircraft, `SCHEDULED`), `409 AIRCRAFT_UNAVAILABLE` inside arrival + 45 min and `201` exactly at it, `422 UNSUPPORTED_FIELD` for `availableSeats`, `422` unknown airports/aircraft at once, `POST /api/flights/:id/open` (`200`, `409 INVALID_FLIGHT_STATUS`, `403` for users), booking a `SCHEDULED` flight → `409 SALES_CLOSED`
 - **Seat inventory (Day 47)**: a new flight's `availableSeats` = its aircraft's seats; public `GET /api/flights/:id/seats` (all `AVAILABLE`, 8 business + 168 economy, only seat-map keys at any depth); booking answers its seat (`1A`, since Day 48A in `passengers[0].seat`), the map shows it `HELD` and `availableSeats` drops by 1; cancel makes it `AVAILABLE` again, the count returns, the cancelled booking reads `CANCELLED` and keeps the seat it had as history; malformed id → `404`
 - **Multi-passenger hold (Day 48A)**: 3 passengers without seats → `201 HELD` on `1A 1C 1D` with a 6-character reference and a 15-minute `holdExpiresAt`; chosen `[12B, 12A]` paired in order; an overlapping request → `409 SEATS_UNAVAILABLE` naming only `12B`, and `12C` stays `AVAILABLE`; `99K` → `422 UNKNOWN_SEAT`; 10 passengers → one `INVALID_PASSENGER_COUNT` issue; mixed → `MIXED_SEAT_SELECTION`; `passengerName` → `UNSUPPORTED_FIELD`; `GET /api/bookings/by-reference/:reference` (`200` owner, `404` another account); cancelling the `HELD` booking releases all three seats
+- **Hold expiry (Day 48B)**: a fresh hold reads `HELD` with its seats `HELD`; once its deadline has passed (psql) the list and by-reference read `EXPIRED` before the job runs; `DELETE` → `409 BOOKING_EXPIRED` for the owner, `404` for another account; after the job the seats are `AVAILABLE` and another account holds exactly them; the old booking still answers `409 BOOKING_EXPIRED`

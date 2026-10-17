@@ -5,6 +5,7 @@ import {
   type RawPageQuery,
 } from "../pagination.js";
 import type { ValidationIssue } from "../types.js";
+import { withEffectiveStatus } from "./booking-lifecycle.js";
 import type {
   Booking,
   BookingAccessScope,
@@ -17,7 +18,8 @@ export type ListBookingsResult =
 
 /**
  * Bookings visible from `scope`, newest first: an owner sees their own
- * (US-BOOK-02), an admin sees every account's (BR-AUTH-03).
+ * (US-BOOK-02), an admin sees every account's (BR-AUTH-03). Lapsed holds
+ * read EXPIRED (Decision 12), all against one `now` per page.
  */
 export type ListBookings = (
   scope: BookingAccessScope,
@@ -26,8 +28,9 @@ export type ListBookings = (
 
 export function createListBookings(dependencies: {
   bookingRepository: BookingRepository;
+  getCurrentTime: () => Date;
 }): ListBookings {
-  const { bookingRepository } = dependencies;
+  const { bookingRepository, getCurrentTime } = dependencies;
 
   return async (scope, rawQuery) => {
     const pageQuery = parsePageQuery(rawQuery);
@@ -41,9 +44,11 @@ export function createListBookings(dependencies: {
       offset: pageQuery.value.offset,
     });
 
+    const now = getCurrentTime();
+
     return {
       outcome: "success",
-      items: page.items,
+      items: page.items.map((booking) => withEffectiveStatus(booking, now)),
       pagination: toPagination(pageQuery.value, page.totalItems),
     };
   };

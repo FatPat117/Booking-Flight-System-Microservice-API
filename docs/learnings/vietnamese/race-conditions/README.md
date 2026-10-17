@@ -27,11 +27,15 @@ Postgres thật** chứng minh nó.
 | Đọc điều kiện ở dòng khác lúc ghi | `FOR SHARE OF <bảng đó>` | Cửa sổ bán vé lúc giữ ghế | [04](./04-skip-locked-va-cho-khoa.md) |
 
 | Huỷ đua với đặt lại ghế vừa nhả; nhiều lần huỷ cùng lúc | Huỷ + nhả ghế trong một câu (CTE) + `SKIP LOCKED` | Race test D, E Day 47 | [07](./07-huy-va-dat-lai-dong-thoi.md) |
+| Job quét chạy trên nhiều instance | Lô `FOR UPDATE SKIP LOCKED`, một transaction mỗi lô | Hết hạn giữ ghế | [08](./08-het-han-giu-ghe-va-bien-thoi-gian.md) |
+| Hai chuyển trạng thái theo thời gian đua nhau | Điều kiện bổ sung `<= now` / `> now` + row lock | Huỷ vs hết hạn (sau này: thanh toán vs hết hạn) | [08](./08-het-han-giu-ghe-va-bien-thoi-gian.md) |
+| Nhả nhiều ghế trong khi người khác giữ ghế đó | Khoá trước theo cùng thứ tự toàn cục, rồi mới update | Huỷ / hết hạn vs giữ ghế chỉ định | [08](./08-het-han-giu-ghe-va-bien-thoi-gian.md) |
 
 Cách test tất cả những thứ trên: [06-cach-test-race-condition.md](./06-cach-test-race-condition.md).
 
-Ba file race test trong `api/tests/integration/`: `postgres-booking-race` (một ghế mỗi booking, Day 47),
-`postgres-booking-hold-race` (nhiều ghế, Day 48A), `flight-schedule-race.postgres` (lịch máy bay, Day 46).
+Bốn file race test trong `api/tests/integration/`: `postgres-booking-race` (một ghế mỗi booking, Day 47),
+`postgres-booking-hold-race` (nhiều ghế, Day 48A), `postgres-booking-expiry-race` (hết hạn giữ ghế, Day 48B),
+`flight-schedule-race.postgres` (lịch máy bay, Day 46).
 
 ## Các con số đã đo (thuộc lòng để kể khi phỏng vấn)
 
@@ -43,3 +47,6 @@ Ba file race test trong `api/tests/integration/`: `postgres-booking-race` (một
 | Day 48A C3: không khoá dòng (OCC thuần) khi chọn ghế, 20 request / 50 ghế | 15–16/20 báo **hết ghế sai** |
 | Day 48A C: khoá theo thứ tự request, không barrier | 98/100 vòng **deadlock** |
 | Day 48A B: khoá theo (row, letter) | 0 deadlock, 200/200 vòng |
+| Day 48B A/B: 4 sweeper, 50 hold; có / không `SKIP LOCKED` | đều đúng 50 lần hết hạn; ~250 ms có batch chồng nhau / ~910 ms xếp hàng |
+| Day 48B C: huỷ và job đúng lúc hạn, 20 vòng | job thắng 20/20, mỗi booking một kết thúc |
+| Day 48B E: nhả ghế ngược thứ tự, có cổng khoá 12A | deadlock 5/5; code thật 0 |

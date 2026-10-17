@@ -23,7 +23,7 @@ Details, principles and why the order is what it is: [docs/roadmap.md](docs/road
   packages/contracts/         ← @booking-flight-system/contracts (shared event types)
   api/                        ← @booking-flight-system/api (flights + bookings HTTP, outbox relay)
   services/identity/          ← register / login, issues JWTs (identity_db)
-  services/flight-notifier/   ← RabbitMQ consumer (flight-created, booking-held, booking-created)
+  services/flight-notifier/   ← RabbitMQ consumer (flight-created, booking-held, booking-expired, booking-created)
 
 docker-compose.yml
   ├── app              (build context: ., Dockerfile: api/Dockerfile)
@@ -178,12 +178,31 @@ GET /api/bookings/by-reference/K7Q4PZ
 
 - **Breaking change to the booking body.** `{ "passengerName": … }` is replaced by `passengers`: 1 to 9 (BR-BOOK-01, counted before any passenger is read), each with a non-empty `name`. Either every passenger names a `seat` (`12A`) or none does (BR-BOOK-09); with none the system holds the lowest free seats in (row, letter) order. The old body answers `422 UNSUPPORTED_FIELD`.
 - **All or nothing** (BR-SEAT-02): either every passenger gets a seat or no seat is held. `409 NOT_ENOUGH_SEATS` (system-picked), `409 SEATS_UNAVAILABLE` with the taken seat codes in `details` (chosen; never who holds them), `422 UNKNOWN_SEAT` for a code the flight does not have, `422 MIXED_SEAT_SELECTION`, `422 DUPLICATE_SEAT`, `422 INVALID_PASSENGER_COUNT`. `FLIGHT_SOLD_OUT` is gone.
-- **A new booking is `HELD` for 15 minutes** (`holdExpiresAt`, BR-BOOK-04) and its seats show `HELD` on the map. Existing bookings were migrated `active → CONFIRMED`, `cancelled → CANCELLED`. A `HELD` booking can be cancelled at any time; its passengers keep the seat codes they had, as history.
+- **A new booking is `HELD` for 15 minutes** (`holdExpiresAt`, BR-BOOK-04) and its seats show `HELD` on the map. Existing bookings were migrated `active → CONFIRMED`, `cancelled → CANCELLED`. A `HELD` booking can be cancelled until its hold expires (Day 48B, below); its passengers keep the seat codes they had, as history.
 - **Booking reference** (BR-BOOK-05): 6 characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no `0/O`, `1/I`), unique (`UQ_bookings_reference`). A clash is drawn again, up to 5 times, inside the same transaction (`INSERT … ON CONFLICT DO NOTHING` keeps it usable). `GET /api/bookings/by-reference/:reference` follows the same ownership rule as by id: another account's or a malformed reference → `404 BOOKING_NOT_FOUND`.
 - **Concurrency.** Each hold is a single statement. System-picked seats use `SKIP LOCKED` and a count check in the `UPDATE`'s own `WHERE`, so finding fewer seats than passengers writes nothing. Chosen seats are locked **in (row, letter) order, whatever order the request lists them in**, so `[12A, 12B]` and `[12B, 12A]` cannot deadlock (race tests in `postgres-booking-hold-race.integration.test.ts`).
 - **Event `booking-held`** replaces `booking-created` for new bookings (`reference`, `holdExpiresAt`, passengers with seats). flight-notifier consumes it and still consumes `booking-created` for messages sent before Day 48A.
 
 Rules: BR-BOOK-01/02/04/05/09, BR-SEAT-02 and Decision 11 in [docs/product/domain-model.md](docs/product/domain-model.md).
+
+## Hold expiry (Day 48B)
+
+A `HELD` booking expires at `holdExpiresAt` (15 minutes after the hold, BR-BOOK-04). Three places care, each in its own way (Decision 12):
+
+- **Reads derive it.** From the deadline on, `GET /api/bookings/:id`, `/by-reference/:reference` and `GET /api/bookings` show the booking as `EXPIRED`, even if the row still says `HELD`.
+- **Decisions check it themselves.** `DELETE /api/bookings/:id` on a lapsed hold answers `409 BOOKING_EXPIRED` and writes nothing — before or after the job swept it. Another account still gets `404`. The boundary is exact (BR-BOOK-10): at instant `t` a hold is expired when `holdExpiresAt <= t`; cancel (and payment, step 6) need `holdExpiresAt > t`.
+- **A job frees the seats.** `booking-hold-expiry-job` runs every 60 s: batches of 50 lapsed holds, at most 20 batches per run, each batch one transaction that marks them `EXPIRED`, releases their seats, writes a `BOOKING_EXPIRED` audit entry (actor `system` / `booking-hold-expiry`) and a `booking-expired` event per booking. Batches are taken with `FOR UPDATE SKIP LOCKED`, so several instances can sweep at once without waiting on or double-expiring each other. A run that hits its batch limit logs `booking_hold_expiry_backlog`.
+
+```http
+DELETE /api/bookings/:id        (hold lapsed)
+→ 409 { "error": { "code": "BOOKING_EXPIRED", "message": "Booking hold has expired" } }
+```
+
+- **Cancel vs expiry at the same moment**: each is one conditional `UPDATE` on the booking row, on complementary sides of the boundary; the row lock lets one through and the other matches nothing. Exactly one end, one audit entry, one event, seats released once (race tests in `postgres-booking-expiry-race.integration.test.ts`).
+- **Seat lock order**: cancel and expiry lock a booking's seats in `(row, letter)` order before releasing them — the order a chosen-seat hold locks them in — so a release and a hold on the same seats cannot deadlock (race test E forces the interleaving; the reversed order deadlocks every round).
+- **Shutdown** waits for a job run in progress: `JobScheduler.stop()` resolves once the run's transaction is done, then the publisher and the database close.
+
+Rules: BR-BOOK-04/10, Decision 12 in [docs/product/domain-model.md](docs/product/domain-model.md).
 
 ## Audit trail
 
@@ -195,6 +214,7 @@ Every successful write records an audit entry in the `audit_logs` table, in the 
 | `FLIGHT_OPENED` | `POST /api/flights/:id/open` | `account` / admin's JWT `sub` (metadata: `previousStatus`) |
 | `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` (metadata: `reference`, `passengerCount`, `seats`, `holdExpiresAt` — no passenger names) |
 | `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` |
+| `BOOKING_EXPIRED` | `booking-hold-expiry-job` | `system` / `booking-hold-expiry` (metadata: `reference`, `seats`, `holdExpiresAt`) |
 | `AIRPORT_REGISTERED` | `POST /api/airports` | `account` / admin's JWT `sub` |
 | `AIRCRAFT_REGISTERED` | `POST /api/aircraft` | `account` / admin's JWT `sub` (metadata: seats per fare class) |
 
@@ -210,9 +230,9 @@ Rows written before Day 44 keep their original `admin_api_key/admin` and `passen
 Config + Logger
   → Postgres DataSource (private; migrations run on boot)
   → Flight/Booking repositories, AuditRecorder, OutboxRepository, TransactionRunner, HealthChecks
-  → CreateFlight / ListFlights / CreateBooking / CancelBooking
+  → CreateFlight / ListFlights / CreateBooking / CancelBooking / ExpireHolds
   → MessagePublisher (RabbitMQ, private)
-  → JobScheduler + flights-summary-job + outbox-relay-job (private; started on boot)
+  → JobScheduler + flights-summary-job + outbox-relay-job + booking-hold-expiry-job (private; started on boot)
   → Application { ... , close() }
 ```
 
@@ -226,17 +246,20 @@ This is constructor-style Dependency Injection without a DI framework. Framework
 
 The process runs an in-memory `JobScheduler` alongside HTTP.
 
-Current job:
+Current jobs:
 
 | Job | Interval | Behavior |
 |-----|----------|----------|
 | `flights-summary-job` | 60s (default) | Logs `flights_summary` with total flight count via `Logger` |
+| `outbox-relay-job` | 5s (default) | Publishes unpublished outbox rows (see Messaging) |
+| `booking-hold-expiry-job` | 60s (default) | Expires lapsed holds in batches of 50, at most 20 per run (see Hold expiry) |
 
 Design notes:
 
 - Jobs are independent of any HTTP request.
 - Failures are logged; they do not crash the process or other jobs.
 - Recursive `setTimeout` avoids overlapping runs of the same job.
+- `stop()` waits for the run in progress before it resolves (Day 48B), so `close()` never destroys the `DataSource` under a running transaction.
 - Multi-instance deployments would duplicate job execution (accepted while a single instance runs — no distributed lock).
 - Flight count reuses `FlightRepository.findPage({ limit: 1 }).totalItems` (`COUNT(*)` in the database), avoiding a new repository method for one consumer.
 
@@ -301,7 +324,7 @@ docker compose exec app sh -c "getent hosts rabbitmq"
 
 ## Messaging
 
-Every successful write enqueues an outbox row in the same Postgres transaction as the write and its audit entry: `flight-created`, `booking-held` (`booking-created` before Day 48A), `booking-cancelled`. `outbox-relay-job` (default every 5s) reads unpublished rows and publishes each to the durable queue named after its event type.
+Every successful write enqueues an outbox row in the same Postgres transaction as the write and its audit entry: `flight-created`, `booking-held` (`booking-created` before Day 48A), `booking-cancelled`, `booking-expired` (written by the expiry job, Day 48B). `outbox-relay-job` (default every 5s) reads unpublished rows and publishes each to the durable queue named after its event type.
 
 | Decision | Choice | Why |
 |----------|--------|-----|
@@ -318,7 +341,7 @@ After startup, the publisher reconnects lazily: an unexpected connection/channel
 
 ### flight-notifier service
 
-`services/flight-notifier/` has its own `package.json`, build, Dockerfile and process. It subscribes to `flight-created`, `booking-held` and `booking-created` (no longer produced since Day 48A; kept for messages already queued), validates each event against `packages/contracts`, logs `flight_created_consumed` / `booking_held_consumed` (reference and passenger count, no names) / `booking_created_consumed` with the `correlationId`, and acks/nacks manually. `booking-cancelled` is published but has no consumer yet.
+`services/flight-notifier/` has its own `package.json`, build, Dockerfile and process. It subscribes to `flight-created`, `booking-held`, `booking-expired` and `booking-created` (no longer produced since Day 48A; kept for messages already queued), validates each event against `packages/contracts`, logs `flight_created_consumed` / `booking_held_consumed` (reference and passenger count, no names) / `booking_expired_consumed` (reference and seat count) / `booking_created_consumed` with the `correlationId` (for `booking-expired`, the event's own id: no request is behind it), and acks/nacks manually. `booking-cancelled` is published but has no consumer yet.
 
 `flight-created` evolves additively (Day 46): the payload gained `originAirportId`, `destinationAirportId`, `aircraftId` and `status`, while `origin`/`destination` (IATA codes) and `availableSeats` stay. The new fields are optional in the parser, because old-shape messages may still sit in the outbox, queue or DLQ, and rejected only when present but empty. The producer maps the payload field by field, so a field added to `Flight` is never published by accident. Making them required, or dropping the old fields, is a later contract step.
 
@@ -352,6 +375,7 @@ The application runs TypeORM migrations (`api/src/postgres/migrations/`) on star
 | `AddBookingReference` | `bookings.reference`: backfilled from `gen_random_uuid()` bytes, then `NOT NULL`, `UQ_bookings_reference` and a format CHECK |
 | `CreateBookingPassengers` / `ContractBookingPassengers` | `booking_passengers` (1–9 positions, a seat once per booking), backfilled one per booking; the contract refuses with a list if a `CONFIRMED` booking's seats and passengers disagree, else drops `bookings.passenger_name` |
 | `AllowHeldSeats` | seat status `HELD`; `UQ_flight_seats_booking_id` replaced by the partial index `idx_flight_seats_booking_id` (a booking now holds several seats) |
+| `AddBookingHoldExpiryIndex` | partial index `idx_bookings_held_expiry` on `(hold_expires_at, id) WHERE status = 'HELD'`: the expiry sweep reads its batch in order and stops at `LIMIT` (no sort of every due hold) |
 
 Since Day 46 each migration runs in its own transaction (`migrationsTransactionMode: "each"`): a refused contract migration keeps the expand and backfill, so the missing data can be fixed by hand and the migrations re-run. The aircraft of an existing flight cannot be guessed, so it is assigned by hand, e.g. `UPDATE flights SET aircraft_id = (SELECT id FROM aircraft WHERE registration = 'VN-A321') WHERE flight_number = 'VN123';`.
 
@@ -400,11 +424,15 @@ Request
   → express.json / routes
   → JWT verify + role check (flight and reference-data writes, every booking route)
   → CreateFlight | OpenFlight | ListFlights | GetFlight | CreateBooking | CancelBooking | GetBooking | GetBookingByReference | ListBookings
+    (booking reads derive EXPIRED for a lapsed hold)
     | RegisterAirport | ListAirports | RegisterAircraft
   → TransactionRunner (every write)
       ├── Flight / Booking / Airport / Aircraft repositories → Postgres
       ├── AuditRecorder → Postgres audit_logs
       └── OutboxRepository → Postgres outbox (booking-held | booking-cancelled | flight-created)
+
+JobScheduler → booking-hold-expiry-job → ExpireHolds
+  → TransactionRunner (one per batch): expire due holds + release seats, audit, outbox (booking-expired)
 ```
 
 Every response includes header `x-request-id` (generated or echoed from the client).
@@ -458,7 +486,9 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No route cancels a flight yet (phase D step 9); a status change other than the creation has no event
 - `Flight` is both the write model and the read shape; only `status` is mapped to a separate `FlightView`
 - Two overlapping flights of one aircraft inserted at the same instant can deadlock (`40P01`) instead of failing the exclusion constraint; the loser is answered `409 AIRCRAFT_UNAVAILABLE`, which is safe to retry if the winner also rolled back
-- **No payment yet: a `HELD` booking never becomes `CONFIRMED`** (payment is phase D step 6), and **nothing expires a hold yet**: `holdExpiresAt` is stored but no job releases the seats after 15 minutes (Day 48B). Until then a held seat stays `HELD` until its booking is cancelled. There is deliberately no shortcut route to confirm a booking (Decision 11)
+- **No payment yet: a `HELD` booking never becomes `CONFIRMED`** (payment is phase D step 6), so since Day 48B **every new booking expires after 15 minutes**. There is deliberately no shortcut route to confirm a booking (Decision 11)
+- After a hold lapses, its seats stay `HELD` on the seat map until the expiry job's next run — up to ~60 s plus the run itself. The seat cannot be sold twice in that gap and the booking already reads `EXPIRED`; accepted (Decision 12)
+- A failing expiry batch rolls back whole and is retried on the next run: one booking that keeps failing holds back the others of its batch (head-of-line, like the outbox relay). The hold duration (15 min) is a constant, not configuration
 - No price per passenger or booking total yet (BR-BOOK-03, fare class snapshot at hold time)
 - A seat cannot be changed after booking (phase D step 7)
 - Two system-picked multi-seat holds racing for the last seats could in theory both find fewer seats than needed (each skips rows the other just locked) and both answer `409 NOT_ENOUGH_SEATS`; not observed in 200 measured rounds (Day 48A race test A)
@@ -467,7 +497,7 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - Roles are a single `user` | `admin` claim — no permission tables, no refresh tokens
 - A role change takes effect only at the next login: a token keeps the role it was issued with until it expires, both after promotion (still `403`) and after demotion (still admin)
 - Manual DI only (no DI container)
-- In-process jobs only — duplicate execution if multiple instances run; job intervals hardcoded in the Composition Root; no job timeout
+- In-process jobs only — duplicate execution if multiple instances run (the hold expiry job is safe with several thanks to `SKIP LOCKED`; the outbox relay is not); job intervals hardcoded in the Composition Root; no job timeout
 - Outbox relay polls every 5s; duplicate delivery possible if `markPublished` fails after a successful publish
 - `eventId` is on every event, but consumers have no dedupe store yet
 - `booking-cancelled` is published but has no consumer and no shared contract type, so its queue only grows. Next step: add `BookingCancelledEvent` to `packages/contracts`, validate it in a `bookingCancelledConsumer` in `flight-notifier` (same shape as `bookingCreatedConsumer`, with its own DLQ), then drain the queue

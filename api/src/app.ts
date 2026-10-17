@@ -409,6 +409,15 @@ export function createApp(dependencies: AppDependencies) {
         });
       }
 
+      // BR-BOOK-10 / Decision 12: a lapsed hold is expired, not cancelled —
+      // also before the job has swept it. Nothing was written.
+      if (result.outcome === "expired") {
+        return sendApiError(res, 409, {
+          code: "BOOKING_EXPIRED",
+          message: "Booking hold has expired",
+        });
+      }
+
       return res.status(204).send();
     },
   );
