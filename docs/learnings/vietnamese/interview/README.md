@@ -27,7 +27,8 @@ Migration có thư mục riêng: [../migrations/](../migrations/README.md).
 > trong `WHERE`. Ghế do hệ thống chọn thì dùng `FOR UPDATE SKIP LOCKED`; ghế khách chọn thì chờ
 > khoá theo một thứ tự toàn cục để không deadlock. Tôi chứng minh bằng race test trên Postgres
 > thật, có control test đo được: không khoá thì 15–16/20 request báo hết ghế sai, khoá sai thứ tự
-> thì 98/100 vòng deadlock.
+> thì 98/100 vòng deadlock. Giá vé được **chụp** vào từng hành khách ngay trong câu giữ ghế, với
+> dòng giá bị khoá `FOR SHARE`, nên đổi giá giữa chừng không bao giờ cho ra booking lẫn giá.
 >
 > Event đi qua **transactional outbox** nên không mất khi broker chết; consumer có DLQ, ack tay,
 > event có `eventId` và `correlationId` để truy vết. Bảo mật có BOLA: quyền sở hữu nằm ngay trong
@@ -41,6 +42,6 @@ Migration có thư mục riêng: [../migrations/](../migrations/README.md).
 
 - Mở bằng **vấn đề**, rồi cách giải, rồi **đánh đổi** — đừng chỉ nói tên pattern.
 - Luôn có một con số hoặc một lần "tôi đã sai và phát hiện ra nhờ…" (xem mục bẫy trong
-  [on-tap-nhanh-day-01-48b.md](../on-tap-nhanh-day-01-48b.md)).
+  [on-tap-nhanh-day-01-49a.md](../on-tap-nhanh-day-01-49a.md)).
 - Nói rõ cái **chưa làm** và vì sao (chưa có payment, sơ đồ ghế trễ tới ~60 s sau hạn, chưa dedupe consumer):
   biết giới hạn của mình được đánh giá cao.

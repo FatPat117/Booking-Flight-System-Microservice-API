@@ -5,6 +5,7 @@ import {
   FIXTURE_DESTINATION,
   FIXTURE_ORIGIN,
   FIXTURE_OTHER_AIRCRAFT_ID,
+  FIXTURE_TWO_CLASS_AIRCRAFT_ID,
   TEST_AIRCRAFT,
 } from "../fixtures/flights.js";
 
@@ -12,7 +13,7 @@ import {
  * Inserts the airports and aircraft that tests/fixtures/flights.ts refers
  * to, so flights satisfy their foreign keys (Day 46). Idempotent: call it in
  * beforeEach after any TRUNCATE. Since Day 47 the aircraft carry the same
- * layouts as TEST_AIRCRAFT (120 and 5 seats): creating a flight copies them
+ * layouts as TEST_AIRCRAFT (120, 5, and 30 in two classes): creating a flight copies them
  * into its seat inventory, and makeFlight's `availableSeats` assumes them.
  */
 export async function insertFlightReferences(
@@ -34,9 +35,10 @@ export async function insertFlightReferences(
   await dataSource.query(
     `INSERT INTO "aircraft" ("id", "registration", "model", "created_at")
      VALUES ($1, 'ZZ-FX1', 'Fixture A321', now()),
-            ($2, 'ZZ-FX2', 'Fixture A321', now())
+            ($2, 'ZZ-FX2', 'Fixture A321', now()),
+            ($3, 'ZZ-FX3', 'Fixture A350', now())
      ON CONFLICT DO NOTHING`,
-    [FIXTURE_AIRCRAFT_ID, FIXTURE_OTHER_AIRCRAFT_ID],
+    [FIXTURE_AIRCRAFT_ID, FIXTURE_OTHER_AIRCRAFT_ID, FIXTURE_TWO_CLASS_AIRCRAFT_ID],
   );
 
   await insertAircraftSeats(dataSource);

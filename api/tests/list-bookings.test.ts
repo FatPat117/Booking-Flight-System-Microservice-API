@@ -24,7 +24,7 @@ function makeBooking(n: number, ownerAccountId: string): Booking {
     id: `b0b0b0b0-0000-4000-8000-00000000000${n}`,
     flightId: FLIGHT_ID,
     ownerAccountId,
-    passengers: [{ name: `Passenger ${n}`, seat: null }],
+    passengers: [{ name: `Passenger ${n}`, seat: null, fareClass: null, price: null }],
     createdAt: `2026-07-2${n}T00:00:00.000Z`,
   });
 }

@@ -131,8 +131,6 @@ test("counter-proof: a repository that bypasses transaction-context is not part 
           aircraftId: flight.aircraftId,
           departureAt: new Date(flight.departureAt),
           arrivalAt: new Date(flight.arrivalAt),
-          priceInCents: flight.priceInCents,
-          currency: flight.currency,
           status: flight.status,
         });
         throw new Error("boom");

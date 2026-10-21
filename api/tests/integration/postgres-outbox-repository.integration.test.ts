@@ -95,8 +95,9 @@ test("enqueue outside a transaction throws OutboxEnqueueOutsideTransactionError"
 test("findUnpublished's query uses the idx_outbox_unpublished partial index", async () => {
   // On a near-empty table a Seq Scan is the cheaper plan, and which one the
   // planner picks then depends on whatever statistics earlier tests left
-  // behind. Seq scans off: this asserts the index can serve the query's
-  // predicate and order, not a cost decision.
+  // behind. Seq scans off (this transaction only, no ANALYZE needed): this
+  // asserts the index can serve the query's predicate and order, not that
+  // the planner would choose it on real data.
   const rows = (await dataSource.transaction(async (manager) => {
     await manager.query("SET LOCAL enable_seqscan = off");
     return manager.query(

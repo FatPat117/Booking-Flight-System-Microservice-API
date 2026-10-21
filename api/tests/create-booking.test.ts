@@ -22,7 +22,11 @@ import {
   createInMemoryFlightStore,
   createInMemoryTransactionRunner,
 } from "./fakes/in-memory.js";
-import { makeFlight as makeFixtureFlight } from "./fixtures/flights.js";
+import {
+  FIXTURE_FARES,
+  FIXTURE_TWO_CLASS_AIRCRAFT_ID,
+  makeFlight as makeFixtureFlight,
+} from "./fixtures/flights.js";
 
 const FIXED_TIME = new Date("2026-07-20T00:00:00.000Z");
 const FLIGHT_ID = "f1f1f1f1-0000-4000-8000-000000000001";
@@ -114,9 +118,10 @@ test("creates a HELD booking for every passenger, with one audit row and one boo
     return;
   }
 
+  const economy = FIXTURE_FARES.ECONOMY;
   const seated = [
-    { name: "Alice", seat: "1A" },
-    { name: "Bob", seat: "1B" },
+    { name: "Alice", seat: "1A", fareClass: "ECONOMY", price: economy },
+    { name: "Bob", seat: "1B", fareClass: "ECONOMY", price: economy },
   ];
   assert.deepEqual(result.booking, {
     id: BOOKING_ID,
@@ -124,6 +129,7 @@ test("creates a HELD booking for every passenger, with one audit row and one boo
     flightId: FLIGHT_ID,
     ownerAccountId: ACCOUNT_A,
     passengers: seated,
+    total: { amount: 3_000_000, currency: "VND" },
     createdAt: "2026-07-20T00:00:00.000Z",
     status: "HELD",
     // BR-BOOK-04: 15 minutes after FIXED_TIME.
@@ -143,6 +149,7 @@ test("creates a HELD booking for every passenger, with one audit row and one boo
       createdAt: "2026-07-20T00:00:00.000Z",
       holdExpiresAt: "2026-07-20T00:15:00.000Z",
       passengers: seated,
+      total: { amount: 3_000_000, currency: "VND" },
     },
   });
   assert.deepEqual(records, [
@@ -159,6 +166,7 @@ test("creates a HELD booking for every passenger, with one audit row and one boo
         reference: REFERENCE,
         passengerCount: 2,
         seats: "1A,1B",
+        totalVnd: 3_000_000,
         holdExpiresAt: "2026-07-20T00:15:00.000Z",
         correlationId: "fixed-request-id",
       },
@@ -210,10 +218,103 @@ test("named seats are held as one chosen request and paired with passengers in r
     },
   ]);
   assert.equal(result.outcome, "created");
-  assert.deepEqual(result.outcome === "created" && result.booking.passengers, [
-    { name: "Alice", seat: "1C" },
-    { name: "Bob", seat: "1A" },
-  ]);
+  assert.deepEqual(
+    result.outcome === "created" &&
+      result.booking.passengers.map(({ name, seat }) => ({ name, seat })),
+    [
+      { name: "Alice", seat: "1C" },
+      { name: "Bob", seat: "1A" },
+    ],
+  );
+});
+
+test("each passenger pays the fare of their own seat's class, and the total is the sum (BR-BOOK-03)", async () => {
+  const flights = createInMemoryFlightStore();
+  const flightRepository = createInMemoryFlightRepository(flights);
+  await flightRepository.create(
+    makeFlight({ aircraftId: FIXTURE_TWO_CLASS_AIRCRAFT_ID, availableSeats: 30 }),
+  );
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
+  const { auditRecorder, records } = createCapturingAuditRecorder();
+  const createBooking = createCreateBooking({
+    bookingRepository: createInMemoryBookingRepository({ flights }),
+    auditRecorder,
+    outboxRepository,
+    transactionRunner: createInMemoryTransactionRunner(),
+    generateId: () => BOOKING_ID,
+    generateReference: () => REFERENCE,
+    generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
+    getRequestId: () => undefined,
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  const result = await createBooking(
+    FLIGHT_ID,
+    {
+      passengers: [
+        { name: "Alice", seat: "1A" },
+        { name: "Bob", seat: "3A" },
+      ],
+    },
+    ACTOR_A,
+  );
+
+  assert.equal(result.outcome, "created");
+  if (result.outcome !== "created") {
+    return;
+  }
+  assert.deepEqual(
+    result.booking.passengers.map(({ seat, fareClass, price }) => [seat, fareClass, price?.amount]),
+    [
+      ["1A", "BUSINESS", 4_200_000],
+      ["3A", "ECONOMY", 1_500_000],
+    ],
+  );
+  assert.deepEqual(result.booking.total, { amount: 5_700_000, currency: "VND" });
+  const event = entries[0]?.payload as {
+    booking: { passengers: Array<{ price: unknown }>; total: unknown };
+  };
+  assert.deepEqual(event.booking.passengers[0]?.price, { amount: 4_200_000, currency: "VND" });
+  assert.deepEqual(event.booking.total, { amount: 5_700_000, currency: "VND" });
+  assert.equal(records[0]?.metadata.totalVnd, 5_700_000);
+});
+
+test("a held seat whose class has no fare is a broken invariant: it throws, nothing is stored", async () => {
+  const flights = createInMemoryFlightStore();
+  const flightRepository = createInMemoryFlightRepository(flights);
+  // Stored past CreateFlight, which would refuse it (BR-FLT-09).
+  await flightRepository.create(
+    makeFlight({
+      aircraftId: FIXTURE_TWO_CLASS_AIRCRAFT_ID,
+      availableSeats: 30,
+      fares: { ECONOMY: FIXTURE_FARES.ECONOMY },
+    }),
+  );
+  const bookingRepository = createInMemoryBookingRepository({ flights });
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
+  const createBooking = createCreateBooking({
+    bookingRepository,
+    auditRecorder: createCapturingAuditRecorder().auditRecorder,
+    outboxRepository,
+    transactionRunner: createInMemoryTransactionRunner(),
+    generateId: () => BOOKING_ID,
+    generateReference: () => REFERENCE,
+    generateAuditId: () => "fixed-audit-id",
+    generateOutboxId: () => "fixed-outbox-id",
+    getRequestId: () => undefined,
+    getCurrentTime: () => FIXED_TIME,
+  });
+
+  await assert.rejects(
+    () => createBooking(FLIGHT_ID, passengers("Alice"), ACTOR_A),
+    /no BUSINESS fare for seat 1A \(BR-FLT-09\)/,
+  );
+  assert.equal(entries.length, 0);
+  assert.equal(
+    await bookingRepository.findById(BOOKING_ID, { kind: "admin" }),
+    undefined,
+  );
 });
 
 test("an invalid body is validation_failed and never reaches the repository", async () => {
@@ -264,7 +365,10 @@ test("a hold returning fewer seats than passengers is a programmer error: it thr
   const bookingRepository: BookingRepository = {
     ...inner,
     async holdSeats() {
-      return { outcome: "held", seats: ["1A"] };
+      return {
+        outcome: "held",
+        seats: [{ seat: "1A", fareClass: "ECONOMY", price: FIXTURE_FARES.ECONOMY }],
+      };
     },
     async create(booking) {
       creates += 1;
@@ -464,7 +568,9 @@ test("a taken reference is drawn again: the booking gets the next one and keeps 
   assert.ok(first.outcome === "created" && second.outcome === "created");
   assert.equal(first.booking.reference, "AAAAAA");
   assert.equal(second.booking.reference, "BBBBBB");
-  assert.deepEqual(second.booking.passengers, [{ name: "Bob", seat: "1B" }]);
+  assert.deepEqual(second.booking.passengers, [
+    { name: "Bob", seat: "1B", fareClass: "ECONOMY", price: FIXTURE_FARES.ECONOMY },
+  ]);
   assert.equal(draws.length, 0);
   assert.equal((await flightRepository.findById(FLIGHT_ID))?.availableSeats, 0);
 });
@@ -511,7 +617,10 @@ test("a malformed flight id is flight-not-found, never sent to the repository", 
   const bookingRepository: BookingRepository = {
     async holdSeats() {
       repositoryCalls += 1;
-      return { outcome: "held", seats: ["1A"] };
+      return {
+        outcome: "held",
+        seats: [{ seat: "1A", fareClass: "ECONOMY", price: FIXTURE_FARES.ECONOMY }],
+      };
     },
     async create() {
       repositoryCalls += 1;

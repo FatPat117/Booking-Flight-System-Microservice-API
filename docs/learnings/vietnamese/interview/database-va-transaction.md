@@ -69,3 +69,24 @@ integration từng chạy bằng superuser nên che mất lỗi quyền (Day 40)
 
 **Trả lời:** `UpdateQueryBuilder.returning("flight_id")` — truyền tên cột thay vì tên property thì
 TypeORM **lặng lẽ bỏ** mệnh đề RETURNING, `raw` rỗng, không báo lỗi (Day 39).
+
+### 10. Lưu tiền thế nào? (Day 49A)
+
+**Trả lời:** Số nguyên theo đơn vị nhỏ nhất của tiền tệ, không bao giờ float (`0.1 + 0.2 !== 0.3`).
+VND không có đơn vị con đang dùng → lưu **số đồng nguyên**, không nhân 100. Cột Postgres `bigint`;
+trong TypeScript là `number` vì giá vé còn xa giới hạn 2^53 − 1. `pg` trả `bigint` dưới dạng
+**chuỗi**, nên adapter parse bằng regex số nguyên + kiểm safe integer và **throw** nếu sai;
+thêm `CHECK (amount_vnd <= 9007199254740991)` để DB từ chối ngay lúc ghi.
+**Câu chuyện:** cột cũ tên `price_in_cents` nhưng thật ra chứa đồng (`1500000` = 1,5 triệu đồng).
+Tên cột không phải đơn vị — chỉ cần một chỗ đọc chia 100 là giá thành 15 nghìn. Giờ đơn vị nằm
+trong tên (`amount_vnd`) và trong kiểu (`Money`). Hai bẫy parse đã có test: `Number("")` là `0`,
+`Number("9007199254740993")` làm tròn im lặng.
+
+### 11. Một luật database không khai báo được thì giữ ở đâu? (Day 49A)
+
+**Trả lời:** BR-FLT-09: "hạng nào có ghế thì có giá, không có ghế thì không có giá". `CHECK` chỉ
+thấy một dòng, FK chỉ trỏ một chiều → không ràng buộc nào nói được "với mỗi hạng trong
+`flight_seats` phải có một dòng trong `flight_fares`". Nên ghi rõ **ứng dụng** giữ: CreateFlight
+trả `422 MISSING_FARE` / `FARE_CLASS_NOT_ON_AIRCRAFT`; migration contract kiểm dữ liệu cũ và từ chối
+kèm danh sách; câu giữ ghế **throw** nếu gặp ghế không có giá (bất biến hỏng phải ồn ào). Trigger
+làm được nhưng chưa đáng khi chỉ một use case ghi giá.

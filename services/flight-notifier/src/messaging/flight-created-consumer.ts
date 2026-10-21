@@ -16,9 +16,10 @@ export function createFlightCreatedConsumer(deps: {
     }
 
     const { event } = parsed;
-    const { aircraftId, status } = event.flight;
+    const { aircraftId, status, fares } = event.flight;
 
-    // Pre-Day-46 messages have neither field; they are logged without them.
+    // Pre-Day-46 messages have neither field, pre-Day-49A ones no fares;
+    // they are logged without them.
     deps.logger.info("flight_created_consumed", {
       eventId: event.eventId,
       correlationId: event.correlationId,
@@ -28,6 +29,13 @@ export function createFlightCreatedConsumer(deps: {
       destination: event.flight.destination,
       ...(aircraftId === undefined ? {} : { aircraftId }),
       ...(status === undefined ? {} : { status }),
+      ...(fares === undefined
+        ? {}
+        : {
+            fares: Object.entries(fares)
+              .map(([fareClass, fare]) => `${fareClass}:${fare.amount} ${fare.currency}`)
+              .join(","),
+          }),
       occurredAt: event.occurredAt,
     });
 

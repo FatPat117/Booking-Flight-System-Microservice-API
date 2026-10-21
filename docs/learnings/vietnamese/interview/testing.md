@@ -70,3 +70,13 @@ thời điểm hạn** và trước 1 ms (cách xa 1 phút không phân biệt `
 `$2` không còn được dùng, Postgres không suy được kiểu tham số, tức là **lỗi SQL**, không phải hành
 vi sai. Làm lại giữ `$2` (`$2::timestamptz IS NOT NULL`) → đúng 1 test biên fail. Ngược lại có
 mutation **sống sót** (bỏ `ORDER BY` khi nhả ghế) và tôi ghi nó lại thay vì giấu.
+
+### 11. Test nào **không** chứng minh điều bạn tưởng? (Day 49A)
+
+**Trả lời:** Race test C: 20 vòng, hai booking đua một lần đổi giá, kiểm "không booking nào trộn giá
+cũ với giá mới". Nghe như test khoá dòng giá — nhưng bỏ `FOR SHARE` thì nó **vẫn xanh**, vì một câu
+lệnh đã đọc mọi giá từ một snapshot. Mutation cho thấy điều đó. Tôi giữ C vì nó canh *hình dạng*
+(một câu lệnh — refactor thành truy vấn giá từng ghế sẽ trộn được), còn khoá thì chứng minh bằng
+B1/B2: dựng một transaction đổi giá chưa commit làm "cổng" và kiểm hold còn pending sau 50 ms; kịch
+bản ngược thì dừng CreateBooking ở bước ghi audit để transaction hold còn mở. Mỗi test có bản đối
+chứng không `FOR SHARE` chạy ra kết quả khác.

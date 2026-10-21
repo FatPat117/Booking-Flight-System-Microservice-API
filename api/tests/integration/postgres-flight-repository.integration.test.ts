@@ -130,10 +130,10 @@ test("the exclusion violation surfaces as SQLSTATE 23P01 on the named constraint
   await assert.rejects(
     dataSource.query(
       `INSERT INTO flights (id, flight_number, origin_airport_id, destination_airport_id,
-         aircraft_id, departure_at, arrival_at, price_in_cents, currency, status)
+         aircraft_id, departure_at, arrival_at, status)
        SELECT gen_random_uuid(), 'VN999', origin_airport_id, destination_airport_id,
          aircraft_id, departure_at + interval '1 hour', arrival_at + interval '1 hour',
-         price_in_cents, currency, 'SCHEDULED'
+         'SCHEDULED'
        FROM flights WHERE id = $1`,
       [flight.id],
     ),

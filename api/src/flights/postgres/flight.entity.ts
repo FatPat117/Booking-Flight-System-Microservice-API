@@ -18,6 +18,9 @@ import { Column, Entity, PrimaryColumn, Unique } from "typeorm";
  *
  * Day 47: no seat counter. Available seats are counted from `flight_seats`
  * (ContractFlightSeats dropped `available_seats`).
+ *
+ * Day 49A: no price. Fares are rows of `flight_fares`, read with raw SQL by
+ * the repository (ContractFlightFares dropped `price_in_cents`/`currency`).
  */
 @Entity({ name: "flights" })
 @Unique("UQ_flights_flight_number_departure_at", [
@@ -45,12 +48,6 @@ export class FlightEntity {
 
   @Column({ type: "timestamptz", name: "arrival_at" })
   arrivalAt!: Date;
-
-  @Column({ type: "integer", name: "price_in_cents" })
-  priceInCents!: number;
-
-  @Column({ type: "varchar" })
-  currency!: string;
 
   @Column({ type: "text" })
   status!: string;

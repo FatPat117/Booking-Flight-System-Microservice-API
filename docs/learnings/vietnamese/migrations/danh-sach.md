@@ -3,7 +3,7 @@
 Thư mục: `api/src/postgres/migrations/` (database `booking_db`) và
 `services/identity/src/migrations/` (database `identity_db`). Tên file = timestamp + tên lớp.
 
-## `booking_db` — 20 migration
+## `booking_db` — 24 migration
 
 | # | Migration | Day | Làm gì | Điểm hay / lý do |
 |---|---|---|---|---|
@@ -27,6 +27,10 @@ Thư mục: `api/src/postgres/migrations/` (database `booking_db`) và
 | 18 | `ContractBookingPassengers` | 48A | Đối soát rồi xoá `bookings.passenger_name` | Từ chối booking CONFIRMED lệch ghế/hành khách, booking CANCELLED còn giữ ghế |
 | 19 | `AllowHeldSeats` | 48A | Status ghế thêm `HELD`; xoá `UQ_flight_seats_booking_id`; thêm partial index `idx_flight_seats_booking_id` | Index thay thế cái UQ từng cho "miễn phí" — cancel và job hết hạn tìm ghế theo `booking_id` |
 | 20 | `AddBookingHoldExpiryIndex` | 48B | Partial index `idx_bookings_held_expiry` trên `(hold_expires_at, id) WHERE status = 'HELD'` | Chỉ chứa hold đang mở (nhỏ, bảng thì lớn mãi). Có `id` để khớp `ORDER BY hold_expires_at, id` → đọc theo thứ tự, dừng ở `LIMIT`, không Sort (chỉ `hold_expires_at` → Incremental Sort). Đo 100 000 booking: 104 buffer / 0,06 ms so với 2 990 / 8 ms. `CREATE INDEX` thường (chặn ghi lúc tạo) — bảng lớn đang chạy thì cần `CONCURRENTLY`, không chạy được trong transaction của migration |
+| 21 | `CreateFlightFares` | 49A | Bảng `flight_fares`: PK `(flight_id, fare_class)`, `amount_vnd bigint`, CHECK `> 0` và `<= 2^53 − 1`, CHECK hạng | Một dòng mỗi hạng (không phải cột `economy_price`/`business_price`): không cột NULL cho máy bay chỉ có phổ thông, thêm hạng không đổi schema. Trần 2^53 − 1 vì JS `number` chỉ đúng tới đó — số lớn hơn lưu được nhưng làm chuyến không đọc được |
+| 22 | `BackfillFlightFares` | 49A | Chuyến `VND` có ghế ECONOMY → giá ECONOMY = `price_in_cents` **giữ nguyên** | `price_in_cents` vốn đã là đồng (tên cột sai). **Không** đoán giá BUSINESS, **không** tỷ giá USD trong migration |
+| 23 | `ContractFlightFares` | 49A | Kiểm BR-FLT-09 rồi xoá `price_in_cents`, `currency` và 2 CHECK | Từ chối kèm danh sách + HINT khi hạng có ghế mà thiếu giá, hoặc có giá mà không có ghế. Thử trên dev: lần 1 từ chối VN902 (thiếu BUSINESS) và VN903 (USD); đặt giá bằng psql; thêm cố ý một giá thừa → lần 2 từ chối đúng nó; lần 3 qua. `down` mất dữ liệu (chỉ giữ một giá) và ghi rõ |
+| 24 | `AddPassengerFareSnapshot` | 49A | `booking_passengers.fare_class`, `price_vnd`; backfill theo **vị trí ghế** trên chuyến + giá **lúc chạy migration**; CHECK ghế/hạng/giá cùng NULL, giá > 0, ≤ 2^53 − 1 | Tìm ghế theo vị trí (không theo `booking_id`) để booking đã huỷ/hết hạn cũng có giá. Từ chối hành khách có ghế mà không ra giá (ghế không thuộc chuyến) |
 
 ## `identity_db` — 2 migration
 

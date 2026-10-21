@@ -46,9 +46,9 @@ Lỗi chung cho mọi route: `400 MALFORMED_JSON`, `401` (thiếu/sai/hết hạ
 
 | Use case | Audit action | Event (outbox → queue) |
 |---|---|---|
-| CreateFlight | `FLIGHT_CREATED` | `flight-created` |
+| CreateFlight | `FLIGHT_CREATED` (có `fares`, Day 49A) | `flight-created` (có `fares`; `priceInCents` deprecated) |
 | OpenFlight | `FLIGHT_OPENED` | — |
-| CreateBooking | `BOOKING_CREATED` | `booking-held` (trước Day 48A: `booking-created`) |
+| CreateBooking | `BOOKING_CREATED` (có `totalVnd`, Day 49A) | `booking-held` (trước Day 48A: `booking-created`; Day 49A thêm giá + `total`) |
 | CancelBooking | `BOOKING_CANCELLED` | `booking-cancelled` (chưa có consumer) |
 | ExpireHolds (job) | `BOOKING_EXPIRED`, actor `system/booking-hold-expiry` | `booking-expired` |
 | RegisterAirport | `AIRPORT_REGISTERED` | — |

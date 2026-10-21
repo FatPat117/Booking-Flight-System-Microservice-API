@@ -56,8 +56,7 @@ type FlightPayload = {
   destination: string;
   departureAt: string;
   arrivalAt: string;
-  priceInCents: number;
-  currency: string;
+  fares: Record<string, unknown>;
   aircraftRegistration: string;
   [key: string]: unknown;
 };
@@ -105,8 +104,7 @@ function makeValidFlight(
     destination: "HAN",
     departureAt: "2026-08-10T08:00:00+07:00",
     arrivalAt: "2026-08-10T10:00:00+07:00",
-    priceInCents: 15_000_000,
-    currency: "VND",
+    fares: { ECONOMY: 15_000_000 },
     aircraftRegistration: "VN-A321",
     ...overrides,
   };
@@ -325,7 +323,6 @@ test("POST /api/flights creates a normalized flight with Location header", async
         flightNumber: "vn123",
         origin: " sgn ",
         destination: "han",
-        currency: "vnd",
         aircraftRegistration: " vn-a321 ",
         isAdmin: true,
         internalStatus: "APPROVED",
@@ -342,10 +339,13 @@ test("POST /api/flights creates a normalized flight with Location header", async
   assert.equal(response.body.flightNumber, "VN123");
   assert.equal(response.body.origin, "SGN");
   assert.equal(response.body.destination, "HAN");
-  assert.equal(response.body.currency, "VND");
   assert.equal(response.body.departureAt, "2026-08-10T01:00:00.000Z");
   assert.equal(response.body.arrivalAt, "2026-08-10T03:00:00.000Z");
-  assert.equal(response.body.priceInCents, 15_000_000);
+  assert.deepEqual(response.body.fares, {
+    ECONOMY: { amount: 15_000_000, currency: "VND" },
+  });
+  assert.equal(response.body.priceInCents, undefined);
+  assert.equal(response.body.currency, undefined);
   assert.equal(response.body.availableSeats, 120);
   assert.equal(response.body.status, "SCHEDULED");
   assert.equal(response.body.aircraftId, TEST_AIRCRAFT[0]?.id);
@@ -386,6 +386,63 @@ test("POST /api/flights rejects availableSeats: capacity is no longer client-set
     ]),
     [["availableSeats", "UNSUPPORTED_FIELD"]],
   );
+});
+
+test("POST /api/flights rejects priceInCents and currency: prices are fares per class now (Day 49A)", async () => {
+  const { app } = createTestContext();
+
+  const response = await postFlight(app).send(
+    makeValidFlight({ priceInCents: 1_500_000, currency: "VND" }),
+  );
+
+  assert.equal(response.status, 422);
+  assert.deepEqual(
+    response.body.error.details.map((issue: { field: string; code: string }) => [
+      issue.field,
+      issue.code,
+    ]),
+    [
+      ["priceInCents", "UNSUPPORTED_FIELD"],
+      ["currency", "UNSUPPORTED_FIELD"],
+    ],
+  );
+});
+
+test("POST /api/flights on a two-class aircraft returns both fares; a missing or extra class is 422", async () => {
+  const { app } = createTestContext();
+
+  const missing = await postFlight(app).send(
+    makeValidFlight({ aircraftRegistration: "VN-A350", fares: { ECONOMY: 1_500_000 } }),
+  );
+  assert.equal(missing.status, 422);
+  assertValidationFailed(missing.body, "MISSING_FARE", "fares.BUSINESS");
+
+  const extra = await postFlight(app).send(
+    makeValidFlight({ fares: { ECONOMY: 1_500_000, BUSINESS: 4_200_000 } }),
+  );
+  assert.equal(extra.status, 422);
+  assertValidationFailed(extra.body, "FARE_CLASS_NOT_ON_AIRCRAFT", "fares.BUSINESS");
+
+  const created = await postFlight(app).send(
+    makeValidFlight({
+      aircraftRegistration: "VN-A350",
+      fares: { ECONOMY: 1_500_000, BUSINESS: 4_200_000 },
+    }),
+  );
+  assert.equal(created.status, 201);
+  const expected = {
+    ECONOMY: { amount: 1_500_000, currency: "VND" },
+    BUSINESS: { amount: 4_200_000, currency: "VND" },
+  };
+  assert.deepEqual(created.body.fares, expected);
+
+  const read = await request(app).get(`/api/flights/${created.body.id}`);
+  assert.deepEqual(read.body.fares, expected);
+
+  const seatMap = await request(app).get(`/api/flights/${created.body.id}/seats`);
+  assert.deepEqual(seatMap.body.fares, expected);
+  assert.equal(seatMap.body.rows[0]?.seats[0]?.fareClass, "BUSINESS");
+  assert.equal(seatMap.body.rows[2]?.seats[0]?.fareClass, "ECONOMY");
 });
 
 test("POST /api/flights names every unknown airport and aircraft at once (422)", async () => {
@@ -635,9 +692,22 @@ test("the seat map shows a held seat as HELD and no key anywhere says who holds 
   });
   // An allow-list of keys, not a check for a few forbidden ones: a field
   // added later (bookingId, ownerAccountId, passenger...) fails here.
+  // Day 49A: the fares, once per map (ECONOMY → amount, currency).
   assert.deepEqual(
     [...collectKeys(response.body)].sort(),
-    ["code", "fareClass", "flightId", "row", "rows", "seats", "status"],
+    [
+      "ECONOMY",
+      "amount",
+      "code",
+      "currency",
+      "fareClass",
+      "fares",
+      "flightId",
+      "row",
+      "rows",
+      "seats",
+      "status",
+    ],
   );
   const body = JSON.stringify(response.body);
   assert.ok(!body.includes(booking.body.id));
@@ -742,7 +812,7 @@ test("rejects empty object with missing fields", async () => {
 
   assert.equal(response.status, 422);
   assertValidationFailed(response.body);
-  assert.ok(response.body.error.details.length >= 8);
+  assert.ok(response.body.error.details.length >= 7);
 });
 
 test("rejects wrong primitive types and empty strings", async (t) => {
@@ -754,10 +824,10 @@ test("rejects wrong primitive types and empty strings", async (t) => {
       field: "flightNumber",
     },
     {
-      name: "string instead of number priceInCents",
-      override: { priceInCents: "15000000" as unknown as number },
-      code: "INVALID_PRICE",
-      field: "priceInCents",
+      name: "string instead of number fare",
+      override: { fares: { ECONOMY: "15000000" } },
+      code: "INVALID_FARE",
+      field: "fares.ECONOMY",
     },
     {
       name: "whitespace-only origin",
@@ -766,10 +836,28 @@ test("rejects wrong primitive types and empty strings", async (t) => {
       field: "origin",
     },
     {
-      name: "fractional price",
-      override: { priceInCents: 10.5 },
-      code: "INVALID_PRICE",
-      field: "priceInCents",
+      name: "fractional fare",
+      override: { fares: { ECONOMY: 10.5 } },
+      code: "INVALID_FARE",
+      field: "fares.ECONOMY",
+    },
+    {
+      name: "zero fare",
+      override: { fares: { ECONOMY: 0 } },
+      code: "INVALID_FARE",
+      field: "fares.ECONOMY",
+    },
+    {
+      name: "negative fare",
+      override: { fares: { ECONOMY: -1_500_000 } },
+      code: "INVALID_FARE",
+      field: "fares.ECONOMY",
+    },
+    {
+      name: "fare as a money object instead of a VND amount",
+      override: { fares: { ECONOMY: { amount: 1_500_000, currency: "VND" } } },
+      code: "INVALID_FARE",
+      field: "fares.ECONOMY",
     },
     {
       name: "empty aircraftRegistration",
@@ -778,10 +866,22 @@ test("rejects wrong primitive types and empty strings", async (t) => {
       field: "aircraftRegistration",
     },
     {
-      name: "unsafe integer price",
-      override: { priceInCents: Number.MAX_SAFE_INTEGER + 1 },
-      code: "INVALID_PRICE",
-      field: "priceInCents",
+      name: "unsafe integer fare",
+      override: { fares: { ECONOMY: Number.MAX_SAFE_INTEGER + 1 } },
+      code: "INVALID_FARE",
+      field: "fares.ECONOMY",
+    },
+    {
+      name: "fares as an array",
+      override: { fares: [15_000_000] as unknown as Record<string, unknown> },
+      code: "INVALID_FARES",
+      field: "fares",
+    },
+    {
+      name: "unknown fare class",
+      override: { fares: { ECONOMY: 15_000_000, FIRST: 90_000_000 } },
+      code: "INVALID_FARE_CLASS",
+      field: "fares.FIRST",
     },
   ];
 
@@ -823,11 +923,6 @@ test("rejects business invariant violations", async (t) => {
         arrivalAt: "2026-08-10T08:00:00Z",
       },
       code: "ARRIVAL_BEFORE_DEPARTURE",
-    },
-    {
-      name: "unsupported currency",
-      override: { currency: "EUR" },
-      code: "UNSUPPORTED_CURRENCY",
     },
     {
       name: "invalid airport code",
@@ -1130,6 +1225,7 @@ test("POST /api/flights records an audit log when created", async () => {
     origin: "SGN",
     destination: "HAN",
     aircraftRegistration: "VN-A321",
+    fares: "ECONOMY:15000000",
     correlationId: "audit-request-1",
   });
 });

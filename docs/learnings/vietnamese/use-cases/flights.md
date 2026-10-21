@@ -8,20 +8,27 @@
 ```json
 { "flightNumber": "VN461", "origin": "SGN", "destination": "HAN", "aircraftRegistration": "VN-A321",
   "departureAt": "2026-11-20T08:00:00+07:00", "arrivalAt": "2026-11-20T10:00:00+07:00",
-  "priceInCents": 1500000, "currency": "VND" }
+  "fares": { "ECONOMY": 1500000, "BUSINESS": 4200000 } }
 ```
+Giá là **số đồng nguyên** (không ×100), một giá mỗi hạng ghế, không gửi `currency` (chỉ VND).
+Response trả dạng `Money`: `"fares": { "ECONOMY": { "amount": 1500000, "currency": "VND" }, … }`.
 
 **Luồng:**
-1. Validate hình dạng: thiếu field, chuỗi rỗng, mã sân bay, datetime hợp lệ, giá nguyên dương,
-   currency, đến sau đi (`ARRIVAL_BEFORE_DEPARTURE`), đi ≠ đến (`ORIGIN_EQUALS_DESTINATION`).
-   `availableSeats` → `UNSUPPORTED_FIELD` (số ghế lấy từ máy bay).
+1. Validate hình dạng: thiếu field, chuỗi rỗng, mã sân bay, datetime hợp lệ, đến sau đi
+   (`ARRIVAL_BEFORE_DEPARTURE`), đi ≠ đến (`ORIGIN_EQUALS_DESTINATION`).
+   `fares` không phải object → `INVALID_FARES`; hạng lạ → `INVALID_FARE_CLASS`; giá không phải số
+   nguyên dương an toàn (kể cả gửi object `{amount, currency}`) → `INVALID_FARE`.
+   `availableSeats` (Day 46), `priceInCents`, `currency` (Day 49A) → `UNSUPPORTED_FIELD`.
 2. Tra **song song** origin, destination, aircraft; báo **mọi** tham chiếu không tồn tại cùng lúc
-   (`UNKNOWN_AIRPORT`, `UNKNOWN_AIRCRAFT`).
+   (`UNKNOWN_AIRPORT`, `UNKNOWN_AIRCRAFT`) **cùng với** lỗi giá theo máy bay (BR-FLT-09):
+   hạng có ghế mà thiếu giá → `MISSING_FARE`; giá cho hạng máy bay không có → `FARE_CLASS_NOT_ON_AIRCRAFT`.
 3. Trong transaction:
    - insert flight `SCHEDULED`;
    - **một câu SQL copy layout ghế** của máy bay vào `flight_seats` (tất cả `AVAILABLE`) — layout
      không đi qua TypeScript;
-   - audit `FLIGHT_CREATED`, outbox `flight-created`.
+   - **một câu `INSERT … unnest`** ghi giá vào `flight_fares` (Day 49A);
+   - audit `FLIGHT_CREATED` (có `fares: "ECONOMY:1500000,BUSINESS:4200000"`), outbox `flight-created`
+     (có `fares`; vẫn gửi `priceInCents` = giá ECONOMY và `currency: "VND"`, đã deprecated).
 
 **Outcome → HTTP:**
 | Outcome | HTTP |
@@ -36,6 +43,8 @@
   Insert đồng thời ra `40P01` → map sang 409, an toàn vì insert flight là câu ghi đầu tiên.
 - FK sai (race: sân bay bị xoá giữa lúc tra và lúc ghi) → `reference-not-found` → 422.
 - Ghế được **copy** (không tham chiếu) → sửa layout máy bay sau này không ảnh hưởng chuyến đã bán.
+- BR-FLT-09 do **ứng dụng** giữ: DB không khai báo được "mỗi hạng ghế phải có một dòng giá". Chưa
+  có endpoint đổi giá (chỉ psql); endpoint sau này phải giữ luật này và đi qua `UPDATE flight_fares`.
 
 ## OpenFlight — `POST /api/flights/:id/open` (admin)
 
@@ -68,15 +77,19 @@
 ## GetFlight — `GET /api/flights/:id` (public)
 
 id sai định dạng hoặc không có → 404 `FLIGHT_NOT_FOUND`. Trả `FlightView` với `status` hiệu lực,
-`origin/destination` là mã IATA, kèm `originAirportId`, `destinationAirportId`, `aircraftId`.
+`origin/destination` là mã IATA, kèm `originAirportId`, `destinationAirportId`, `aircraftId`, và
+`fares` (Day 49A; danh sách đọc giá của cả trang bằng **một** query).
 
 ## GetFlightSeatMap — `GET /api/flights/:id/seats` (public)
 
 **Code:** `api/src/flights/get-flight-seat-map.ts`
 
 ```json
-{ "flightId": "…", "rows": [ { "row": 1, "seats": [ { "code": "1A", "fareClass": "BUSINESS", "status": "HELD" } ] } ] }
+{ "flightId": "…", "fares": { "ECONOMY": { "amount": 1500000, "currency": "VND" }, "BUSINESS": { … } },
+  "rows": [ { "row": 1, "seats": [ { "code": "1A", "fareClass": "BUSINESS", "status": "HELD" } ] } ] }
 ```
+
+- `fares` **một lần** ở đầu (Day 49A), không gắn vào từng ghế: giá ghế = giá hạng của nó.
 
 - Trạng thái ghế: `AVAILABLE` / `HELD` / `BOOKED`.
 - **Không** có booking id, chủ sở hữu, tên khách — repository không select `booking_id`; test

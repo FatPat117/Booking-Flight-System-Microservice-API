@@ -100,6 +100,39 @@ test("flightCreatedConsumer processes the Day 46 shape and logs the aircraft and
   assert.equal(logged?.fields?.origin, "SGN");
 });
 
+test("flightCreatedConsumer processes the Day 49A shape and logs the fares", async () => {
+  const { logger, entries } = createMemoryLogger();
+  const handler = createFlightCreatedConsumer({ logger });
+  const fares = {
+    ECONOMY: { amount: 1_500_000, currency: "VND" },
+    BUSINESS: { amount: 4_200_000, currency: "VND" },
+  };
+
+  const result = await handler({ ...validPayload, flight: { ...day46Flight, fares } });
+
+  assert.deepEqual(result, { outcome: "processed" });
+  const logged = entries.find((entry) => entry.message === "flight_created_consumed");
+  assert.equal(logged?.fields?.fares, "ECONOMY:1500000 VND,BUSINESS:4200000 VND");
+});
+
+test("flightCreatedConsumer rejects fares that are present but malformed", async () => {
+  const { logger } = createMemoryLogger();
+  const handler = createFlightCreatedConsumer({ logger });
+
+  const cases: unknown[] = [
+    [],
+    { ECONOMY: 1_500_000 },
+    { ECONOMY: { amount: 1.5, currency: "VND" } },
+    { ECONOMY: { amount: 0, currency: "VND" } },
+    { ECONOMY: { amount: 1_500_000 } },
+  ];
+
+  for (const fares of cases) {
+    const result = await handler({ ...validPayload, flight: { ...day46Flight, fares } });
+    assert.equal(result.outcome, "rejected", JSON.stringify(fares));
+  }
+});
+
 test("flightCreatedConsumer rejects a Day 46 field that is present but empty or not a string", async () => {
   const { logger } = createMemoryLogger();
   const handler = createFlightCreatedConsumer({ logger });

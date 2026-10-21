@@ -50,6 +50,7 @@ import type {
 } from "../../src/outbox/outbox-repository.js";
 import type { TransactionRunner } from "../../src/transactions/transaction-runner.js";
 import type { Flight } from "../../src/types.js";
+import { makeSeats, TEST_AIRCRAFT } from "../fixtures/flights.js";
 
 /**
  * In-memory fakes for the unit/HTTP test tier (Day 41).
@@ -92,15 +93,21 @@ function toInstant(isoDate: string): number {
 }
 
 /**
- * The fake knows no aircraft layouts, so it creates as many seats as the
- * flight's `availableSeats` says (CreateFlight passes the aircraft's count),
- * economy rows of six, ABCDEF — the order Postgres copies the fixture
- * aircraft's layout in, so both hand out the same seat codes.
+ * The first `availableSeats` seats (CreateFlight passes the aircraft's count;
+ * a test passes fewer for a small flight, as keepFirstSeats does on
+ * Postgres) of a fixture aircraft's layout, so a two-class fixture flight has
+ * BUSINESS seats here too. For an aircraft the fixtures do not know
+ * (registered by a test), economy rows of six, ABCDEF — the same codes either
+ * way.
  */
-function generateSeats(count: number): InMemoryFlightSeat[] {
-  return Array.from({ length: count }, (_, index) => ({
-    position: { row: Math.floor(index / 6) + 1, letter: "ABCDEF"[index % 6] as string },
-    fareClass: "ECONOMY",
+function generateSeats(flight: Flight): InMemoryFlightSeat[] {
+  const layout =
+    TEST_AIRCRAFT.find((aircraft) => aircraft.id === flight.aircraftId)?.seats ??
+    makeSeats(flight.availableSeats);
+
+  return layout.slice(0, flight.availableSeats).map((seat) => ({
+    position: { ...seat.position },
+    fareClass: seat.fareClass,
     status: "AVAILABLE",
     bookingId: null,
   }));
@@ -198,7 +205,7 @@ export function createInMemoryFlightRepository(
         departureAt: new Date(flight.departureAt).toISOString(),
         arrivalAt: new Date(flight.arrivalAt).toISOString(),
       });
-      seats.set(flight.id, generateSeats(availableSeats));
+      seats.set(flight.id, generateSeats(flight));
       return { outcome: "created" };
     },
 
@@ -278,14 +285,23 @@ export function createInMemoryBookingRepository(deps: {
         picked = codes.map((code) => byCode.get(code) as InMemoryFlightSeat);
       }
 
+      // Same rule as the Postgres hold: a seat whose class has no fare is a
+      // broken BR-FLT-09 and throws, before anything is written.
+      const priced = picked.map((seat) => {
+        const price = flight.fares[seat.fareClass];
+        if (price === undefined) {
+          throw new Error(
+            `Flight ${flightId} has no ${seat.fareClass} fare for seat ${formatSeatPosition(seat.position)} (BR-FLT-09)`,
+          );
+        }
+        return { seat: formatSeatPosition(seat.position), fareClass: seat.fareClass, price };
+      });
+
       for (const seat of picked) {
         seat.status = "HELD";
         seat.bookingId = bookingId;
       }
-      return {
-        outcome: "held",
-        seats: picked.map((seat) => formatSeatPosition(seat.position)),
-      };
+      return { outcome: "held", seats: priced };
     },
 
     async create(booking) {

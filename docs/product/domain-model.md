@@ -10,7 +10,7 @@ This document describes the **target** model for phase D, not what the code does
 
 | Value object | Fields | Notes |
 |---|---|---|
-| `Money` | `amountMinor: integer`, `currency: "VND"` | Integer in the currency's smallest unit, never a float (`0.1 + 0.2 !== 0.3`). One currency today (BR-MONEY-01), but the code is stored so a second one is a data change. |
+| `Money` | `amount: integer`, `currency: "VND"` | Integer in the currency's smallest unit, never a float (`0.1 + 0.2 !== 0.3`). For VND that is whole đồng: `1 500 000` is 1.5 million đồng, never ×100 (Decision 13). One currency today (BR-MONEY-01), but the code is stored so a second one is a data change. |
 | `SeatPosition` | `row: integer ≥ 1`, `letter: "A"–"K"` | Rendered `12A`. Unique within one SeatLayout. |
 | `BookingReference` | 6 characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` | No `0/O`, `1/I` because people read it aloud (BR-BOOK-05). |
 
@@ -21,9 +21,9 @@ This document describes the **target** model for phase D, not what the code does
 | `Airport` | `id`, `code` (IATA, unique), `name`, `city`, `timeZone` (IANA name) |
 | `Aircraft` | `id`, `registration`, `model` |
 | `Seat` | `aircraftId`, `position: SeatPosition`, `fareClass` |
-| `Flight` | `id`, `flightNumber`, `originAirportId`, `destinationAirportId`, `aircraftId`, `departureAt`, `arrivalAt`, `status`, `fares: { ECONOMY: Money, BUSINESS: Money }` |
+| `Flight` | `id`, `flightNumber`, `originAirportId`, `destinationAirportId`, `aircraftId`, `departureAt`, `arrivalAt`, `status`, `fares: { ECONOMY?: Money, BUSINESS?: Money }` (exactly the classes its aircraft has seats in, BR-FLT-09) |
 | `FlightSeat` | `flightId` + `position` (composite key, no surrogate id), `fareClass`, `status`, `bookingId?` (no version column: `status` itself is the guard, ADR-004; see Decision 10) |
-| `Booking` | `id`, `reference`, `flightId`, `ownerAccountId`, `status`, `total: Money`, `holdExpiresAt`, `createdAt` |
+| `Booking` | `id`, `reference`, `flightId`, `ownerAccountId`, `status`, `total: Money` (derived: the sum of its passengers' prices, Decision 13), `holdExpiresAt`, `createdAt` |
 | `BookingPassenger` | `bookingId`, `position` (1–9, request order), `name`, `seat: SeatPosition` (a display copy; the truth is `FlightSeat.bookingId`, Decision 11), `fareClass`, `price: Money` (snapshot) |
 | `Payment` | `id`, `bookingId`, `idempotencyKey`, `requestHash`, `amount: Money`, `status`, `createdAt` |
 
@@ -52,7 +52,7 @@ An aggregate is the set of data that must be consistent **together, immediately*
 |---|---|---|
 | **Airport** | Airport | Code is 3 uppercase letters and unique (BR-REF-01); time zone is a valid IANA name (BR-REF-04) |
 | **Aircraft** | Aircraft + its Seats | Registration unique (BR-REF-02); seat positions unique, every seat has a fare class (BR-REF-03); layout is bounded (BR-REF-06) |
-| **Flight** | Flight + its FlightSeats (seat inventory) | Arrival after departure, origin ≠ destination (BR-FLT-01/02); status follows the lifecycle (BR-FLT-05); **a FlightSeat is held or booked by at most one active Booking** (BR-SEAT-01); a multi-seat hold is all-or-nothing (BR-SEAT-02) |
+| **Flight** | Flight + its FlightSeats (seat inventory) | Arrival after departure, origin ≠ destination (BR-FLT-01/02); status follows the lifecycle (BR-FLT-05); **a FlightSeat is held or booked by at most one active Booking** (BR-SEAT-01); a multi-seat hold is all-or-nothing (BR-SEAT-02); fares cover exactly the fare classes it has seats in (BR-FLT-09) |
 | **Booking** | Booking + BookingPassengers | Owned by exactly one account (BR-AUTH-01); 1–9 passengers, one distinct seat each (BR-BOOK-01/02); prices are a snapshot taken at hold time (BR-BOOK-03); status follows the lifecycle |
 | **Payment** | Payment | One idempotency key ⇒ one payment (BR-PAY-01/02); amount equals the booking total (BR-PAY-03) |
 
@@ -72,7 +72,7 @@ Until Day 46 `flights.available_seats` was the inventory. Once FlightSeats exist
 `BookingPassenger.price` and `Booking.total` are copied from the flight's fares when the hold is created. If an admin changes a fare afterwards, the customer still pays the price they were shown. That is the only defensible answer to "which price does the customer pay?", and it keeps Payment independent of later fare edits.
 
 **5. One currency (VND), stored as integer minor units.**
-VND has no subunit in practice, so `amountMinor` is whole đồng. `Money` still carries `currency`, so a second currency later means new data plus conversion rules, not a schema redesign. Multiple currencies are in [Won't](./scope.md#wont).
+VND has no subunit in practice, so the amount is whole đồng (the field is `amount` since Day 49A, Decision 13). `Money` still carries `currency`, so a second currency later means new data plus conversion rules, not a schema redesign. Multiple currencies are in [Won't](./scope.md#wont).
 
 **6. Airports get a surrogate key; the IATA code is a unique business identifier (Day 45).**
 IATA codes are short and readable, but they are reassigned when an airport closes and occasionally changed. As a primary key referenced by every flight, a changed code would mean rewriting those references. A `uuid` key never changes; `code` stays unique and is how people and the API refer to an airport. Flights reference `originAirportId`/`destinationAirportId` from phase D step 3.
@@ -128,6 +128,17 @@ A status set by a person (open, cancel) must be stored. A status that is only a 
 | Expire (job) | The due booking rows, `SKIP LOCKED` | Their seats | `(row, letter)` order, from Day 48B |
 
 Found while planning this day: until Day 48B, cancel released seats with a plain `UPDATE … WHERE booking_id = $1`, which locks them in whatever order the scan returns, not `(row, letter)`. A chosen-seat hold on `[12A, 12B]` could hold 12A and wait for 12B while a cancel of the booking holding both had locked 12B and waits for 12A: a deadlock, which Postgres resolves by failing one of them (`40P01`). Release therefore locks the seats first, `ORDER BY "flight_id", "row", "letter" FOR UPDATE`, and only then updates them; cancel and expiry share that shape (`releaseSeatsOf`). Race test E forces the interleaving with a gate transaction on 12A: a release locking 12B first deadlocked 5 rounds out of 5; the real cancel and sweep, 0. Removing the `ORDER BY` altogether is not caught today — the physical order happens to be `(row, letter)` — the same as the hold's `ORDER BY` (Day 48A): the clause is the guarantee, the plan is not.
+
+**13. Fares: a price per fare class, copied onto each passenger at hold time (Day 49A).**
+
+- **One row per fare class (`flight_fares`), not price columns on `flights`.** Primary key `(flight_id, fare_class)`, `amount_vnd bigint > 0`. Columns such as `economy_price`/`business_price` would have to be nullable for economy-only aircraft and make a third class a schema change. A row per class has the same key as `flight_seats.fare_class`, so the hold joins a seat to its price directly. Cost: reading a flight touches one more table, loaded once per page like airport codes.
+- **The classes with a price are exactly the classes with seats (BR-FLT-09).** A price for a class the aircraft lacks is a number nobody can pay; a class with seats but no price is a seat that cannot be held. Creating a flight answers `422 MISSING_FARE` or `422 FARE_CLASS_NOT_ON_AIRCRAFT`. The **application** keeps this rule, not the database: "for every distinct value in that table a row exists in this one" is not a constraint Postgres can declare, and a trigger is not worth it while one use case writes fares. CreateFlight, the contract migration (it refuses existing data that breaks the rule) and tests guard it. No endpoint changes a fare yet; one that arrives must keep the rule too.
+- **`amount` is whole đồng, never ×100.** The old column `price_in_cents` already held đồng despite its name (`1500000` was 1.5 million đồng, not 15 000). Storing hundredths would multiply every amount by 100 and invite one forgotten division. The database column is `bigint`, so a total never needs a question about overflow. In TypeScript it is a `number`, exact up to 2^53 − 1 (about 9·10^15 đồng). `pg` returns a `bigint` as a string; the adapter converts it and **throws** if the result is not a safe integer. That cannot happen with real fares, and if it ever does it must fail loudly, not become a rounded price.
+- **The price is copied inside the hold statement, with the fare rows share-locked.** The statement that claims the seats also reads the flight's fares `FOR SHARE`, and each passenger stores `fare_class` and `price_vnd`. Changing a fare is an `UPDATE flight_fares`, which needs those rows: it waits for holds in progress, and holds wait for it. So every booking carries the prices from before the change or from after it, never one class old and one new. Reading fares in an earlier query would leave a gap where the price changes between the read and the hold. The `FOR SHARE` on the flight row (Day 46) does not cover this: it conflicts with `UPDATE flights`, not with `UPDATE flight_fares`.
+- **`Booking.total` is derived, not stored.** It is the sum of the passengers' prices, which never change after the hold, so a stored total would be a second copy that could only disagree. One shared function computes it on every read; payment (49B) charges exactly that.
+- **Bookings made before Day 49A are priced at migration time, and say so.** Their passengers get the fare of their seat's class as it is when the migration runs, not the price at their hold, which was never recorded. The alternative, a null price, would make every reader and payment handle "a booking without a price" forever. Written in the migration and here; only dev data exists.
+- **No exchange rate in code.** The backfill copies `price_in_cents` into the ECONOMY fare for `VND` flights only. A `USD` flight or a BUSINESS cabin has no price that can be derived: the contract migration refuses with the list of flights and a `psql` hint, and the operator sets the fares. A rate written into a migration would be wrong the next day and would quietly price every seat with it.
+- **Event contracts grow; nothing is removed yet.** `booking-held` gains `fareClass` and `price` per passenger and a `total`. `flight-created` gains `fares` and keeps sending `priceInCents` (the ECONOMY fare, or the lowest one if there is no ECONOMY) and `currency: "VND"`, marked deprecated until no consumer reads them. The new fields are optional in the parsers, so messages already in a queue or the DLQ stay valid (expand → contract, as for events since Day 46).
 
 ### What happens to these boundaries in phase F
 
@@ -208,7 +219,7 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 
 | ID | Rule | Existing |
 |---|---|---|
-| **BR-MONEY-01** | Amounts are integers in minor units with a currency code; the only accepted currency is `VND`. | Partly — `priceInCents` integer; `VND`/`USD` both accepted |
+| **BR-MONEY-01** | Amounts are integers in minor units with a currency code; the only accepted currency is `VND`. | ✅ Day 49A: `Money { amount, currency: "VND" }` in whole đồng (`api/src/money/money.ts`); `bigint` columns capped at 2^53 − 1 by `CHECK`; `priceInCents`/`currency` rejected (`422 UNSUPPORTED_FIELD`), `USD` gone |
 | **BR-REF-01** | An airport code is exactly 3 uppercase letters and unique. | ✅ Day 45: normalized + validation, `UQ_airports_code` + `CHECK` |
 | **BR-REF-02** | An aircraft registration is unique. | ✅ Day 45: normalized, `UQ_aircraft_registration` |
 | **BR-REF-03** | Seat positions are unique within a layout, and every seat has a fare class. | ✅ Day 45: `expandSeatLayout` + `PK_seats`, fare class `CHECK` |
@@ -223,12 +234,13 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 | **BR-FLT-06** | Seats can be held only while the flight is `OPEN`; sales close **1 hour** before departure. | ✅ Day 46: condition inside the seat-hold `UPDATE` → `409 SALES_CLOSED`; reads derive `CLOSED` |
 | **BR-FLT-07** | Cancelling a flight cancels every `HELD`/`CONFIRMED` booking on it, regardless of BR-BOOK-06. | — |
 | **BR-FLT-08** | An aircraft needs at least **45 minutes** on the ground between flights (turnaround: cleaning, fuel, boarding). A flight landing at 10:00 frees the aircraft at 10:45; the window is half-open, so the next departure may be exactly 10:45. | ✅ Day 46: `flight_aircraft_occupancy()` + `AIRCRAFT_TURNAROUND_MS`, boundary pinned by the flight repository contract |
+| **BR-FLT-09** | A flight has a fare for every fare class its aircraft has seats in, and for no other class. A fare is a whole number of đồng greater than 0. | ✅ Day 49A: CreateFlight → `422 MISSING_FARE` / `FARE_CLASS_NOT_ON_AIRCRAFT`; `ContractFlightFares` refused existing data that broke it; `CHK_flight_fares_amount_positive`. Kept by the application (no declarative constraint can) |
 | **BR-SEAT-01** | A FlightSeat is held or booked by at most one active booking. | ✅ Day 47: one `booking_id` column per seat, claim via `FOR UPDATE SKIP LOCKED`; race tests A–E on Postgres. Day 48A: several seats per booking (UQ dropped), still one booking per seat |
 | **BR-SEAT-02** | Holding several seats is all-or-nothing. | ✅ Day 48A: one statement per hold, the count/availability verdict inside the `UPDATE`'s `WHERE`; half-commit test, contract on both tiers, race tests A–B |
 | **BR-SEAT-03** | A flight's FlightSeats are generated from its aircraft's layout when it is scheduled; later layout changes do not affect existing flights. | ✅ Day 47: copied in the flight's create transaction (Decision 10); existing flights backfilled |
 | **BR-BOOK-01** | A booking has **1 to 9** passengers. | ✅ Day 48A: count checked first in validation (`INVALID_PASSENGER_COUNT`), `CHK_booking_passengers_position` 1–9 |
 | **BR-BOOK-02** | Each passenger gets exactly one seat; a seat appears at most once in a booking. | ✅ Day 48A: `DUPLICATE_SEAT` in validation, `UQ_booking_passengers_seat`; one held seat per passenger |
-| **BR-BOOK-03** | Each passenger's price is the flight's fare for that seat's class at hold time; the booking total is their sum. | — |
+| **BR-BOOK-03** | Each passenger's price is the flight's fare for that seat's class at hold time; the booking total is their sum. | ✅ Day 49A: fares read `FOR SHARE` by the hold statement, `fare_class`/`price_vnd` on each passenger, `total` derived (`bookingTotal`); race tests A–C with controls. Bookings older than Day 49A priced at migration time |
 | **BR-BOOK-04** | A hold lasts **15 minutes**; an unpaid `HELD` booking then expires and releases its seats. | ✅ Day 48A: `holdExpiresAt` = now + 15 min, `CHK_bookings_hold_expiry`. Day 48B: `booking-hold-expiry-job` (60 s, batches of 50 with `SKIP LOCKED`), `idx_bookings_held_expiry`, reads derive `EXPIRED` (Decision 12); race tests A–F |
 | **BR-BOOK-05** | Each booking has a unique 6-character reference from the unambiguous alphabet. | ✅ Day 48A: `generateBookingReference` (crypto), `UQ_bookings_reference` + format `CHECK`, redraw up to 5 on `ON CONFLICT DO NOTHING`; race test D |
 | **BR-BOOK-06** | The owner cannot cancel a `CONFIRMED` booking within **24 hours** of departure. A `HELD` booking can be cancelled at any time until its hold expires (BR-BOOK-10). | Partly — `HELD` cancellable since Day 48A, until its hold expires since Day 48B (`409 BOOKING_EXPIRED`); the 24 h rule for `CONFIRMED` arrives with step 7 |
@@ -275,7 +287,7 @@ Numbers are fixed here and nowhere else. Code constants and tests reference thes
 | Airports / aircraft | ✅ Done on Day 46: `flights` reference `airports` and `aircraft` by FK; the text codes are gone (expand → backfill → contract) | — | — |
 | Flight status | ✅ Done on Day 46: stored `SCHEDULED/OPEN/CANCELLED`, `CLOSED/DEPARTED` derived (Decision 9); existing flights backfilled `OPEN` | `→ CANCELLED` with the cascade (step 9) | — |
 | Booking status | ✅ Done on Day 48A/B: `HELD/CONFIRMED/EXPIRED/CANCELLED`, legacy migrated (Decision 11); `→ EXPIRED` by the job, derived on read (Decision 12) | `→ CONFIRMED` with payment (step 6) | — |
-| Price | One `price_in_cents` per flight; `VND` or `USD` | `Money` per fare class; `VND` only; snapshot on booking | **Yes**: column rename/split; `USD` dropped |
+| Price | ✅ Done on Day 49A: `Money` per fare class (`flight_fares`), `VND` only, snapshot on each passenger, total derived (Decision 13); migrated expand → backfill → contract | — | — |
 | Booking reference | None (UUID only) | 6-char unique reference | No (additive) |
 | Payment | None | `payments` table, Idempotency-Key | No (additive) |
 | Audit actor | ✅ Done on Day 44: `account/<sub>` for flight and booking writes | — | — |
@@ -300,7 +312,9 @@ Ordered by dependency first, then by risk: each step builds only on what earlier
 | 3 | Flights reference airports/aircraft + flight lifecycle | US-FLT-01/02, BR-FLT-03/05/06 | Needs step 2. Introduces `OPEN`, which booking must check before step 5. The overlap rule (BR-FLT-03) is the first new concurrency guard. |
 | 4 | **FlightSeat inventory + seat map** | US-SEAT-01, BR-SEAT-01/03, Decision 3 | The largest model change: `available_seats` goes away. Done once flights have aircraft (step 3), and before multi-passenger booking, so that is built once on the right model instead of on the counter and then rewritten. |
 | 5 | Multi-passenger booking: reference, all-or-nothing hold, expiry job | US-BOOK-01, US-SEAT-02, BR-BOOK-01..05, BR-SEAT-02 | Needs steps 1 and 4. Highest-risk logic (multi-row OCC, the expiry job), so it gets the race tests. |
-| 6 | Simulated payment with Idempotency-Key | US-PAY-01, BR-PAY-* | Needs `HELD` (step 5). Adds the payment-vs-expiry race test. |
+| 6a | **Fares: `Money`, price per fare class, price snapshot at hold time** (Day 49A) | US-FLT-01 (prices), BR-MONEY-01, BR-BOOK-03 | Split out of step 6 on Day 49A: payment must charge an amount that is fixed when the seats are held, and there was none — one `price_in_cents` per flight, VND or USD, nothing stored on the booking. |
+| 6b | Simulated payment with Idempotency-Key (Day 49B) | US-PAY-01, BR-PAY-01..06 | Needs `HELD` (step 5) and the booking total (6a). Adds the payment-vs-expiry race test. |
+| 6c | Payment failures: timeout, unknown outcome, reconciliation (Day 49C) | BR-PAY-* | Needs 6b. The hard failure modes get their own day instead of being squeezed into the happy path. |
 | 7 | Cancellation policy + seat change | US-BOOK-05/06, BR-BOOK-06/07 | Needs `CONFIRMED` (step 6). |
 | 8 | Flight search + details with availability | US-FLT-04/05 | Read-only. Best done once availability is derived from FlightSeats (step 4) and status exists (step 3). |
 | 9 | Flight cancellation cascade | US-OPS-01, BR-FLT-07 | Touches every booking state, so it comes after all of them exist. (Automatic close/depart, US-OPS-02, needs no job since Day 46: those statuses are derived, Decision 9.) |

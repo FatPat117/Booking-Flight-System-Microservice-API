@@ -10,10 +10,13 @@ import {
 } from "./booking-validation.js";
 import type {
   Booking,
+  BookingPassenger,
   BookingRepository,
+  HeldSeat,
   HoldSeatsResult,
   SeatHoldRequest,
 } from "./booking-repository.js";
+import { bookingTotal } from "./booking-total.js";
 
 /** Replaces `booking-created` for new bookings (Decision 11). */
 export const BOOKING_HELD_QUEUE = "booking-held";
@@ -57,22 +60,23 @@ function toHoldRequest(input: CreateBookingInput): SeatHoldRequest {
 
 /**
  * Held seats come back in passenger order — request order when chosen, the
- * lowest free seats in order when auto — so pairing is by index.
+ * lowest free seats in order when auto — so pairing is by index. Each
+ * passenger takes the seat's price as held (BR-BOOK-03).
  */
 function seatPassengers(
   input: CreateBookingInput,
-  seats: readonly string[],
-): Array<{ name: string; seat: string }> {
+  seats: readonly HeldSeat[],
+): Array<BookingPassenger & HeldSeat> {
   if (seats.length !== input.passengers.length) {
     throw new Error(
       `holdSeats returned ${seats.length} seats for ${input.passengers.length} passengers`,
     );
   }
 
-  return input.passengers.map(({ name }, index) => ({
-    name,
-    seat: seats[index] as string,
-  }));
+  return input.passengers.map(({ name }, index) => {
+    const { seat, fareClass, price } = seats[index] as HeldSeat;
+    return { name, seat, fareClass, price };
+  });
 }
 
 type CreateBookingDependencies = {
@@ -169,6 +173,7 @@ export function createCreateBooking(
         flightId,
         ownerAccountId: actor.accountId,
         passengers,
+        total: bookingTotal(passengers),
         createdAt: occurredAt,
         status: "HELD",
         holdExpiresAt,
@@ -200,7 +205,8 @@ export function createCreateBooking(
           reference: booking.reference,
           passengerCount: passengers.length,
           // Metadata values are flat (AuditMetadata): "12A,12B".
-          seats: holdResult.seats.join(","),
+          seats: passengers.map(({ seat }) => seat).join(","),
+          totalVnd: booking.total.amount,
           holdExpiresAt,
           correlationId,
         },
@@ -217,7 +223,14 @@ export function createCreateBooking(
           flightId: booking.flightId,
           createdAt: booking.createdAt,
           holdExpiresAt,
-          passengers,
+          // Field by field: the event is a contract, not the domain type.
+          passengers: passengers.map(({ name, seat, fareClass, price }) => ({
+            name,
+            seat,
+            fareClass,
+            price: { amount: price.amount, currency: price.currency },
+          })),
+          total: { amount: booking.total.amount, currency: booking.total.currency },
         },
       };
 

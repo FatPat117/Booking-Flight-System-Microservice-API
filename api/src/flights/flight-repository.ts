@@ -92,6 +92,10 @@ export interface FlightRepository {
    * layout, all AVAILABLE — in the same transaction: a flight never exists
    * without its seats (Decision 10). `availableSeats` on the argument is not
    * stored either; reads count it.
+   *
+   * And its fares, one per class, in that same transaction (Decision 13).
+   * Whether they match the seats' classes (BR-FLT-09) is not checked here:
+   * CreateFlight decides that before calling.
    */
   create(flight: Flight): Promise<CreateFlightRepositoryResult>;
 

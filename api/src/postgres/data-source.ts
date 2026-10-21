@@ -31,6 +31,10 @@ import { CreateBookingPassengers1790483200000 } from "./migrations/1790483200000
 import { ContractBookingPassengers1790486800000 } from "./migrations/1790486800000-ContractBookingPassengers.js";
 import { AllowHeldSeats1790490400000 } from "./migrations/1790490400000-AllowHeldSeats.js";
 import { AddBookingHoldExpiryIndex1790494000000 } from "./migrations/1790494000000-AddBookingHoldExpiryIndex.js";
+import { CreateFlightFares1790497600000 } from "./migrations/1790497600000-CreateFlightFares.js";
+import { BackfillFlightFares1790501200000 } from "./migrations/1790501200000-BackfillFlightFares.js";
+import { ContractFlightFares1790504800000 } from "./migrations/1790504800000-ContractFlightFares.js";
+import { AddPassengerFareSnapshot1790508400000 } from "./migrations/1790508400000-AddPassengerFareSnapshot.js";
 
 /**
  * Day 36+ — dev-complete only. Entities/migrations are added per Strangler
@@ -84,6 +88,10 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
       ContractBookingPassengers1790486800000,
       AllowHeldSeats1790490400000,
       AddBookingHoldExpiryIndex1790494000000,
+      CreateFlightFares1790497600000,
+      BackfillFlightFares1790501200000,
+      ContractFlightFares1790504800000,
+      AddPassengerFareSnapshot1790508400000,
     ],
   });
 }

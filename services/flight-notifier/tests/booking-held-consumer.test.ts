@@ -83,6 +83,44 @@ test("bookingHeldConsumer processes a valid event and logs the reference, not th
   ]);
 });
 
+const pricedBooking = {
+  ...validBooking,
+  passengers: [
+    { name: "Alice", seat: "1A", fareClass: "BUSINESS", price: { amount: 4_200_000, currency: "VND" } },
+    { name: "Bob", seat: "12B", fareClass: "ECONOMY", price: { amount: 1_500_000, currency: "VND" } },
+  ],
+  total: { amount: 5_700_000, currency: "VND" },
+};
+
+test("bookingHeldConsumer processes the Day 49A shape and logs the total", async () => {
+  const { logger, entries } = createMemoryLogger();
+  const handler = createBookingHeldConsumer({ logger });
+
+  const result = await handler({ ...validPayload, booking: pricedBooking });
+
+  assert.deepEqual(result, { outcome: "processed" });
+  assert.equal(entries[0]?.fields?.total, 5_700_000);
+  assert.equal(entries[0]?.fields?.currency, "VND");
+});
+
+test("bookingHeldConsumer rejects prices that are present but malformed", async () => {
+  const { logger } = createMemoryLogger();
+  const handler = createBookingHeldConsumer({ logger });
+  const [alice, bob] = pricedBooking.passengers;
+
+  const cases: unknown[] = [
+    { ...pricedBooking, total: 5_700_000 },
+    { ...pricedBooking, total: { amount: 5.7, currency: "VND" } },
+    { ...pricedBooking, passengers: [{ ...alice, price: { amount: 4_200_000 } }, bob] },
+    { ...pricedBooking, passengers: [{ ...alice, fareClass: "" }, bob] },
+  ];
+
+  for (const booking of cases) {
+    const result = await handler({ ...validPayload, booking });
+    assert.equal(result.outcome, "rejected", JSON.stringify(booking));
+  }
+});
+
 test("bookingHeldConsumer rejects invalid payloads without throwing", async () => {
   const { logger, entries } = createMemoryLogger();
   const handler = createBookingHeldConsumer({ logger });

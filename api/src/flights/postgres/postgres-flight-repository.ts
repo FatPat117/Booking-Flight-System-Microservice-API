@@ -11,7 +11,8 @@ import {
   isInTransaction,
   resolveEntityManager,
 } from "../../postgres/transaction-context.js";
-import type { Flight } from "../../types.js";
+import { type Money, parseVndFromDatabase } from "../../money/money.js";
+import type { Flight, FlightFares } from "../../types.js";
 import {
   toStoredFlightStatus,
   type StoredFlightStatus,
@@ -25,7 +26,7 @@ import type {
   FlightSeat,
   FlightSeatStatus,
 } from "../flight-repository.js";
-import type { FareClass } from "../../aircraft/seat-layout.js";
+import { FARE_CLASSES, type FareClass } from "../../aircraft/seat-layout.js";
 import { FlightEntity } from "./flight.entity.js";
 
 /**
@@ -37,6 +38,7 @@ import { FlightEntity } from "./flight.entity.js";
 function mapFlight(
   { entity, availableSeats }: FlightRow,
   codes: ReadonlyMap<string, string>,
+  fares: ReadonlyMap<string, FlightFares>,
 ): Flight {
   const code = (airportId: string) => {
     const value = codes.get(airportId);
@@ -56,8 +58,7 @@ function mapFlight(
     aircraftId: entity.aircraftId,
     departureAt: entity.departureAt.toISOString(),
     arrivalAt: entity.arrivalAt.toISOString(),
-    priceInCents: entity.priceInCents,
-    currency: entity.currency,
+    fares: fares.get(entity.id) ?? {},
     availableSeats,
     status: toStoredFlightStatus(entity.status),
   };
@@ -98,7 +99,32 @@ async function loadFlightRows(
   });
 }
 
-/** One query for every airport code a page of flights needs. */
+/**
+ * One query for the fares of every flight on a page. `amount_vnd` is a
+ * bigint, which `pg` returns as a string: parsed here, loudly (Decision 13).
+ */
+async function loadFares(
+  manager: EntityManager,
+  flightIds: readonly string[],
+): Promise<Map<string, FlightFares>> {
+  const rows = (await manager.query(
+    `SELECT "flight_id", "fare_class", "amount_vnd" FROM "flight_fares"
+     WHERE "flight_id" = ANY($1::uuid[])`,
+    [flightIds],
+  )) as Array<{ flight_id: string; fare_class: string; amount_vnd: string }>;
+
+  const fares = new Map<string, Partial<Record<FareClass, Money>>>();
+  for (const row of rows) {
+    const flightFares = fares.get(row.flight_id) ?? {};
+    // CHK_flight_fares_fare_class guarantees the value set.
+    flightFares[row.fare_class as FareClass] = parseVndFromDatabase(row.amount_vnd);
+    fares.set(row.flight_id, flightFares);
+  }
+
+  return fares;
+}
+
+/** One query for every airport code and one for every fare a page needs. */
 async function mapFlights(
   manager: EntityManager,
   rows: FlightRow[],
@@ -120,8 +146,12 @@ async function mapFlights(
     .getRepository(AirportEntity)
     .find({ where: { id: In(airportIds) }, select: { id: true, code: true } });
   const codes = new Map(airports.map((airport) => [airport.id, airport.code]));
+  const fares = await loadFares(
+    manager,
+    rows.map(({ entity }) => entity.id),
+  );
 
-  return rows.map((row) => mapFlight(row, codes));
+  return rows.map((row) => mapFlight(row, codes, fares));
 }
 
 async function insertFlight(
@@ -137,8 +167,6 @@ async function insertFlight(
       aircraftId: flight.aircraftId,
       departureAt: new Date(flight.departureAt),
       arrivalAt: new Date(flight.arrivalAt),
-      priceInCents: flight.priceInCents,
-      currency: flight.currency,
       status: flight.status,
     });
   } catch (error) {
@@ -180,6 +208,22 @@ async function insertFlight(
      SELECT $1, "row", "letter", "fare_class", 'AVAILABLE'
      FROM "seats" WHERE "aircraft_id" = $2`,
     [flight.id, flight.aircraftId],
+  );
+
+  // Rows of this new flight only, like its seats above. Which classes they
+  // cover (BR-FLT-09) is the use case's rule, not the repository's.
+  const fareClasses = FARE_CLASSES.filter(
+    (fareClass) => flight.fares[fareClass] !== undefined,
+  );
+  await manager.query(
+    `INSERT INTO "flight_fares" ("flight_id", "fare_class", "amount_vnd")
+     SELECT $1, fare.fare_class, fare.amount_vnd
+     FROM unnest($2::text[], $3::bigint[]) AS fare(fare_class, amount_vnd)`,
+    [
+      flight.id,
+      fareClasses,
+      fareClasses.map((fareClass) => flight.fares[fareClass]?.amount),
+    ],
   );
 
   return { outcome: "created" };

@@ -89,3 +89,17 @@ Quan trọng: câu huỷ **tự kiểm hạn**, không dựa vào việc job đ�
 `UPDATE … WHERE booking_id` — thứ tự quét. Tôi tái hiện bằng một transaction "cổng" giữ 12A: hold
 xếp hàng trước, release tới sau → nhả ngược thứ tự deadlock 5/5. Sửa: CTE khoá trước có
 `ORDER BY flight_id, row, letter FOR UPDATE`, dùng chung cho huỷ và hết hạn → 0 deadlock.
+
+### 13. Giá đổi đúng lúc khách đang giữ ghế thì sao? (Day 49A)
+
+**Trả lời:** Khách trả giá **lúc giữ ghế**: mỗi hành khách chép giá hạng ghế của mình, tổng suy ra
+từ đó. Giá được đọc **trong chính câu giữ ghế**, khoá dòng giá `FOR SHARE`:
+- một câu lệnh → mọi ghế một booking lấy giá từ một snapshot, không bao giờ BUSINESS giá cũ +
+  ECONOMY giá mới;
+- `FOR SHARE` → đổi giá (`UPDATE flight_fares`) phải chờ hold đang mở, và hold gặp lần đổi giá chưa
+  commit thì chờ rồi đọc giá mới. Không có khoá thì một booking có thể commit **sau** khi giá mới
+  có hiệu lực mà vẫn mang giá cũ — race test đối chứng chứng minh điều đó.
+**Điểm cộng khi kể:** một CTE `SELECT … FOR SHARE` mà không ai đọc thì Postgres **không chạy** nó →
+không có khoá, mà giá trả về vẫn đúng. Mutation "lấy giá bằng subquery thay vì JOIN CTE" chỉ race
+test bắt được. Và test "không bao giờ trộn giá" **vẫn xanh khi bỏ khoá** — nên tôi không dùng nó để
+chứng minh khoá; test chứng minh là test có một bên phải **chờ**.

@@ -43,8 +43,7 @@ function makeRawInput(overrides: Record<string, unknown> = {}) {
     aircraftRegistration: "ZZ-FX1",
     departureAt: "2026-08-10T08:00:00+07:00",
     arrivalAt: "2026-08-10T10:00:00+07:00",
-    priceInCents: 15_000_000,
-    currency: "VND",
+    fares: { ECONOMY: 15_000_000 },
     ...overrides,
   };
 }
@@ -137,7 +136,7 @@ test("duplicate: second create with the same flightNumber+departureAt resolves d
   assert.equal(outboxRows.length, 1);
 });
 
-test("a 176-seat aircraft gives its flight exactly 176 flight_seats with the same fare-class split", async () => {
+test("a 176-seat aircraft gives its flight exactly 176 flight_seats with the same fare-class split, and one fare per class", async () => {
   const aircraftRepository = createPostgresAircraftRepository(dataSource);
   if ((await aircraftRepository.findByRegistration("ZZ-176")) === undefined) {
     const layout = expandSeatLayout({
@@ -157,7 +156,10 @@ test("a 176-seat aircraft gives its flight exactly 176 flight_seats with the sam
   }
 
   const result = await createUseCase()(
-    makeRawInput({ aircraftRegistration: "ZZ-176" }),
+    makeRawInput({
+      aircraftRegistration: "ZZ-176",
+      fares: { ECONOMY: 1_500_000, BUSINESS: 4_200_000 },
+    }),
     ADMIN_ACTOR,
   );
 
@@ -179,6 +181,16 @@ test("a 176-seat aircraft gives its flight exactly 176 flight_seats with the sam
     { fare_class: "BUSINESS", seats: 8, free: 8 },
     { fare_class: "ECONOMY", seats: 168, free: 168 },
   ]);
+
+  const fares = await dataSource.query(
+    `SELECT "fare_class", "amount_vnd" FROM "flight_fares"
+     WHERE "flight_id" = $1 ORDER BY "fare_class"`,
+    [result.flight.id],
+  );
+  assert.deepEqual(fares, [
+    { fare_class: "BUSINESS", amount_vnd: "4200000" },
+    { fare_class: "ECONOMY", amount_vnd: "1500000" },
+  ]);
 });
 
 test("a failing seat insert rolls back the flight, its audit row and its outbox row", async () => {
@@ -197,11 +209,12 @@ test("a failing seat insert rolls back the flight, its audit row and its outbox 
   const [counts] = (await dataSource.query(
     `SELECT (SELECT count(*) FROM "flights")::int AS flights,
             (SELECT count(*) FROM "flight_seats")::int AS seats,
+            (SELECT count(*) FROM "flight_fares")::int AS fares,
             (SELECT count(*) FROM "audit_logs")::int AS audit,
             (SELECT count(*) FROM "outbox")::int AS outbox`,
-  )) as { flights: number; seats: number; audit: number; outbox: number }[];
+  )) as { flights: number; seats: number; fares: number; audit: number; outbox: number }[];
 
-  assert.deepEqual(counts, { flights: 0, seats: 0, audit: 0, outbox: 0 });
+  assert.deepEqual(counts, { flights: 0, seats: 0, fares: 0, audit: 0, outbox: 0 });
 });
 
 test("mid-transaction failure: an error after the audit write rolls back flights, audit_logs, and outbox together", async () => {

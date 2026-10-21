@@ -1,4 +1,6 @@
+import type { FareClass } from "../aircraft/seat-layout.js";
 import type { SeatPosition } from "../aircraft/seat-position.js";
+import type { Money } from "../money/money.js";
 
 /** domain-model "Lifecycles → Booking" (Decision 11). */
 export type BookingStatus = "HELD" | "CONFIRMED" | "CANCELLED" | "EXPIRED";
@@ -12,6 +14,13 @@ export type BookingPassenger = Readonly<{
    * only for a legacy booking cancelled before Day 48A.
    */
   seat: string | null;
+  /**
+   * The seat's fare class and that class's fare when the seats were held
+   * (BR-BOOK-03, Decision 13) — never re-read from the flight, so a later
+   * fare change does not reach this booking. Null exactly when `seat` is.
+   */
+  fareClass: FareClass | null;
+  price: Money | null;
 }>;
 
 export type Booking = Readonly<{
@@ -23,6 +32,11 @@ export type Booking = Readonly<{
   ownerAccountId: string;
   /** In request order: position 1 first. 1–9 (BR-BOOK-01). */
   passengers: readonly BookingPassenger[];
+  /**
+   * Derived, never stored: the sum of the passengers' prices (bookingTotal).
+   * Those never change after the hold, so neither does this.
+   */
+  total: Money;
   createdAt: string;
   status: BookingStatus;
   /** Required while HELD; kept afterwards as history; null for legacy bookings. */
@@ -61,9 +75,19 @@ export type SeatHoldRequest =
   | Readonly<{ kind: "chosen"; seats: readonly SeatPosition[] }>;
 
 /**
+ * A seat the hold took, with the price it was taken at: its fare class's
+ * fare, read in the same statement that held it (Decision 13).
+ */
+export type HeldSeat = Readonly<{
+  seat: string;
+  fareClass: FareClass;
+  price: Money;
+}>;
+
+/**
  * All or nothing (BR-SEAT-02): every outcome but `held` wrote nothing.
- * - held: seat codes, one per passenger — `auto` in (row, letter) order,
- *   `chosen` in the request's order.
+ * - held: one seat per passenger — `auto` in (row, letter) order,
+ *   `chosen` in the request's order — each with its price.
  * - not-enough-seats (auto): fewer AVAILABLE seats than requested that this
  *   caller could take.
  * - seats-unavailable (chosen): these requested seats are held or booked;
@@ -72,7 +96,7 @@ export type SeatHoldRequest =
  * - sales-closed: the flight is not effectively OPEN at `now` (BR-FLT-06).
  */
 export type HoldSeatsResult =
-  | { outcome: "held"; seats: string[] }
+  | { outcome: "held"; seats: HeldSeat[] }
   | { outcome: "not-enough-seats" }
   | { outcome: "seats-unavailable"; seats: string[] }
   | { outcome: "unknown-seats"; seats: string[] }
@@ -135,6 +159,12 @@ export type BookingRepository = Readonly<{
    * Called before create(booking): the booking id is generated first and
    * the seats point at it; the storage must accept that order within one
    * transaction (Decision 10).
+   *
+   * Prices (BR-BOOK-03): each held seat's fare is read by the same statement
+   * that holds it, with the flight's fares share-locked, so a concurrent
+   * fare change either waits for this hold or is seen whole by it — never
+   * one class old and one new. A held seat whose class has no fare breaks
+   * BR-FLT-09 and throws: it must not pass as free or as `not-enough-seats`.
    */
   holdSeats(
     flightId: string,
@@ -143,7 +173,8 @@ export type BookingRepository = Readonly<{
     now: Date,
   ): Promise<HoldSeatsResult>;
   /**
-   * Store the booking and its passengers, atomically. A taken reference is
+   * Store the booking and its passengers with their prices, atomically
+   * (`total` is not stored: reads derive it). A taken reference is
    * an expected outcome, not an error: it must leave the transaction usable
    * (on Postgres a failed statement would abort it, together with the seats
    * already claimed in it).

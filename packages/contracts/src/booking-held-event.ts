@@ -3,7 +3,24 @@
  * Decision 11). Not "booking confirmed": the hold may expire. Replaces
  * `booking.created` for new bookings; `booking-confirmed` is reserved for
  * payment.
+ *
+ * Day 49A added each passenger's `fareClass` and `price` and the booking's
+ * `total` (BR-BOOK-03). The producer always sends them; they are optional
+ * here because Day 48A messages may still sit in the queue or the DLQ.
  */
+export type BookingHeldMoney = {
+  /** Integer in the currency's smallest unit — whole đồng for VND. */
+  amount: number;
+  currency: string;
+};
+
+export type BookingHeldPassenger = {
+  name: string;
+  seat: string;
+  fareClass?: string;
+  price?: BookingHeldMoney;
+};
+
 export type BookingHeldEvent = {
   eventId: string;
   correlationId: string;
@@ -16,9 +33,25 @@ export type BookingHeldEvent = {
     createdAt: string;
     holdExpiresAt: string;
     /** In booking order, 1 to 9; each with the seat code held for them. */
-    passengers: Array<{ name: string; seat: string }>;
+    passengers: BookingHeldPassenger[];
+    /** The sum of the passengers' prices; absent before Day 49A. */
+    total?: BookingHeldMoney;
   };
 };
+
+function isMoney(value: unknown): value is BookingHeldMoney {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.amount === "number" &&
+    Number.isSafeInteger(record.amount) &&
+    record.amount >= 0 &&
+    typeof record.currency === "string" &&
+    record.currency.length > 0
+  );
+}
 
 export function parseBookingHeldEvent(
   payload: unknown,
@@ -76,7 +109,7 @@ export function parseBookingHeldEvent(
     return { ok: false, reason: "booking.passengers must be a non-empty array" };
   }
 
-  const passengers: Array<{ name: string; seat: string }> = [];
+  const passengers: BookingHeldPassenger[] = [];
 
   for (const [index, value] of booking.passengers.entries()) {
     const passenger = (value ?? {}) as Record<string, unknown>;
@@ -91,7 +124,38 @@ export function parseBookingHeldEvent(
         reason: `booking.passengers[${index}] must have a non-empty name and seat`,
       };
     }
-    passengers.push({ name: passenger.name, seat: passenger.seat });
+    // Absent is the Day 48A shape and fine; present but malformed is a
+    // broken producer.
+    const { fareClass, price } = passenger;
+    if (
+      fareClass !== undefined &&
+      (typeof fareClass !== "string" || fareClass.length === 0)
+    ) {
+      return {
+        ok: false,
+        reason: `booking.passengers[${index}].fareClass must be a non-empty string when present`,
+      };
+    }
+    if (price !== undefined && !isMoney(price)) {
+      return {
+        ok: false,
+        reason: `booking.passengers[${index}].price must have an integer amount and a currency when present`,
+      };
+    }
+    passengers.push({
+      name: passenger.name,
+      seat: passenger.seat,
+      ...(fareClass === undefined ? {} : { fareClass }),
+      ...(price === undefined ? {} : { price: { amount: price.amount, currency: price.currency } }),
+    });
+  }
+
+  const total = booking.total;
+  if (total !== undefined && !isMoney(total)) {
+    return {
+      ok: false,
+      reason: "booking.total must have an integer amount and a currency when present",
+    };
   }
 
   return {
@@ -108,6 +172,9 @@ export function parseBookingHeldEvent(
         createdAt: booking.createdAt as string,
         holdExpiresAt: booking.holdExpiresAt as string,
         passengers,
+        ...(total === undefined
+          ? {}
+          : { total: { amount: total.amount, currency: total.currency } }),
       },
     },
   };

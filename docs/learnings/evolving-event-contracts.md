@@ -15,6 +15,8 @@ The same expand → contract idea as a database migration, applied to a message:
 
 Tests: a pre-Day-46 payload is still `processed`; the Day 46 payload logs the new fields; a present-but-empty field is `rejected`.
 
+**Day 49A, the second round.** `flight-created` gained `fares` and `booking-held` gained each passenger's `fareClass`/`price` and a `total` — optional, validated when present, the same way. New this time: an old field whose *meaning* the domain dropped. `priceInCents`/`currency` no longer exist on `Flight`, but the deployed consumer still requires them, so the producer keeps sending a derived value (the ECONOMY fare, else the lowest; `"VND"`) marked `@deprecated` in the type. Removing it is the contract step: first the parser stops requiring it, then, once no consumer reads it and no old message is left, the producer stops sending it.
+
 ## Trade-offs / when NOT to use
 
 - Optional fields push "is it there?" checks into every consumer until the contract step.

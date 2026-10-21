@@ -18,7 +18,7 @@ import { isDeadlockDetected } from "../../src/postgres/postgres-errors.js";
 import { resolveEntityManager } from "../../src/postgres/transaction-context.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import { nextBookingReference } from "../fixtures/bookings.js";
-import { makeFlight } from "../fixtures/flights.js";
+import { FIXTURE_FARES, makeFlight } from "../fixtures/flights.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
 /**
@@ -257,7 +257,15 @@ function createRepositoryLockingInRequestOrder(
            AND ("row", "letter"::text) IN (SELECT * FROM unnest($3::int[], $4::text[]))`,
         [flightId, bookingId, request.seats.map((s) => s.row), request.seats.map((s) => s.letter)],
       );
-      return { outcome: "held", seats: codes };
+      // About lock order only: priced at the economy-only fixture's fare.
+      return {
+        outcome: "held",
+        seats: codes.map((seat) => ({
+          seat,
+          fareClass: "ECONOMY",
+          price: FIXTURE_FARES.ECONOMY,
+        })),
+      };
     },
   };
 }

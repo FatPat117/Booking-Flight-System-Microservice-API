@@ -1,4 +1,13 @@
+import type { FareClass } from "./aircraft/seat-layout.js";
 import type { StoredFlightStatus } from "./flights/flight-lifecycle.js";
+import type { Money } from "./money/money.js";
+
+/**
+ * A flight's price per fare class (Decision 13). Exactly the classes its
+ * aircraft has seats in (BR-FLT-09) — CreateFlight keeps that, so readers
+ * may treat a missing class as "no such cabin", never "free".
+ */
+export type FlightFares = Readonly<Partial<Record<FareClass, Money>>>;
 
 /**
  * Since Day 46 a flight references airports and an aircraft by id
@@ -19,8 +28,7 @@ export type Flight = {
   aircraftId: string;
   departureAt: string;
   arrivalAt: string;
-  priceInCents: number;
-  currency: string;
+  fares: FlightFares;
   /** Derived: the flight's AVAILABLE seats, counted on read (Day 47). */
   availableSeats: number;
   status: StoredFlightStatus;
@@ -30,7 +38,9 @@ export type Flight = {
  * Trusted create payload after validation — not derived from stored Flight.
  * Airports by IATA code and the aircraft by registration (both normalized);
  * the use case resolves them to ids. No availableSeats: it comes from the
- * aircraft's layout.
+ * aircraft's layout. `fares` is well-formed here; whether its classes match
+ * the aircraft's (BR-FLT-09) is the use case's check, once the aircraft is
+ * known.
  */
 export type CreateFlightInput = {
   flightNumber: string;
@@ -39,8 +49,7 @@ export type CreateFlightInput = {
   aircraftRegistration: string;
   departureAt: string;
   arrivalAt: string;
-  priceInCents: number;
-  currency: string;
+  fares: FlightFares;
 };
 
 /**

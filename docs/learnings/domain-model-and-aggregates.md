@@ -28,7 +28,7 @@ Rule of thumb: if two people would argue about what a word means, it is two conc
 ### 2. Entity vs value object
 
 - **Entity**: has an identity that stays the same while its data changes. A Booking is still *that* booking after it moves from `HELD` to `CONFIRMED`.
-- **Value object**: no identity, only a value. Two `Money { amountMinor: 1500000, currency: "VND" }` are interchangeable. You replace a value object; you never edit it in place.
+- **Value object**: no identity, only a value. Two `Money { amount: 1500000, currency: "VND" }` are interchangeable. You replace a value object; you never edit it in place.
 
 Value objects carry rules with them. `Money` as an integer in minor units plus a currency code is the rule "never use floats for money" (`0.1 + 0.2 === 0.30000000000000004`), made impossible to forget.
 

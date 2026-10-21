@@ -6,16 +6,25 @@ import type {
   Booking,
   BookingAccessScope,
   BookingRepository,
+  HeldSeat,
   HoldSeatsResult,
   SeatHoldRequest,
 } from "../../src/bookings/booking-repository.js";
+import { bookingTotal } from "../../src/bookings/booking-total.js";
+import { vnd } from "../../src/money/money.js";
 import type { Flight } from "../../src/types.js";
 import {
   FIXTURE_ACCOUNT_A as ACCOUNT_A,
   FIXTURE_ACCOUNT_B as ACCOUNT_B,
   makeBooking as makeFixtureBooking,
+  passengersFor,
 } from "../fixtures/bookings.js";
-import { FIXTURE_OTHER_AIRCRAFT_ID, makeFlight } from "../fixtures/flights.js";
+import {
+  FIXTURE_FARES,
+  FIXTURE_OTHER_AIRCRAFT_ID,
+  FIXTURE_TWO_CLASS_AIRCRAFT_ID,
+  makeFlight,
+} from "../fixtures/flights.js";
 
 /**
  * What every BookingRepository promises, run against every implementation
@@ -119,19 +128,34 @@ export function runBookingRepositoryContract(
     const booking = makeBooking(flight.id, ownerAccountId, createdAt);
     const held = await book(subject, booking);
     assert.equal(held.outcome, "held");
-    return withSeats(booking, ["1A"]);
+    return withSeats(booking, economy("1A"));
   }
 
-  /** The held seats copied onto the passengers, one each, in order. */
-  function withSeats(booking: Booking, seats: readonly string[]): Booking {
-    return {
-      ...booking,
-      passengers: seats.map((seat, index) => ({
-        name: booking.passengers[index]?.name ?? `Passenger ${index + 1}`,
-        seat,
-      })),
-    };
+  /**
+   * The held seats copied onto the passengers, one each, in order, with
+   * their prices — and the total those make (CreateBooking's pairing).
+   */
+  function withSeats(booking: Booking, held: readonly HeldSeat[]): Booking {
+    const passengers = passengersFor(
+      held,
+      booking.passengers.map(({ name }) => name),
+    );
+    return { ...booking, passengers, total: bookingTotal(passengers) };
   }
+
+  /** Seats of the economy-only fixture aircraft, at the fixture fare. */
+  function economy(...codes: string[]): HeldSeat[] {
+    return codes.map((seat) => ({
+      seat,
+      fareClass: "ECONOMY",
+      price: FIXTURE_FARES.ECONOMY,
+    }));
+  }
+
+  /** A hold's result with seat codes only — what most cases compare. */
+  type HoldCodes =
+    | Exclude<HoldSeatsResult, { outcome: "held" }>
+    | { outcome: "held"; seats: string[] };
 
   function chosen(...codes: string[]): SeatHoldRequest {
     return {
@@ -148,11 +172,23 @@ export function runBookingRepositoryContract(
    * Seats first, then the booking they point at, in one transaction —
    * CreateBooking's order. The booking is stored only if its seats were
    * held, with them copied onto its passengers. Default: one auto seat.
+   * Returns the seat codes; holdPriced keeps the prices.
    */
-  function book(
+  async function book(
     subject: BookingRepositoryContractSubject,
     booking: Booking,
     request: SeatHoldRequest = { kind: "auto", count: 1 },
+  ): Promise<HoldCodes> {
+    const held = await holdPriced(subject, booking, request);
+    return held.outcome === "held"
+      ? { outcome: "held", seats: held.seats.map(({ seat }) => seat) }
+      : held;
+  }
+
+  function holdPriced(
+    subject: BookingRepositoryContractSubject,
+    booking: Booking,
+    request: SeatHoldRequest,
   ): Promise<HoldSeatsResult> {
     return subject.transaction(async () => {
       const held = await subject.repository.holdSeats(booking.flightId, booking.id, request, NOW);
@@ -404,8 +440,76 @@ export function runBookingRepositoryContract(
     const stored = await subject.repository.findById(booking.id, ADMIN);
 
     assert.deepEqual(stored, booking);
-    assert.deepEqual(stored?.passengers, [{ name: "Alice", seat: "1A" }]);
+    assert.deepEqual(stored?.passengers, [
+      { name: "Alice", seat: "1A", fareClass: "ECONOMY", price: FIXTURE_FARES.ECONOMY },
+    ]);
+    assert.deepEqual(stored?.total, FIXTURE_FARES.ECONOMY);
     assert.equal(stored?.holdExpiresAt, "2026-07-20T00:15:00.000Z");
+  });
+
+  // ---- Day 49A: the price is the seat's class fare at hold time (BR-BOOK-03) ----
+
+  test(name("a hold prices each seat at its class's fare, and the booking's total is their sum"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 30, {
+      aircraftId: FIXTURE_TWO_CLASS_AIRCRAFT_ID,
+    });
+    const booking = makeFixtureBooking({
+      flightId: flight.id,
+      passengers: ["Alice", "Bob", "Carol"].map((name) => ({
+        name,
+        seat: null,
+        fareClass: null,
+        price: null,
+      })),
+    });
+
+    // 3A is the first ECONOMY row (rows 1–2 are BUSINESS).
+    const held = await holdPriced(subject, booking, chosen("1A", "3A", "2F"));
+
+    assert.deepEqual(held, {
+      outcome: "held",
+      seats: [
+        { seat: "1A", fareClass: "BUSINESS", price: FIXTURE_FARES.BUSINESS },
+        { seat: "3A", fareClass: "ECONOMY", price: FIXTURE_FARES.ECONOMY },
+        { seat: "2F", fareClass: "BUSINESS", price: FIXTURE_FARES.BUSINESS },
+      ],
+    });
+    const stored = await subject.repository.findById(booking.id, ADMIN);
+    assert.deepEqual(
+      stored?.passengers.map(({ name, seat, price }) => `${name} ${seat} ${price?.amount}`),
+      ["Alice 1A 4200000", "Bob 3A 1500000", "Carol 2F 4200000"],
+    );
+    assert.deepEqual(stored?.total, vnd(9_900_000));
+  });
+
+  test(name("an auto hold prices its seats front to back, and prices read back as exact numbers"), async () => {
+    const subject = await setup();
+    // 2^52 − 1: far past 32 bits, and two of them still sum exactly.
+    const big = 2 ** 52 - 1;
+    const flight = await seedFlight(subject, 30, {
+      aircraftId: FIXTURE_TWO_CLASS_AIRCRAFT_ID,
+      fares: { ECONOMY: vnd(1_500_000), BUSINESS: vnd(big) },
+    });
+    const booking = makeFixtureBooking({
+      flightId: flight.id,
+      passengers: ["Alice", "Bob"].map((name) => ({ name, seat: null, fareClass: null, price: null })),
+    });
+
+    const held = await holdPriced(subject, booking, { kind: "auto", count: 2 });
+    assert.equal(held.outcome, "held");
+
+    const stored = await subject.repository.findById(booking.id, ADMIN);
+    // bigint comes from pg as a string; the adapter must hand back exact numbers.
+    assert.equal(typeof stored?.passengers[0]?.price?.amount, "number");
+    assert.deepEqual(
+      stored?.passengers.map(({ seat, price }) => [seat, price?.amount]),
+      [
+        ["1A", big],
+        ["1B", big],
+      ],
+    );
+    assert.deepEqual(stored?.total, vnd(2 * big));
   });
 
   test(name("a cancelled booking reads CANCELLED and keeps its passengers' seat copy (the seat itself is released)"), async () => {
@@ -653,7 +757,7 @@ export function runBookingRepositoryContract(
     );
     // The booking keeps its passengers' seat copy, like a cancelled one.
     assert.deepEqual(await subject.repository.findById(due.id, ADMIN), {
-      ...withSeats(due, ["2B", "1C", "2A"]),
+      ...withSeats(due, economy("2B", "1C", "2A")),
       status: "EXPIRED",
     });
     assert.deepEqual(

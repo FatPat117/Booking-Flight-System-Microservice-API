@@ -211,3 +211,50 @@ tests fail with `40P01`; the boundary moved (`<` for the sweep, `>=` for cancel)
 contract fails at the exact instant. **Not caught:** removing the release `ORDER BY` altogether —
 the physical order is `(row, letter)` today. As for the hold (Day 48A), the clause is the
 guarantee, the plan is not.
+
+## Addendum (Day 49A): the price snapshot — the hold share-locks the fare rows
+
+A hold now copies each seat's fare onto its passenger (domain-model Decision 13, BR-BOOK-03).
+Fares are rows of `flight_fares (flight_id, fare_class)`; changing one is an `UPDATE` of that row.
+
+**The fares are read by the hold statement itself, `FOR SHARE`.** Both hold statements (system-picked
+and chosen) carry a CTE `fares AS (SELECT fare_class, amount_vnd FROM flight_fares WHERE flight_id
+= $1 FOR SHARE)` and join each held seat to it. Two consequences:
+
+- A fare change that starts while a hold's transaction is open waits for that transaction. The
+  booking commits first, at the old fare: a serial order (hold, then change).
+- A hold that reaches a fare row another transaction changed but has not committed waits for it;
+  under READ COMMITTED it then reads the row's committed version, so it takes the new fares — for
+  every class, from one version.
+
+Without the lock a hold reads its statement snapshot and neither waits nor makes anyone wait: a
+booking can then commit *after* a fare change with the old fare. Share locks do not conflict with
+each other, so concurrent holds on one flight do not queue on its fares. The `FOR SHARE OF flight`
+from Day 46 does not cover this: it conflicts with `UPDATE flights`, not `UPDATE flight_fares`.
+
+**A plain-SELECT CTE runs only if the query reads it.** Declaring the `fares` CTE and taking the
+price from somewhere else (a scalar subquery on `flight_fares`) silently drops the lock — the
+statement still returns the right price in a quiet database. The join is what makes the lock happen.
+
+**A seat whose class has no fare throws** (BR-FLT-09 broken): the hold rolls back loudly instead of
+answering `not-enough-seats` or holding a seat without a price.
+
+Measured (race file `postgres-fare-snapshot.integration.test.ts`, 10 runs in a row, all green):
+
+| Test | Scenario | Result |
+| --- | --- | --- |
+| A | fare change after the hold | booking keeps 4.2M + 1.5M = 5.7M; next booking 5M + 2M = 7M |
+| A | a BUSINESS fare deleted by hand | hold throws `… no BUSINESS fare for seat 1A (BR-FLT-09)`, nothing held or stored |
+| B1 | hold [1A, 3A] during an uncommitted change (gate) | waits; new fares for both classes |
+| B1 (auto) | system-picked hold of 2, same gate | waits; 5M + 5M |
+| B1 control | the same statement without `FOR SHARE` | does not wait; old fares |
+| B2 | fare change during a hold's open transaction (paused at the audit write) | the change waits; booking commits first at the old fare |
+| B2 control | without `FOR SHARE` | the change commits mid-hold; the booking commits after it with the old fare |
+| C | 20 rounds, two holds racing a change (staggered 0–20 ms) | never mixed versions; per run 32–38 old / 2–8 new of 40 |
+
+Mutations: `FOR SHARE` removed → B1 and B2 fail; the chosen statement reads the fare through a
+scalar subquery instead of the CTE → B1 and B2 fail (the CTE never runs); the same in the auto
+statement → B1 (auto) fails; the missing-fare check disabled → A (missing fare) fails;
+`parseVndFromDatabase` ×100 → the Money unit test and 8 integration tests fail. **What C does not
+prove:** one statement already reads all fares from one snapshot, so C passes without the lock
+too. It guards the shape — a refactor that reads fares per seat in separate queries could mix.

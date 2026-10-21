@@ -318,7 +318,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A321\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"VN-A321\"\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "201 Created + Location header. Auth: Authorization Bearer {{accessToken}} with role=admin.\nDay 46: origin/destination are registered IATA codes and aircraftRegistration a registered aircraft (run the seed); the flight starts SCHEDULED — open it before booking.\nDay 47: availableSeats = the aircraft's seat count (VN-A321: 176); the flight gets its own copy of the seats.\nDay 29: wait ~5s then grep {{requestId}} in flight-notifier for flight_created_consumed."
@@ -341,7 +341,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A321\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"VN-A321\"\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "Run after a successful create with the same payload. Expect 409 FLIGHT_ALREADY_EXISTS."
@@ -1046,7 +1046,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN461\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN461\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "US-FLT-01. Airports by IATA code, aircraft by registration. Seats come from the aircraft layout; the flight starts SCHEDULED (not bookable yet)."
@@ -1086,7 +1086,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN462\",\n  \"origin\": \"HAN\",\n  \"destination\": \"SGN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T10:30:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T12:30:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN462\",\n  \"origin\": \"HAN\",\n  \"destination\": \"SGN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T10:30:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T12:30:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "BR-FLT-03/08: the aircraft is busy until arrival + 45 min. Decided by the EXCL_flights_aircraft_schedule exclusion constraint, so two admins racing cannot both win."
@@ -1121,7 +1121,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN462\",\n  \"origin\": \"HAN\",\n  \"destination\": \"SGN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T10:45:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T12:45:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN462\",\n  \"origin\": \"HAN\",\n  \"destination\": \"SGN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T10:45:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T12:45:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "The occupancy window is half-open, [departure, arrival + 45 min): the boundary itself is free. This flight is left SCHEDULED for the SALES_CLOSED request below."
@@ -1156,7 +1156,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN463\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-11-21T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-21T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\",\n  \"availableSeats\": 300\n}"
+              "raw": "{\n  \"flightNumber\": \"VN463\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-11-21T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-21T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"availableSeats\": 300\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "Capacity is no longer client-set. Rejected loudly (UNSUPPORTED_FIELD) instead of silently ignored, so an old client notices the breaking change."
@@ -1194,7 +1194,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN464\",\n  \"origin\": \"XXX\",\n  \"destination\": \"YYY\",\n  \"aircraftRegistration\": \"VN-NOPE\",\n  \"departureAt\": \"2026-11-21T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-21T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN464\",\n  \"origin\": \"XXX\",\n  \"destination\": \"YYY\",\n  \"aircraftRegistration\": \"VN-NOPE\",\n  \"departureAt\": \"2026-11-21T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-21T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -1388,7 +1388,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN471\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-01T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-01T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN471\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-01T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-01T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "BR-SEAT-03: the flight's seat inventory is copied from the aircraft layout in the same transaction."
@@ -1432,7 +1432,8 @@
                   "pm.test('8 business, 168 economy', () => pm.expect(seats.filter((seat) => seat.fareClass === 'BUSINESS').length).to.eql(8));",
                   "const keys = new Set();",
                   "(function walk(value) { if (Array.isArray(value)) value.forEach(walk); else if (value && typeof value === 'object') for (const [key, nested] of Object.entries(value)) { keys.add(key); walk(nested); } })(pm.response.json());",
-                  "pm.test('only seat-map keys at any depth', () => pm.expect([...keys].sort()).to.eql(['code', 'fareClass', 'flightId', 'row', 'rows', 'seats', 'status']));"
+                  "// Day 49A: plus the fares, once per map (BUSINESS/ECONOMY → amount, currency).",
+                  "pm.test('only seat-map keys at any depth', () => pm.expect([...keys].sort()).to.eql(['BUSINESS', 'ECONOMY', 'amount', 'code', 'currency', 'fareClass', 'fares', 'flightId', 'row', 'rows', 'seats', 'status']));"
                 ]
               }
             }
@@ -1670,7 +1671,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN481\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-05T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-05T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN481\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-05T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-05T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -1762,7 +1763,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('201', () => pm.response.to.have.status(201));",
-                  "pm.test('each passenger on the seat they named', () => pm.expect(pm.response.json().passengers).to.eql([{ name: 'Bob Tran', seat: '12B' }, { name: 'Lan Tran', seat: '12A' }]));"
+                  "pm.test('each passenger on the seat they named', () => pm.expect(pm.response.json().passengers.map(({ name, seat }) => ({ name, seat }))).to.eql([{ name: 'Bob Tran', seat: '12B' }, { name: 'Lan Tran', seat: '12A' }]));"
                 ]
               }
             }
@@ -2018,7 +2019,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN482\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-06T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-06T10:00:00+07:00\",\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN482\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-06T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-06T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -2288,6 +2289,246 @@
       ]
     },
     {
+      "name": "Day 49A — Fares",
+      "description": "Needs the dev seed (VN-A321: rows 1–2 BUSINESS ACDF, rows 3–30 ECONOMY A–F; VN-B210 economy only), alice's accessToken (admin) and bob's userAccessToken.\nRun top to bottom on a database without VN491 on 2026-12-07.\nA flight has one fare per fare class, in whole VND (never x100), for exactly the classes its aircraft has seats in (BR-FLT-09). A booking copies each passenger's fare when the seats are held (BR-BOOK-03); its total is their sum. There is no endpoint that changes a fare: to see the snapshot hold, change one with psql (README, Day 49A) and read the booking again.",
+      "item": [
+        {
+          "name": "POST /api/flights without the BUSINESS fare (VN-A321 → 422 MISSING_FARE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN491\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-07T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-07T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000 }\n}"
+            },
+            "url": "{{baseUrl}}/api/flights"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 MISSING_FARE on fares.BUSINESS', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  const details = pm.response.json().error.details.map((d) => `${d.field} ${d.code}`);",
+                  "  pm.expect(details).to.eql(['fares.BUSINESS MISSING_FARE']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights with a BUSINESS fare on an economy-only aircraft (VN-B210 → 422 FARE_CLASS_NOT_ON_AIRCRAFT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN492\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-B210\",\n  \"departureAt\": \"2026-12-07T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-07T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+            },
+            "url": "{{baseUrl}}/api/flights"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 FARE_CLASS_NOT_ON_AIRCRAFT on fares.BUSINESS', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  const details = pm.response.json().error.details.map((d) => `${d.field} ${d.code}`);",
+                  "  pm.expect(details).to.eql(['fares.BUSINESS FARE_CLASS_NOT_ON_AIRCRAFT']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights with the old priceInCents + currency body (→ 422 UNSUPPORTED_FIELD)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN491\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-07T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-07T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 UNSUPPORTED_FIELD for both old fields', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  const details = pm.response.json().error.details.map((d) => `${d.field} ${d.code}`);",
+                  "  pm.expect(details).to.eql(['priceInCents UNSUPPORTED_FIELD', 'currency UNSUPPORTED_FIELD']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights (VN491 on VN-A321, both fares → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN491\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-07T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-07T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+            },
+            "url": "{{baseUrl}}/api/flights"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 with one Money per fare class, no priceInCents', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.fares).to.eql({ ECONOMY: { amount: 1500000, currency: 'VND' }, BUSINESS: { amount: 4200000, currency: 'VND' } });",
+                  "  pm.expect(body).to.not.have.property('priceInCents');",
+                  "  pm.expect(body).to.not.have.property('currency');",
+                  "});",
+                  "pm.collectionVariables.set('day49FlightId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (→ 200 OPEN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day49FlightId}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OPEN', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('OPEN'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id/seats (fares once at the top; 1A BUSINESS, 3A ECONOMY)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day49FlightId}}/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('fares once, not per seat', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.fares.BUSINESS.amount).to.eql(4200000);",
+                  "  pm.expect(body.rows[0].seats[0]).to.eql({ code: '1A', fareClass: 'BUSINESS', status: 'AVAILABLE' });",
+                  "  pm.expect(body.rows[2].seats[0].fareClass).to.eql('ECONOMY');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking [1A, 3A] (bob → 201, 4 200 000 + 1 500 000 = 5 700 000)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    { \"name\": \"Bob Tran\", \"seat\": \"1A\" },\n    { \"name\": \"An Le\", \"seat\": \"3A\" }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/flights/{{day49FlightId}}/bookings"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201, each passenger priced at their seat class, total = sum', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.passengers.map((p) => [p.seat, p.fareClass, p.price.amount])).to.eql([['1A', 'BUSINESS', 4200000], ['3A', 'ECONOMY', 1500000]]);",
+                  "  pm.expect(body.total).to.eql({ amount: 5700000, currency: 'VND' });",
+                  "});",
+                  "pm.collectionVariables.set('day49BookingId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/bookings/:id (bob → 200, the same prices and total)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49BookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('prices read back as numbers, total unchanged', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.passengers.map((p) => p.price.amount)).to.eql([4200000, 1500000]);",
+                  "  pm.expect(body.total.amount).to.eql(5700000);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Day 29 — Correlation investigate",
       "description": "Fixed requestId for log grep across api + flight-notifier.",
       "item": [
@@ -2347,7 +2588,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN29\",\n  \"origin\": \"SGN\",\n  \"destination\": \"DAD\",\n  \"departureAt\": \"2026-12-20T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-20T09:30:00+07:00\",\n  \"priceInCents\": 1200000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A632\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN29\",\n  \"origin\": \"SGN\",\n  \"destination\": \"DAD\",\n  \"departureAt\": \"2026-12-20T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-20T09:30:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1200000, \"BUSINESS\": 3500000 },\n  \"aircraftRegistration\": \"VN-A632\"\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "Generates a fresh requestId each run (needs alice's admin accessToken and the seed: VN-A632).\nThen: open Postman Console for the id, wait ~5s, search flight-notifier log for correlationId.\nVN29 on 2026-12-20 can be created once: a second run answers 409 FLIGHT_ALREADY_EXISTS."
@@ -2710,7 +2951,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN999\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-11T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-11T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A321\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN999\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-11T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-11T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"VN-A321\"\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -2743,7 +2984,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN403\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-12T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-12T10:00:00+07:00\",\n  \"priceInCents\": 15000000,\n  \"currency\": \"VND\",\n  \"aircraftRegistration\": \"VN-A321\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN403\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-12T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-12T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"VN-A321\"\n}"
             },
             "description": "Login as bob first (role=user). Expect 403 FORBIDDEN."
           },

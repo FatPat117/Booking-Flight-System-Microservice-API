@@ -20,7 +20,7 @@ import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { resolveEntityManager } from "../../src/postgres/transaction-context.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import { nextBookingReference } from "../fixtures/bookings.js";
-import { makeFlight } from "../fixtures/flights.js";
+import { FIXTURE_FARES, makeFlight } from "../fixtures/flights.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
 /**
@@ -222,7 +222,17 @@ function oneSeatResult(rows: Array<{ row: number; letter: string }>): HoldSeatsR
   const [claimed] = rows;
   return claimed === undefined
     ? { outcome: "not-enough-seats" }
-    : { outcome: "held", seats: [formatSeatPosition(claimed)] };
+    : {
+        outcome: "held",
+        // About seat allocation only: priced at the economy-only fixture's fare.
+        seats: [
+          {
+            seat: formatSeatPosition(claimed),
+            fareClass: "ECONOMY",
+            price: FIXTURE_FARES.ECONOMY,
+          },
+        ],
+      };
 }
 
 test("Test C1 — control: without SKIP LOCKED, Test B still books 20 distinct seats (no false sold-out on Postgres)", async (t) => {
@@ -319,7 +329,10 @@ test("Test C2 — control: while one booking holds seat 1A, the next waits on it
   const holder = runner
     .run(async () => {
       const result = await repository.holdSeats(flightId, crypto.randomUUID(), ONE_SEAT, NOW);
-      assert.deepEqual(result, { outcome: "held", seats: ["1A"] });
+      assert.deepEqual(result, {
+        outcome: "held",
+        seats: [{ seat: "1A", fareClass: "ECONOMY", price: FIXTURE_FARES.ECONOMY }],
+      });
       claimed();
       await holderReleased;
       throw new Rollback();
@@ -348,7 +361,10 @@ test("Test C2 — control: while one booking holds seat 1A, the next waits on it
 
   try {
     assert.equal(await claimWhileHeld(createRepositoryWithoutSkipLocked()), "lock-timeout");
-    assert.deepEqual(await claimWhileHeld(repository), { outcome: "held", seats: ["1B"] });
+    assert.deepEqual(await claimWhileHeld(repository), {
+      outcome: "held",
+      seats: [{ seat: "1B", fareClass: "ECONOMY", price: FIXTURE_FARES.ECONOMY }],
+    });
   } finally {
     release();
     await holder;

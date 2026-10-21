@@ -17,7 +17,7 @@ import {
   createInMemoryOutboxRepository,
   createInMemoryTransactionRunner,
 } from "./fakes/in-memory.js";
-import { makeBooking } from "./fixtures/bookings.js";
+import { makeBooking, passengersFor } from "./fixtures/bookings.js";
 import { makeFlight } from "./fixtures/flights.js";
 
 /** When the holds were made; fixture flights depart in 2027. */
@@ -70,12 +70,10 @@ async function createRuntime(options: { batchSize?: number; maxBatches?: number 
       HELD_AT,
     );
     assert.equal(held.outcome, "held");
-    const stored = {
+    const stored = makeBooking({
       ...booking,
-      passengers: held.outcome === "held"
-        ? held.seats.map((seat, index) => ({ name: `Passenger ${index + 1}`, seat }))
-        : [],
-    };
+      passengers: held.outcome === "held" ? passengersFor(held.seats, []) : [],
+    });
     assert.deepEqual(await bookingRepository.create(stored), { outcome: "created" });
     return stored;
   }

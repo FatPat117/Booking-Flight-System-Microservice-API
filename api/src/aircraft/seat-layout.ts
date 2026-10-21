@@ -35,7 +35,7 @@ type Cabin = {
   letters: string[];
 };
 
-function isFareClass(value: unknown): value is FareClass {
+export function isFareClass(value: unknown): value is FareClass {
   return FARE_CLASSES.some((fareClass) => fareClass === value);
 }
 

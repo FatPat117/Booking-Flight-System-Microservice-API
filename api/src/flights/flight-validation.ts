@@ -1,13 +1,17 @@
 import type {
   CreateFlightInput,
+  FlightFares,
   ValidationIssue,
   ValidationResult,
 } from "../types.js";
 import { normalizeRegistration } from "../aircraft/aircraft-validation.js";
+import { type FareClass, isFareClass } from "../aircraft/seat-layout.js";
 import { normalizeAirportCode } from "../airports/airport-validation.js";
+import { isVndAmount, type Money, vnd } from "../money/money.js";
 import { isNonEmptyString, isPlainObject } from "../validation.js";
 
-const SUPPORTED_CURRENCIES = new Set(["VND", "USD"]);
+/** Day 49A: one price per fare class replaced these (Decision 13). */
+const REPLACED_BY_FARES = ["priceInCents", "currency"] as const;
 
 const ISO_DATETIME_WITH_TZ =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
@@ -16,8 +20,50 @@ function isAirportCode(value: string): boolean {
   return /^[A-Z]{3}$/.test(value);
 }
 
-function isPositiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+/**
+ * `{ "ECONOMY": 1500000, "BUSINESS": 4200000 }` — whole đồng per fare class
+ * (BR-MONEY-01: VND only, so the request carries no currency). Every bad
+ * entry is reported, not just the first.
+ */
+function parseFares(
+  raw: unknown,
+  issues: ValidationIssue[],
+): FlightFares | undefined {
+  if (!isPlainObject(raw)) {
+    issues.push({
+      field: "fares",
+      code: "INVALID_FARES",
+      message: "fares must be an object of fare class to amount in VND",
+    });
+    return undefined;
+  }
+
+  const issueCountBefore = issues.length;
+  const fares: Partial<Record<FareClass, Money>> = {};
+
+  for (const [fareClass, amount] of Object.entries(raw)) {
+    if (!isFareClass(fareClass)) {
+      issues.push({
+        field: `fares.${fareClass}`,
+        code: "INVALID_FARE_CLASS",
+        message: "Fare class must be ECONOMY or BUSINESS",
+      });
+      continue;
+    }
+
+    if (!isVndAmount(amount) || amount === 0) {
+      issues.push({
+        field: `fares.${fareClass}`,
+        code: "INVALID_FARE",
+        message: `fares.${fareClass} must be a whole number of VND greater than 0`,
+      });
+      continue;
+    }
+
+    fares[fareClass] = vnd(amount);
+  }
+
+  return issues.length === issueCountBefore ? fares : undefined;
 }
 
 function isLeapYear(year: number): boolean {
@@ -90,8 +136,7 @@ export function validateCreateFlightInput(
     "aircraftRegistration",
     "departureAt",
     "arrivalAt",
-    "priceInCents",
-    "currency",
+    "fares",
   ] as const;
 
   for (const field of requiredFields) {
@@ -115,6 +160,16 @@ export function validateCreateFlightInput(
     });
   }
 
+  for (const field of REPLACED_BY_FARES) {
+    if (field in input) {
+      issues.push({
+        field,
+        code: "UNSUPPORTED_FIELD",
+        message: `${field} is no longer accepted: send fares, one VND amount per fare class`,
+      });
+    }
+  }
+
   const stringFields = [
     "flightNumber",
     "origin",
@@ -122,7 +177,6 @@ export function validateCreateFlightInput(
     "aircraftRegistration",
     "departureAt",
     "arrivalAt",
-    "currency",
   ] as const;
 
   for (const field of stringFields) {
@@ -141,7 +195,6 @@ export function validateCreateFlightInput(
   const flightNumberRaw = input.flightNumber;
   const originRaw = input.origin;
   const destinationRaw = input.destination;
-  const currencyRaw = input.currency;
   const departureRaw = input.departureAt;
   const arrivalRaw = input.arrivalAt;
 
@@ -149,7 +202,7 @@ export function validateCreateFlightInput(
   let origin = "";
   let destination = "";
   let aircraftRegistration = "";
-  let currency = "";
+  let fares: FlightFares | undefined;
   let departureAtUtc: string | null = null;
   let arrivalAtUtc: string | null = null;
 
@@ -197,15 +250,8 @@ export function validateCreateFlightInput(
     });
   }
 
-  if (isNonEmptyString(currencyRaw)) {
-    currency = currencyRaw.trim().toUpperCase();
-    if (!SUPPORTED_CURRENCIES.has(currency)) {
-      issues.push({
-        field: "currency",
-        code: "UNSUPPORTED_CURRENCY",
-        message: "Currency must be VND or USD",
-      });
-    }
+  if ("fares" in input && input.fares !== undefined) {
+    fares = parseFares(input.fares, issues);
   }
 
   if (isNonEmptyString(departureRaw)) {
@@ -242,17 +288,7 @@ export function validateCreateFlightInput(
     }
   }
 
-  if ("priceInCents" in input && input.priceInCents !== undefined) {
-    if (!isPositiveInteger(input.priceInCents)) {
-      issues.push({
-        field: "priceInCents",
-        code: "INVALID_PRICE",
-        message: "priceInCents must be a safe integer greater than 0",
-      });
-    }
-  }
-
-  if (issues.length > 0) {
+  if (issues.length > 0 || fares === undefined) {
     return { success: false, issues };
   }
 
@@ -265,8 +301,7 @@ export function validateCreateFlightInput(
       aircraftRegistration,
       departureAt: departureAtUtc as string,
       arrivalAt: arrivalAtUtc as string,
-      priceInCents: input.priceInCents as number,
-      currency,
+      fares,
     },
   };
 }

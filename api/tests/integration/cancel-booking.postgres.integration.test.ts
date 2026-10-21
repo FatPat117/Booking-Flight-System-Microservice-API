@@ -12,7 +12,7 @@ import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import type { Flight } from "../../src/types.js";
 import { makeBooking } from "../fixtures/bookings.js";
-import { makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
+import { FIXTURE_FARES, makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
 /**
@@ -68,7 +68,9 @@ test("cancelled then already-cancelled: seat count increases by exactly 1, no ex
   const booking = makeBooking({
     flightId: flight.id,
     ownerAccountId: OWNER_ACCOUNT_ID,
-    passengers: [{ name: "Alice", seat: "1A" }],
+    passengers: [
+      { name: "Alice", seat: "1A", fareClass: "ECONOMY", price: FIXTURE_FARES.ECONOMY },
+    ],
   });
   await createPostgresTransactionRunner(dataSource).run(async () => {
     await bookingRepository.holdSeats(flight.id, booking.id, { kind: "auto", count: 1 }, new Date("2026-07-20T00:00:00.000Z"));

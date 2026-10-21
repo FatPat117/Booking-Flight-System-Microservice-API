@@ -5,7 +5,18 @@
  * outbox, the queue or the DLQ. Making them required — and ever dropping
  * `origin`/`destination` — is a later contract step, once no old-shape
  * message and no consumer relying on the old fields remains.
+ *
+ * Day 49A added `fares`, one price per fare class. `priceInCents` and
+ * `currency` are deprecated: still sent (the ECONOMY fare in whole VND, and
+ * "VND") so existing consumers keep working, to be dropped in a contract
+ * step once none reads them.
  */
+export type FlightCreatedFare = {
+  /** Integer in the currency's smallest unit — whole đồng for VND. */
+  amount: number;
+  currency: string;
+};
+
 export type FlightCreatedEvent = {
   eventId: string;
   correlationId: string;
@@ -20,8 +31,12 @@ export type FlightCreatedEvent = {
     destination: string;
     departureAt: string;
     arrivalAt: string;
+    /** @deprecated Day 49A — read `fares`. Despite the name, whole đồng. */
     priceInCents: number;
+    /** @deprecated Day 49A — always "VND"; read `fares`. */
     currency: string;
+    /** Keyed by fare class (ECONOMY, BUSINESS); absent before Day 49A. */
+    fares?: Record<string, FlightCreatedFare>;
     availableSeats: number;
     originAirportId?: string;
     destinationAirportId?: string;
@@ -37,6 +52,37 @@ const OPTIONAL_FLIGHT_STRINGS = [
   "aircraftId",
   "status",
 ] as const;
+
+function parseFares(
+  value: unknown,
+): { ok: true; fares: Record<string, FlightCreatedFare> } | { ok: false; reason: string } {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, reason: "flight.fares must be an object when present" };
+  }
+
+  const fares: Record<string, FlightCreatedFare> = {};
+
+  for (const [fareClass, fare] of Object.entries(value)) {
+    const record = fare as Record<string, unknown> | null;
+    if (
+      record === null ||
+      typeof record !== "object" ||
+      typeof record.amount !== "number" ||
+      !Number.isSafeInteger(record.amount) ||
+      record.amount <= 0 ||
+      typeof record.currency !== "string" ||
+      record.currency.length === 0
+    ) {
+      return {
+        ok: false,
+        reason: `flight.fares.${fareClass} must have a positive integer amount and a currency`,
+      };
+    }
+    fares[fareClass] = { amount: record.amount, currency: record.currency };
+  }
+
+  return { ok: true, fares };
+}
 
 export function parseFlightCreatedEvent(
   payload: unknown,
@@ -124,6 +170,15 @@ export function parseFlightCreatedEvent(
     optional[key] = value;
   }
 
+  let fares: Record<string, FlightCreatedFare> | undefined;
+  if (flight.fares !== undefined) {
+    const parsedFares = parseFares(flight.fares);
+    if (!parsedFares.ok) {
+      return parsedFares;
+    }
+    fares = parsedFares.fares;
+  }
+
   return {
     ok: true,
     event: {
@@ -142,6 +197,7 @@ export function parseFlightCreatedEvent(
         currency: flight.currency as string,
         availableSeats: flight.availableSeats,
         ...optional,
+        ...(fares === undefined ? {} : { fares }),
       },
     },
   };

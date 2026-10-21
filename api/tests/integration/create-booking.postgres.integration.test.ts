@@ -12,7 +12,7 @@ import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import type { Flight } from "../../src/types.js";
 import { nextBookingReference } from "../fixtures/bookings.js";
-import { makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
+import { FIXTURE_FARES, makeFlight as makeFixtureFlight } from "../fixtures/flights.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
 /**
@@ -73,7 +73,10 @@ test("created: writes one booking row, claims its seat, one audit row, one outbo
   if (result.outcome !== "created") {
     return;
   }
-  assert.deepEqual(result.booking.passengers, [{ name: "Alice", seat: "1A" }]);
+  assert.deepEqual(result.booking.passengers, [
+    { name: "Alice", seat: "1A", fareClass: "ECONOMY", price: FIXTURE_FARES.ECONOMY },
+  ]);
+  assert.deepEqual(result.booking.total, FIXTURE_FARES.ECONOMY);
 
   const seats = await dataSource.query(
     `SELECT "row" || "letter" AS seat, "status", "booking_id" FROM "flight_seats" WHERE "flight_id" = $1`,
@@ -162,11 +165,11 @@ test("chosen seats for 3 passengers: each passenger's copy matches the seat HELD
     flightId: flight.id,
     createdAt: "2026-07-20T00:00:00.000Z",
     holdExpiresAt: "2026-07-20T00:15:00.000Z",
-    passengers: [
-      { name: "Alice", seat: "1F" },
-      { name: "Bob", seat: "1A" },
-      { name: "Carol", seat: "1C" },
-    ],
+    passengers: ["Alice 1F", "Bob 1A", "Carol 1C"].map((entry) => {
+      const [name, seat] = entry.split(" ");
+      return { name, seat, fareClass: "ECONOMY", price: { amount: 1_500_000, currency: "VND" } };
+    }),
+    total: { amount: 4_500_000, currency: "VND" },
   });
   assert.equal((await flightRepository.findById(flight.id))?.availableSeats, 3);
 });

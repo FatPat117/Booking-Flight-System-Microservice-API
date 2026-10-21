@@ -10,7 +10,7 @@ import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
 import type { Flight } from "../../src/types.js";
 import { makeBooking as makeFixtureBooking } from "../fixtures/bookings.js";
-import { makeFlight } from "../fixtures/flights.js";
+import { FIXTURE_FARES, makeFlight } from "../fixtures/flights.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
 
 /**
@@ -78,7 +78,10 @@ test("holdSeats: the held seat row is HELD for that booking; the next call is no
     return held;
   });
 
-  assert.deepEqual(first, { outcome: "held", seats: ["1A"] });
+  assert.deepEqual(first, {
+    outcome: "held",
+    seats: [{ seat: "1A", fareClass: "ECONOMY", price: FIXTURE_FARES.ECONOMY }],
+  });
   assert.deepEqual(await seatRows(flight.id), [
     { seat: "1A", status: "HELD", booking_id: booking.id },
   ]);
@@ -211,11 +214,13 @@ test("cancel: not-found for an unknown booking id", async () => {
 });
 
 test("the expiry sweep's lookup reads idx_bookings_held_expiry in order, without a Sort", async () => {
-  // Seq scans off, as in the outbox plan test: on a near-empty table the
-  // planner's choice is a cost decision. This asserts the partial index can
-  // serve the predicate *and* the ORDER BY, so a batch stops at LIMIT instead
-  // of sorting every due hold (Day 48B Step 2 measured 104 vs 2 990 buffers
-  // on 100 000 bookings).
+  // Deterministic without ANALYZE: seq scans are off for this transaction
+  // only, so the plan no longer depends on what statistics earlier tests left
+  // behind. What it asserts: the partial index *can* serve the predicate and
+  // the ORDER BY, so a batch stops at LIMIT instead of sorting every due
+  // hold. What it does not: that the planner picks the index on real data —
+  // that was measured once with EXPLAIN (ANALYZE) on 100 000 bookings, 104 vs
+  // 2 990 buffers (Day 48B Step 2), not pinned by a test.
   const rows = (await dataSource.transaction(async (manager) => {
     await manager.query("SET LOCAL enable_seqscan = off");
     return manager.query(

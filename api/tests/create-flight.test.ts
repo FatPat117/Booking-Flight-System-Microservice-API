@@ -12,6 +12,7 @@ import {
   createConsoleLogger,
   type Logger,
 } from "../src/observability/logger.js";
+import { vnd } from "../src/money/money.js";
 import type { TransactionRunner } from "../src/transactions/transaction-runner.js";
 import type { Actor, Flight } from "../src/types.js";
 import {
@@ -39,8 +40,7 @@ function makeValidRawInput(overrides: Record<string, unknown> = {}) {
     destination: "han",
     departureAt: "2026-08-10T08:00:00+07:00",
     arrivalAt: "2026-08-10T10:00:00+07:00",
-    priceInCents: 15_000_000,
-    currency: "vnd",
+    fares: { ECONOMY: 15_000_000 },
     aircraftRegistration: "vn-a321",
     ...overrides,
   };
@@ -147,7 +147,7 @@ test("valid input creates a normalized flight via repository", async () => {
   assert.equal(result.flight.flightNumber, "VN123");
   assert.equal(result.flight.origin, "SGN");
   assert.equal(result.flight.destination, "HAN");
-  assert.equal(result.flight.currency, "VND");
+  assert.deepEqual(result.flight.fares, { ECONOMY: vnd(15_000_000) });
   assert.equal(result.flight.departureAt, "2026-08-10T01:00:00.000Z");
   assert.equal(result.flight.arrivalAt, "2026-08-10T03:00:00.000Z");
   assert.equal(generateIdCalls, 1);
@@ -388,6 +388,7 @@ test("records audit log when flight is created", async () => {
         origin: "SGN",
         destination: "HAN",
         aircraftRegistration: "VN-A321",
+        fares: "ECONOMY:15000000",
         correlationId: "fixed-request-id",
       },
     },
@@ -621,10 +622,86 @@ test("enqueues flight-created outbox row after successful create", async () => {
       arrivalAt: "2026-08-10T03:00:00.000Z",
       priceInCents: 15_000_000,
       currency: "VND",
+      fares: { ECONOMY: { amount: 15_000_000, currency: "VND" } },
       availableSeats: 120,
       status: "SCHEDULED",
     },
   });
+});
+
+test("a two-class aircraft needs both fares, and the event keeps the ECONOMY one as priceInCents", async () => {
+  const created: Flight[] = [];
+  const repository: FlightRepository = {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    findSeats: async () => undefined,
+    changeStatus: async () => ({ outcome: "not-found" }),
+    async create(flight) {
+      created.push(flight);
+      return { outcome: "created" };
+    },
+  };
+  const { outboxRepository, entries } = createCapturingOutboxRepository();
+  const createFlight = createUseCase(
+    repository,
+    createCapturingAuditRecorder().auditRecorder,
+    outboxRepository,
+  );
+
+  const result = await createFlight(
+    makeValidRawInput({
+      aircraftRegistration: "VN-A350",
+      fares: { BUSINESS: 4_200_000, ECONOMY: 1_500_000 },
+    }),
+    ADMIN_ACTOR,
+  );
+
+  assert.equal(result.outcome, "created");
+  assert.deepEqual(created[0]?.fares, {
+    ECONOMY: vnd(1_500_000),
+    BUSINESS: vnd(4_200_000),
+  });
+  const flight = (entries[0]?.payload as { flight: Record<string, unknown> }).flight;
+  assert.equal(flight.priceInCents, 1_500_000);
+  assert.deepEqual(flight.fares, {
+    ECONOMY: { amount: 1_500_000, currency: "VND" },
+    BUSINESS: { amount: 4_200_000, currency: "VND" },
+  });
+});
+
+test("fares must cover exactly the aircraft's fare classes (BR-FLT-09), reported with unknown references", async () => {
+  let createCalls = 0;
+  const repository: FlightRepository = {
+    findPage: async () => ({ items: [], totalItems: 0 }),
+    findById: async () => undefined,
+    findSeats: async () => undefined,
+    changeStatus: async () => ({ outcome: "not-found" }),
+    async create() {
+      createCalls += 1;
+      return { outcome: "created" };
+    },
+  };
+  const createFlight = createUseCase(repository);
+  const codes = async (input: Record<string, unknown>) => {
+    const result = await createFlight(makeValidRawInput(input), ADMIN_ACTOR);
+    return result.outcome === "validation_failed"
+      ? result.issues.map((issue) => `${issue.field} ${issue.code}`)
+      : [result.outcome];
+  };
+
+  assert.deepEqual(
+    await codes({ aircraftRegistration: "VN-A350", fares: { ECONOMY: 1_500_000 } }),
+    ["fares.BUSINESS MISSING_FARE"],
+  );
+  assert.deepEqual(
+    await codes({ fares: { ECONOMY: 1_500_000, BUSINESS: 4_200_000 } }),
+    ["fares.BUSINESS FARE_CLASS_NOT_ON_AIRCRAFT"],
+  );
+  assert.deepEqual(
+    await codes({ origin: "XXX", aircraftRegistration: "VN-A350", fares: {} }),
+    ["origin UNKNOWN_AIRPORT", "fares.ECONOMY MISSING_FARE", "fares.BUSINESS MISSING_FARE"],
+  );
+  assert.equal(createCalls, 0);
 });
 
 test("outbox correlationId falls back to eventId when requestId is missing", async () => {

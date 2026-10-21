@@ -19,7 +19,12 @@ import { createOpenFlight } from "../src/flights/open-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { Logger } from "../src/observability/logger.js";
 import { nextBookingReference } from "./fixtures/bookings.js";
-import { makeSeats, TEST_AIRPORTS } from "./fixtures/flights.js";
+import {
+  FIXTURE_TWO_CLASS_AIRCRAFT_ID,
+  makeSeats,
+  TEST_AIRCRAFT,
+  TEST_AIRPORTS,
+} from "./fixtures/flights.js";
 import {
   createInMemoryAircraftRepository,
   createInMemoryAirportRepository,
@@ -161,8 +166,7 @@ async function seedFlight(
       aircraftRegistration: registration,
       departureAt: "2026-12-10T08:00:00+07:00",
       arrivalAt: "2026-12-10T10:00:00+07:00",
-      priceInCents: 1_500_000,
-      currency: "VND",
+      fares: { ECONOMY: 1_500_000 },
     });
 
   assert.equal(response.status, 201);
@@ -190,6 +194,11 @@ function book(
     .post(`/api/flights/${flightId}/bookings`)
     .set("Authorization", `Bearer ${accessToken}`)
     .send({ passengers });
+}
+
+/** Who sits where, without the prices (the cases about seating only). */
+function seatsOf(body: { passengers: Array<{ name: string; seat: string }> }) {
+  return body.passengers.map(({ name, seat }) => ({ name, seat }));
 }
 
 /** Seat code → status, from the public seat map. */
@@ -229,7 +238,15 @@ test("POST booking returns 201 owned by the caller, with a Location that GET res
   assert.equal(created.status, 201);
   assert.equal(created.body.flightId, flightId);
   assert.equal(created.body.ownerAccountId, ACCOUNT_A);
-  assert.deepEqual(created.body.passengers, [{ name: "Alice Nguyen", seat: "1A" }]);
+  assert.deepEqual(created.body.passengers, [
+    {
+      name: "Alice Nguyen",
+      seat: "1A",
+      fareClass: "ECONOMY",
+      price: { amount: 1_500_000, currency: "VND" },
+    },
+  ]);
+  assert.deepEqual(created.body.total, { amount: 1_500_000, currency: "VND" });
   assert.equal(created.body.status, "HELD");
   // BR-BOOK-04: fifteen minutes after FIXED_TIME.
   assert.equal(created.body.holdExpiresAt, "2026-07-20T00:15:00.000Z");
@@ -264,11 +281,12 @@ test("POST booking without seats holds the lowest free seats in row-then-letter 
   ]);
 
   assert.equal(created.status, 201);
-  assert.deepEqual(created.body.passengers, [
+  assert.deepEqual(seatsOf(created.body), [
     { name: "Alice", seat: "1A" },
     { name: "Bob", seat: "1C" },
     { name: "Carol", seat: "1D" },
   ]);
+  assert.deepEqual(created.body.total, { amount: 4_500_000, currency: "VND" });
   const statuses = await seatStatuses(app, flightId);
   assert.deepEqual(
     ["1A", "1B", "1C", "1D", "1E"].map((code) => statuses[code]),
@@ -286,10 +304,63 @@ test("POST booking with chosen seats pairs each passenger with the seat they nam
   ]);
 
   assert.equal(created.status, 201);
-  assert.deepEqual(created.body.passengers, [
+  assert.deepEqual(seatsOf(created.body), [
     { name: "Alice", seat: "1F" },
     { name: "Bob", seat: "1A" },
   ]);
+});
+
+test("a booking on a two-class flight shows each passenger's class and price and the total, on every read (BR-BOOK-03)", async () => {
+  const { app } = createContext();
+  const aircraftRepository = seedAccess.get(app);
+  assert.ok(aircraftRepository);
+  const twoClass = TEST_AIRCRAFT.find(({ id }) => id === FIXTURE_TWO_CLASS_AIRCRAFT_ID);
+  assert.ok(twoClass);
+  await aircraftRepository.create(twoClass);
+  const flight = await request(app)
+    .post("/api/flights")
+    .set("Authorization", `Bearer ${ADMIN}`)
+    .send({
+      flightNumber: "VN350",
+      origin: "SGN",
+      destination: "HAN",
+      aircraftRegistration: twoClass.registration,
+      departureAt: "2026-12-10T08:00:00+07:00",
+      arrivalAt: "2026-12-10T10:00:00+07:00",
+      fares: { ECONOMY: 1_500_000, BUSINESS: 4_200_000 },
+    });
+  assert.equal(flight.status, 201);
+  await request(app)
+    .post(`/api/flights/${flight.body.id}/open`)
+    .set("Authorization", `Bearer ${ADMIN}`);
+
+  const created = await book(app, USER_A, flight.body.id, [
+    { name: "Alice", seat: "1A" },
+    { name: "Bob", seat: "3A" },
+  ]);
+
+  assert.equal(created.status, 201);
+  const expected = {
+    passengers: [
+      { name: "Alice", seat: "1A", fareClass: "BUSINESS", price: { amount: 4_200_000, currency: "VND" } },
+      { name: "Bob", seat: "3A", fareClass: "ECONOMY", price: { amount: 1_500_000, currency: "VND" } },
+    ],
+    total: { amount: 5_700_000, currency: "VND" },
+  };
+  const priced = (body: { passengers: unknown; total: unknown }) => ({
+    passengers: body.passengers,
+    total: body.total,
+  });
+  assert.deepEqual(priced(created.body), expected);
+
+  const byId = await request(app).get(`/api/bookings/${created.body.id}`).set(as(USER_A));
+  const byReference = await request(app)
+    .get(`/api/bookings/by-reference/${created.body.reference}`)
+    .set(as(USER_A));
+  const list = await request(app).get("/api/bookings").set(as(USER_A));
+  assert.deepEqual(priced(byId.body), expected);
+  assert.deepEqual(priced(byReference.body), expected);
+  assert.deepEqual(priced(list.body.items[0]), expected);
 });
 
 test("POST booking with one chosen seat already held is 409 SEATS_UNAVAILABLE naming only that seat, and holds nothing", async () => {

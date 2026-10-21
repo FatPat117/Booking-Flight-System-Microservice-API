@@ -26,12 +26,15 @@ Kết quả validate là kiểu `{ seatSelection: "auto" } | { seatSelection: "c
 2. `holdSeats(flightId, bookingId, auto n | chosen [ghế], now)` — **một câu SQL**, tất cả hoặc không:
    - auto: `SKIP LOCKED`, `LIMIT n`, `WHERE enough.ok`;
    - chosen: khoá theo `(row, letter)`, `WHERE verdict.ok` (đủ số + tất cả `AVAILABLE`).
+   - **Day 49A**: cùng câu đó đọc giá của chuyến `FOR SHARE` (CTE `fares`, phải JOIN) → mỗi ghế
+     giữ được trả về kèm `fareClass` + `price`. Ghế có hạng không có giá → **throw** (BR-FLT-09 hỏng).
    Không `held` → trả outcome luôn, **không ghi gì**.
-3. Ghép ghế với hành khách theo chỉ số (số ghế ≠ số khách → throw, là bug adapter).
-4. Tạo booking `HELD`, `holdExpiresAt = now + 15 phút`; vòng sinh mã đặt chỗ tối đa 5 lần
+3. Ghép ghế (kèm giá) với hành khách theo chỉ số (số ghế ≠ số khách → throw, là bug adapter).
+4. Tạo booking `HELD`, `holdExpiresAt = now + 15 phút`, mỗi hành khách lưu `fare_class` +
+   `price_vnd`; `total` = tổng giá (suy ra, không lưu). Vòng sinh mã đặt chỗ tối đa 5 lần
    (`ON CONFLICT DO NOTHING` → `reference-taken` → sinh lại). Quá 5 → throw.
-5. Audit `BOOKING_CREATED` (reference, passengerCount, seats `"1A,1B"`, holdExpiresAt — không tên).
-6. Outbox `booking-held`.
+5. Audit `BOOKING_CREATED` (reference, passengerCount, seats `"1A,1B"`, `totalVnd`, holdExpiresAt — không tên).
+6. Outbox `booking-held` (Day 49A thêm `fareClass`/`price` mỗi hành khách và `total`, optional trong parser).
 
 **Outcome → HTTP:**
 | Outcome | HTTP |
@@ -49,13 +52,20 @@ Admin đặt vé → 403 (BR-AUTH-03: admin không đặt hộ).
 **Xử lý hay:** half-commit bị chặn bằng phán quyết trong `WHERE`; deadlock bị chặn bằng thứ tự
 khoá; FK deferred cho phép ghế trỏ tới booking chưa tồn tại tới lúc COMMIT. Xem
 [../race-conditions/05-giu-nhieu-ghe-tat-ca-hoac-khong.md](../race-conditions/05-giu-nhieu-ghe-tat-ca-hoac-khong.md).
+Chụp giá vs đổi giá đồng thời: [../race-conditions/09-chup-gia-va-khoa-dong-gia.md](../race-conditions/09-chup-gia-va-khoa-dong-gia.md).
 
-**Response mẫu:**
+**Response mẫu** (chuyến 2 hạng, Day 49A):
 ```json
 { "id": "…", "reference": "K7Q4PZ", "flightId": "…", "ownerAccountId": "…", "status": "HELD",
   "createdAt": "…", "holdExpiresAt": "…+15m",
-  "passengers": [ { "name": "Bob Tran", "seat": "12A" }, { "name": "Lan Tran", "seat": "12B" } ] }
+  "passengers": [
+    { "name": "Bob Tran", "seat": "1A", "fareClass": "BUSINESS", "price": { "amount": 4200000, "currency": "VND" } },
+    { "name": "Lan Tran", "seat": "3A", "fareClass": "ECONOMY", "price": { "amount": 1500000, "currency": "VND" } } ],
+  "total": { "amount": 5700000, "currency": "VND" } }
 ```
+Giá **không đổi** khi admin đổi giá sau đó (BR-BOOK-03). GET theo id, theo mã, và danh sách trả
+cùng giá + tổng; danh sách vẫn **3 query** (giá nằm trên dòng hành khách). Booking có trước Day 49A
+mang giá **lúc chạy migration**.
 
 ## CancelBooking — `DELETE /api/bookings/:id` (role `user`, chủ sở hữu)
 

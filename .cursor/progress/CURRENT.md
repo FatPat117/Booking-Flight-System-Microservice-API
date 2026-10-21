@@ -1,46 +1,49 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 48B
-**Current day:** Day 48B — Hold expiry job, expiry vs cancel race (phase D step 5, part 2)
-**Status:** ✅ Complete — unit 377/377, flight-notifier 10/10, identity 12/12, integration
-140/140, expiry race file 10× in a row, end-to-end verified (HTTP + psql + app/notifier logs +
-newman). A `HELD` booking expires at `holdExpiresAt`: `booking-hold-expiry-job` (60 s, batches
-of 50 with `FOR UPDATE SKIP LOCKED`, at most 20 per run) marks it `EXPIRED`, frees its seats and
-writes a `BOOKING_EXPIRED` audit entry (actor `system/booking-hold-expiry`) and a
-`booking-expired` event (contract + notifier consumer). Reads show `EXPIRED` from the deadline
-on; cancel checks the deadline in its own `WHERE` → `409 BOOKING_EXPIRED`. Boundary BR-BOOK-10:
-`<= now` expired, `> now` valid. Cancel and expiry release seats through one ordered-lock CTE,
-removing a deadlock with chosen-seat holds. `JobScheduler.stop()` waits for a running job.
+**Last completed day:** Day 49A
+**Current day:** Day 49A — Fares: `Money`, price per fare class, price snapshot at hold time (phase D step 6a)
+**Status:** ✅ Complete — unit 400/400, flight-notifier 14/14, identity 12/12, integration
+152/152, fare race file 10× in a row, end-to-end verified (HTTP + psql + app/notifier logs +
+newman). Amounts are `Money` in whole đồng (never ×100), `bigint` capped at 2^53 − 1. A flight
+has one fare per fare class (`flight_fares`) for exactly the classes its aircraft has
+(BR-FLT-09: `422 MISSING_FARE` / `FARE_CLASS_NOT_ON_AIRCRAFT`); `priceInCents`/`currency` are
+rejected. The hold statement reads the fares `FOR SHARE` and copies each seat's fare onto its
+passenger (BR-BOOK-03); `Booking.total` is derived. Old data migrated expand → backfill →
+contract (refused on dev data until BUSINESS/USD fares were set by hand). `flight-created` gains
+`fares` (old fields deprecated), `booking-held` gains prices and `total`.
 
-## Day 48B delivered
+## Day 49A delivered
 
 ```text
-Step 0: Day 48A leftovers — ORDER BY comment on the line; SKIP LOCKED multi-seat edge accepted
-  (Decision 11 bullet)
-Step 1: domain-model Decision 12 (hybrid expiry, expired wins, event, 60 s / 50 / 20, constant
-  duration, system actor), BR-BOOK-10, lock-order table — found the unordered-release deadlock
-Step 2: AddBookingHoldExpiryIndex (hold_expires_at, id) WHERE HELD; EXPLAIN 104 vs 2 990
-  buffers; plan test
-Step 3: expireDueHolds (port, Postgres CTE, fake), contract +5
-Step 4: system audit actor, booking-expired contract + consumer, ExpireHolds, job, stop() awaits
-Step 5: effective status on read, cancel with the deadline + releaseSeatsOf, 409 BOOKING_EXPIRED
-Step 6: race tests A–F (+ controls; gate transaction for E), mutations, e2e, Postman, README,
-  ADR-004 addendum, learnings (EN + VI)
+Step 0: plan-test comments (deterministic without ANALYZE), "English notes are primary",
+  phase D step 6 split into 6a fares / 6b payment / 6c payment failures (+ roadmap history row)
+Step 1: domain-model Decision 13 (8 choices with reasons), BR-FLT-09
+Step 2: api/src/money/money.ts (vnd, addMoney, sumMoney, parseVndFromDatabase) + 8 tests
+Step 3: CreateFlightFares / BackfillFlightFares / ContractFlightFares / AddPassengerFareSnapshot;
+  refused on shaped dev data, fixed by psql, re-run; down + up tested; safe-integer CHECKs added
+Step 4: flights have fares (types, validation, CreateFlight BR-FLT-09, repository, seat map,
+  flight-created event, fixtures with a two-class aircraft, contract + HTTP tests)
+Step 5: hold statements read fares FOR SHARE (SHARE_LOCKED_FARES), HeldSeat with price,
+  passengers priced, total derived (bookingTotal), booking-held prices, audit totalVnd
+Step 6: race tests A–C with controls and gates, 5 mutations (FOR SHARE, unread CTE ×2, missing
+  fare, ×100), e2e 6 scenarios, Postman (13 bodies + Day 49A folder), README, ADR-004 addendum,
+  learnings (EN + VI)
 ```
 
-## Previous day (Day 48A) recap
+## Previous day (Day 48B) recap
 
 ```text
-1–9 passengers per booking, held all-or-nothing in one statement for 15 minutes; chosen seats
-locked in (row, letter) order; 6-character reference; booking-held event.
+Hold expiry: batched SKIP LOCKED job frees seats, reads derive EXPIRED, cancel checks the
+deadline itself (409 BOOKING_EXPIRED); <= / > boundary; ordered-lock release CTE.
 ```
 
 ## Next
 
-Day 49 — Phase D step 6: simulated payment with an Idempotency-Key (US-PAY-01, BR-PAY-*).
-`HELD → CONFIRMED` takes the `> now` side of BR-BOOK-10, seats `HELD → BOOKED` in the same
-transaction, and gets the payment-vs-expiry race test. Per
+Day 49B — Phase D step 6b: simulated payment with an Idempotency-Key (US-PAY-01, BR-PAY-01..06).
+The amount is `booking.total` (fixed at hold time since Day 49A). `HELD → CONFIRMED` takes the
+`> now` side of BR-BOOK-10, seats `HELD → BOOKED` in the same transaction, and gets the
+payment-vs-expiry race test. Then 49C: payment failures. Per
 [`docs/product/domain-model.md`](../../docs/product/domain-model.md#phase-d-order).
-Open items carried (see DAY-48B "Not today"): BR-BOOK-03 pricing, removing the
-`booking-created` contract once its queue is empty, the release `ORDER BY` survivor, the
-outbox relay not being multi-instance safe.
+Open items carried (see DAY-49A "Not today"): no fare-change endpoint, deprecated
+`priceInCents` in `flight-created`, removing the `booking-created` contract once its queue is
+empty, the release `ORDER BY` survivor, the outbox relay not being multi-instance safe.

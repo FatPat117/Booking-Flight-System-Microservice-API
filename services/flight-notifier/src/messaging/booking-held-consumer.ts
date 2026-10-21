@@ -17,7 +17,9 @@ export function createBookingHeldConsumer(deps: {
     }
 
     const { event } = parsed;
+    const { total } = event.booking;
 
+    // Day 48A messages have no total; they are logged without it.
     deps.logger.info("booking_held_consumed", {
       eventId: event.eventId,
       correlationId: event.correlationId,
@@ -25,6 +27,9 @@ export function createBookingHeldConsumer(deps: {
       reference: event.booking.reference,
       flightId: event.booking.flightId,
       passengerCount: event.booking.passengers.length,
+      ...(total === undefined
+        ? {}
+        : { total: total.amount, currency: total.currency }),
       holdExpiresAt: event.booking.holdExpiresAt,
       occurredAt: event.occurredAt,
     });

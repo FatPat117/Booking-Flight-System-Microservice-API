@@ -135,7 +135,7 @@ Rules: BR-REF-01..06 in [docs/product/domain-model.md](docs/product/domain-model
 POST /api/flights
 { "flightNumber": "VN461", "origin": "SGN", "destination": "HAN", "aircraftRegistration": "VN-A323",
   "departureAt": "2026-11-20T08:00:00+07:00", "arrivalAt": "2026-11-20T10:00:00+07:00",
-  "priceInCents": 1500000, "currency": "VND" }
+  "fares": { "ECONOMY": 1500000, "BUSINESS": 4200000 } }
 
 POST /api/flights/:id/open
 ```
@@ -204,15 +204,42 @@ DELETE /api/bookings/:id        (hold lapsed)
 
 Rules: BR-BOOK-04/10, Decision 12 in [docs/product/domain-model.md](docs/product/domain-model.md).
 
+## Fares and the price snapshot (Day 49A)
+
+```http
+POST /api/flights
+{ …, "aircraftRegistration": "VN-A321", "fares": { "ECONOMY": 1500000, "BUSINESS": 4200000 } }
+→ 201 { …, "fares": { "ECONOMY": { "amount": 1500000, "currency": "VND" },
+                      "BUSINESS": { "amount": 4200000, "currency": "VND" } } }
+
+POST /api/flights/:flightId/bookings
+{ "passengers": [ { "name": "Bob Tran", "seat": "1A" }, { "name": "An Le", "seat": "3A" } ] }
+→ 201 { …, "passengers": [
+          { "name": "Bob Tran", "seat": "1A", "fareClass": "BUSINESS", "price": { "amount": 4200000, "currency": "VND" } },
+          { "name": "An Le", "seat": "3A", "fareClass": "ECONOMY", "price": { "amount": 1500000, "currency": "VND" } } ],
+        "total": { "amount": 5700000, "currency": "VND" } }
+```
+
+- **One fare per fare class, in whole VND.** Amounts are đồng, never ×100 (VND has no subunit in use; BR-MONEY-01). The request carries plain numbers; responses carry `Money` (`{ amount, currency }`). Stored in `flight_fares (flight_id, fare_class)` as `bigint`, capped at 2^53 − 1 by a `CHECK` so every amount is exact as a JS number; the adapter converts the string `pg` returns and throws on anything else.
+- **Breaking change to the create body.** `fares` is required; `priceInCents` and `currency` answer `422 UNSUPPORTED_FIELD`. A fare must exist for every class the aircraft has seats in and for no other (BR-FLT-09): `422 MISSING_FARE` / `422 FARE_CLASS_NOT_ON_AIRCRAFT`, reported with unknown airports/aircraft. Also `422 INVALID_FARES`, `INVALID_FARE_CLASS`, `INVALID_FARE`.
+- **Reads.** `GET /api/flights(/:id)` return `fares` (one query per page for every fare); the seat map carries `fares` once at the top, not on every seat.
+- **The price is copied when the seats are held** (BR-BOOK-03, Decision 13). Each passenger stores the fare class and fare of their seat; the booking's `total` is the sum, derived on every read, never stored. A later fare change does not reach existing bookings.
+- **Concurrency.** The hold statement reads the flight's fares `FOR SHARE`: a fare change (an `UPDATE flight_fares`) waits for holds in progress, and a hold arriving during an uncommitted change waits for it, then takes the new fares. Without the lock a booking could commit after a fare change with the old fare (race tests B1/B2 in `postgres-fare-snapshot.integration.test.ts`, with controls).
+- **No endpoint changes a fare yet.** To try the snapshot: `docker compose exec -T postgres psql -U booking -d booking_db -c "UPDATE flight_fares SET amount_vnd = 2000000 WHERE flight_id = '<id>' AND fare_class = 'ECONOMY'"`, then read an older booking (unchanged) and book again (new fare).
+- **Existing data** was migrated expand → backfill → contract: a `VND` flight's `price_in_cents` became its ECONOMY fare unchanged (it already held đồng); BUSINESS fares and `USD` flights could not be derived, so the contract migration refused with the list until they were set by hand. Passengers of earlier bookings were priced at migration time.
+- **Events.** `flight-created` gains `fares`; `priceInCents` (the ECONOMY fare, else the lowest) and `currency: "VND"` are still sent and deprecated. `booking-held` gains each passenger's `fareClass`/`price` and the `total`. Both additions are optional in the parsers.
+
+Rules: BR-MONEY-01, BR-FLT-09, BR-BOOK-03 and Decision 13 in [docs/product/domain-model.md](docs/product/domain-model.md).
+
 ## Audit trail
 
 Every successful write records an audit entry in the `audit_logs` table, in the same Postgres transaction as the write itself. If the audit insert fails, the whole write rolls back.
 
 | Action | Trigger | Actor recorded today |
 |---|---|---|
-| `FLIGHT_CREATED` | `POST /api/flights` | `account` / admin's JWT `sub` (metadata includes `aircraftRegistration`) |
+| `FLIGHT_CREATED` | `POST /api/flights` | `account` / admin's JWT `sub` (metadata includes `aircraftRegistration`, `fares` as `ECONOMY:1500000,BUSINESS:4200000`) |
 | `FLIGHT_OPENED` | `POST /api/flights/:id/open` | `account` / admin's JWT `sub` (metadata: `previousStatus`) |
-| `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` (metadata: `reference`, `passengerCount`, `seats`, `holdExpiresAt` — no passenger names) |
+| `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` (metadata: `reference`, `passengerCount`, `seats`, `totalVnd`, `holdExpiresAt` — no passenger names) |
 | `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` |
 | `BOOKING_EXPIRED` | `booking-hold-expiry-job` | `system` / `booking-hold-expiry` (metadata: `reference`, `seats`, `holdExpiresAt`) |
 | `AIRPORT_REGISTERED` | `POST /api/airports` | `account` / admin's JWT `sub` |
@@ -341,9 +368,9 @@ After startup, the publisher reconnects lazily: an unexpected connection/channel
 
 ### flight-notifier service
 
-`services/flight-notifier/` has its own `package.json`, build, Dockerfile and process. It subscribes to `flight-created`, `booking-held`, `booking-expired` and `booking-created` (no longer produced since Day 48A; kept for messages already queued), validates each event against `packages/contracts`, logs `flight_created_consumed` / `booking_held_consumed` (reference and passenger count, no names) / `booking_expired_consumed` (reference and seat count) / `booking_created_consumed` with the `correlationId` (for `booking-expired`, the event's own id: no request is behind it), and acks/nacks manually. `booking-cancelled` is published but has no consumer yet.
+`services/flight-notifier/` has its own `package.json`, build, Dockerfile and process. It subscribes to `flight-created`, `booking-held`, `booking-expired` and `booking-created` (no longer produced since Day 48A; kept for messages already queued), validates each event against `packages/contracts`, logs `flight_created_consumed` (with `fares` since Day 49A) / `booking_held_consumed` (reference, passenger count and `total`, no names) / `booking_expired_consumed` (reference and seat count) / `booking_created_consumed` with the `correlationId` (for `booking-expired`, the event's own id: no request is behind it), and acks/nacks manually. `booking-cancelled` is published but has no consumer yet.
 
-`flight-created` evolves additively (Day 46): the payload gained `originAirportId`, `destinationAirportId`, `aircraftId` and `status`, while `origin`/`destination` (IATA codes) and `availableSeats` stay. The new fields are optional in the parser, because old-shape messages may still sit in the outbox, queue or DLQ, and rejected only when present but empty. The producer maps the payload field by field, so a field added to `Flight` is never published by accident. Making them required, or dropping the old fields, is a later contract step.
+`flight-created` evolves additively (Day 46): the payload gained `originAirportId`, `destinationAirportId`, `aircraftId` and `status`, while `origin`/`destination` (IATA codes) and `availableSeats` stay. The new fields are optional in the parser, because old-shape messages may still sit in the outbox, queue or DLQ, and rejected only when present but empty. The producer maps the payload field by field, so a field added to `Flight` is never published by accident. Making them required, or dropping the old fields, is a later contract step. Day 49A added `fares` the same way and marked `priceInCents`/`currency` deprecated (still sent: the ECONOMY fare in whole VND, and `"VND"`).
 
 | Concern | Choice |
 |---------|--------|
@@ -376,8 +403,10 @@ The application runs TypeORM migrations (`api/src/postgres/migrations/`) on star
 | `CreateBookingPassengers` / `ContractBookingPassengers` | `booking_passengers` (1–9 positions, a seat once per booking), backfilled one per booking; the contract refuses with a list if a `CONFIRMED` booking's seats and passengers disagree, else drops `bookings.passenger_name` |
 | `AllowHeldSeats` | seat status `HELD`; `UQ_flight_seats_booking_id` replaced by the partial index `idx_flight_seats_booking_id` (a booking now holds several seats) |
 | `AddBookingHoldExpiryIndex` | partial index `idx_bookings_held_expiry` on `(hold_expires_at, id) WHERE status = 'HELD'`: the expiry sweep reads its batch in order and stops at `LIMIT` (no sort of every due hold) |
+| `CreateFlightFares` / `BackfillFlightFares` / `ContractFlightFares` | `flight_fares` (PK `flight_id, fare_class`, `amount_vnd bigint` between 1 and 2^53 − 1); a `VND` flight's `price_in_cents` becomes its ECONOMY fare unchanged; the contract refuses with a list while a class with seats has no fare (BUSINESS, `USD` flights) or a fare has no seats, else drops `price_in_cents` and `currency` |
+| `AddPassengerFareSnapshot` | `booking_passengers.fare_class`, `price_vnd`, priced from the seat's class at migration time; refuses with a list if a seated passenger cannot be priced; CHECK seat, class and price are NULL together |
 
-Since Day 46 each migration runs in its own transaction (`migrationsTransactionMode: "each"`): a refused contract migration keeps the expand and backfill, so the missing data can be fixed by hand and the migrations re-run. The aircraft of an existing flight cannot be guessed, so it is assigned by hand, e.g. `UPDATE flights SET aircraft_id = (SELECT id FROM aircraft WHERE registration = 'VN-A321') WHERE flight_number = 'VN123';`.
+Since Day 46 each migration runs in its own transaction (`migrationsTransactionMode: "each"`): a refused contract migration keeps the expand and backfill, so the missing data can be fixed by hand and the migrations re-run. The aircraft of an existing flight cannot be guessed, so it is assigned by hand, e.g. `UPDATE flights SET aircraft_id = (SELECT id FROM aircraft WHERE registration = 'VN-A321') WHERE flight_number = 'VN123';`. A fare cannot be guessed either (no exchange rate belongs in a migration): `INSERT INTO flight_fares (flight_id, fare_class, amount_vnd) VALUES ('<id>', 'BUSINESS', 4200000);`.
 
 Run them without starting the app: `npm run postgres:migration:run --workspace=@booking-flight-system/api`.
 
@@ -489,7 +518,8 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - **No payment yet: a `HELD` booking never becomes `CONFIRMED`** (payment is phase D step 6), so since Day 48B **every new booking expires after 15 minutes**. There is deliberately no shortcut route to confirm a booking (Decision 11)
 - After a hold lapses, its seats stay `HELD` on the seat map until the expiry job's next run — up to ~60 s plus the run itself. The seat cannot be sold twice in that gap and the booking already reads `EXPIRED`; accepted (Decision 12)
 - A failing expiry batch rolls back whole and is retried on the next run: one booking that keeps failing holds back the others of its batch (head-of-line, like the outbox relay). The hold duration (15 min) is a constant, not configuration
-- No price per passenger or booking total yet (BR-BOOK-03, fare class snapshot at hold time)
+- No endpoint changes a fare (only psql); one that is added must keep BR-FLT-09 and go through `UPDATE flight_fares`, so the hold's share lock still orders it against holds. Passengers of bookings made before Day 49A carry the fare at migration time, not the one at their hold (it was never recorded)
+- `flight-created` still sends the deprecated `priceInCents`/`currency`; dropping them is a later contract step once no consumer reads them
 - A seat cannot be changed after booking (phase D step 7)
 - Two system-picked multi-seat holds racing for the last seats could in theory both find fewer seats than needed (each skips rows the other just locked) and both answer `409 NOT_ENOUGH_SEATS`; not observed in 200 measured rounds (Day 48A race test A)
 - The flight list counts seats for every row the `OFFSET` skips, so deep pages get slower (measured Day 47: 1.4 ms on page 1, 52 ms on page 100 of 2000 flights); flights have no index on `(departure_at, id)`

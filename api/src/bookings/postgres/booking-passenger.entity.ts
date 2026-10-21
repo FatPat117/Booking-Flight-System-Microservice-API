@@ -26,4 +26,12 @@ export class BookingPassengerEntity {
 
   @Column({ type: "character", length: 1, name: "seat_letter", nullable: true })
   seatLetter!: string | null;
+
+  /** Day 49A, the price snapshot (AddPassengerFareSnapshot). */
+  @Column({ type: "text", name: "fare_class", nullable: true })
+  fareClass!: string | null;
+
+  /** bigint: `pg` returns it as a string; the adapter parses it. */
+  @Column({ type: "bigint", name: "price_vnd", nullable: true })
+  priceVnd!: string | null;
 }

@@ -1,5 +1,6 @@
 import { In, type DataSource, type EntityManager } from "typeorm";
 
+import type { FareClass } from "../../aircraft/seat-layout.js";
 import {
   formatSeatPosition,
   parseSeatPosition,
@@ -10,7 +11,9 @@ import {
   toStoredFlightStatus,
 } from "../../flights/flight-lifecycle.js";
 import { FlightEntity } from "../../flights/postgres/flight.entity.js";
+import { parseVndFromDatabase } from "../../money/money.js";
 import { classifyNotCancelled } from "../booking-lifecycle.js";
+import { bookingTotal } from "../booking-total.js";
 import {
   isInTransaction,
   resolveEntityManager,
@@ -26,6 +29,7 @@ import type {
   CancelBookingRepositoryResult,
   CreateBookingRepositoryResult,
   ExpiredHold,
+  HeldSeat,
   HoldSeatsResult,
   SeatHoldRequest,
 } from "../booking-repository.js";
@@ -55,6 +59,7 @@ function mapBooking(
     flightId: entity.flightId,
     ownerAccountId: entity.ownerAccountId,
     passengers,
+    total: bookingTotal(passengers),
     createdAt: entity.createdAt.toISOString(),
     status: entity.status as BookingStatus,
     holdExpiresAt: entity.holdExpiresAt?.toISOString() ?? null,
@@ -68,6 +73,10 @@ function mapPassenger(entity: BookingPassengerEntity): BookingPassenger {
       entity.seatRow === null || entity.seatLetter === null
         ? null
         : formatSeatPosition({ row: entity.seatRow, letter: entity.seatLetter }),
+    // CHK_booking_passengers_fare_class guarantees the value set.
+    fareClass: entity.fareClass as FareClass | null,
+    price:
+      entity.priceVnd === null ? null : parseVndFromDatabase(entity.priceVnd),
   };
 }
 
@@ -146,6 +155,9 @@ async function insertBooking(
         name: passenger.name,
         seatRow: seat?.row ?? null,
         seatLetter: seat?.letter ?? null,
+        fareClass: passenger.fareClass,
+        priceVnd:
+          passenger.price === null ? null : String(passenger.price.amount),
       };
     }),
   );
@@ -184,6 +196,50 @@ function bySeatOrder(a: SeatPosition, b: SeatPosition): number {
 }
 
 /**
+ * The flight's fares, share-locked, as a CTE of both hold statements
+ * (Decision 13, BR-BOOK-03). Changing a fare is an UPDATE of these rows,
+ * which needs them exclusively: it waits for a hold in progress, and a hold
+ * that reaches them after an uncommitted change waits for that change and
+ * then reads its committed values (READ COMMITTED re-reads a row it had to
+ * wait for). Either way every seat of one hold is priced from one version
+ * of the fares. The flight row's `FOR SHARE` does not cover this: it
+ * conflicts with `UPDATE flights`, not `UPDATE flight_fares`.
+ *
+ * Postgres runs a plain-SELECT CTE only when the query reads it, so each
+ * statement must join it, not just declare it.
+ */
+const SHARE_LOCKED_FARES = `fares AS (
+       SELECT "fare_class", "amount_vnd" FROM "flight_fares"
+       WHERE "flight_id" = $1
+       FOR SHARE
+     )`;
+
+type PricedSeatRow = SeatPosition & {
+  fare_class: string;
+  amount_vnd: string | null;
+};
+
+/**
+ * A seat with no fare for its class means BR-FLT-09 is broken for this
+ * flight. It throws, rolling the hold back: answering not-enough-seats would
+ * hide it, and holding the seat would book it without a price.
+ */
+function toHeldSeat(flightId: string, row: PricedSeatRow): HeldSeat {
+  if (row.amount_vnd === null) {
+    throw new Error(
+      `Flight ${flightId} has no ${row.fare_class} fare for seat ${formatSeatPosition(row)} (BR-FLT-09)`,
+    );
+  }
+
+  return {
+    seat: formatSeatPosition(row),
+    // CHK_flight_seats_fare_class guarantees the value set.
+    fareClass: row.fare_class as FareClass,
+    price: parseVndFromDatabase(row.amount_vnd),
+  };
+}
+
+/**
  * The `count` lowest free seats, in one statement (ADR-004 addendum):
  * - SKIP LOCKED: seats other bookings are taking right now are passed over,
  *   so concurrent bookings take different seats instead of queueing.
@@ -195,6 +251,8 @@ function bySeatOrder(a: SeatPosition, b: SeatPosition): number {
  *   written. Never "update what we got, then report not-enough": the
  *   transaction would commit and leave those seats HELD by a booking that
  *   is never created (the half-commit trap, ADR-004 appendix of Day 38).
+ * - Prices: each held seat joined to its class's fare, share-locked in the
+ *   same statement (SHARE_LOCKED_FARES).
  */
 async function holdAutoSeats(
   manager: EntityManager,
@@ -217,23 +275,28 @@ async function holdAutoSeats(
        FOR SHARE OF flight
      ), enough AS (
        SELECT count(*) = $4 AS ok FROM candidates
-     )
-     UPDATE "flight_seats" seat
-     SET "status" = 'HELD', "booking_id" = $2
-     FROM candidates, enough
-     WHERE enough.ok
-       AND (seat."flight_id", seat."row", seat."letter")
-         = (candidates."flight_id", candidates."row", candidates."letter")
-     RETURNING seat."row", seat."letter"`,
+     ), held AS (
+       UPDATE "flight_seats" seat
+       SET "status" = 'HELD', "booking_id" = $2
+       FROM candidates, enough
+       WHERE enough.ok
+         AND (seat."flight_id", seat."row", seat."letter")
+           = (candidates."flight_id", candidates."row", candidates."letter")
+       RETURNING seat."row", seat."letter", seat."fare_class"
+     ), ${SHARE_LOCKED_FARES}
+     SELECT held."row", held."letter", held."fare_class", fares."amount_vnd"
+     FROM held
+     LEFT JOIN fares ON fares."fare_class" = held."fare_class"`,
     [flightId, bookingId, now, count],
-  )) as [Array<SeatPosition>, number];
+  )) as PricedSeatRow[];
 
-  const seats = held[0];
-  if (seats.length > 0) {
+  if (held.length > 0) {
     // RETURNING has no order; passengers get seats front to back.
     return {
       outcome: "held",
-      seats: [...seats].sort(bySeatOrder).map(formatSeatPosition),
+      seats: [...held]
+        .sort(bySeatOrder)
+        .map((row) => toHeldSeat(flightId, row)),
     };
   }
 
@@ -257,7 +320,8 @@ async function holdAutoSeats(
  *   race test B).
  * - `verdict` requires every requested seat to exist and be AVAILABLE;
  *   `held` updates only then. The final SELECT returns every locked row
- *   with its status, so the caller learns which seats were in the way.
+ *   with its status, so the caller learns which seats were in the way —
+ *   and, joined to SHARE_LOCKED_FARES, its fare, used when all were held.
  */
 async function holdChosenSeats(
   manager: EntityManager,
@@ -270,7 +334,7 @@ async function holdChosenSeats(
     `WITH requested AS (
        SELECT * FROM unnest($2::int[], $3::text[]) AS r("row", "letter")
      ), locked AS (
-       SELECT seat."row", seat."letter"::text AS "letter", seat."status"
+       SELECT seat."row", seat."letter"::text AS "letter", seat."status", seat."fare_class"
        FROM "flight_seats" seat
        JOIN "flights" flight ON flight."id" = seat."flight_id"
        WHERE seat."flight_id" = $1
@@ -291,10 +355,12 @@ async function holdChosenSeats(
        WHERE verdict.ok AND seat."flight_id" = $1
          AND seat."row" = locked."row" AND seat."letter" = locked."letter"
        RETURNING seat."row"
-     )
-     SELECT locked."row", locked."letter", locked."status",
+     ), ${SHARE_LOCKED_FARES}
+     SELECT locked."row", locked."letter", locked."status", locked."fare_class",
+            fares."amount_vnd",
             (SELECT count(*) FROM held)::int AS "held"
-     FROM locked`,
+     FROM locked
+     LEFT JOIN fares ON fares."fare_class" = locked."fare_class"`,
     [
       flightId,
       requested.map((seat) => seat.row),
@@ -303,12 +369,17 @@ async function holdChosenSeats(
       now,
       requested.length,
     ],
-  )) as Array<SeatPosition & { status: string; held: number }>;
+  )) as Array<PricedSeatRow & { status: string; held: number }>;
 
   const codes = requested.map(formatSeatPosition);
 
   if (rows.length > 0 && (rows[0]?.held ?? 0) > 0) {
-    return { outcome: "held", seats: codes };
+    // In the request's order, so passenger n gets the seat they named.
+    const byCode = new Map(rows.map((row) => [formatSeatPosition(row), row]));
+    return {
+      outcome: "held",
+      seats: codes.map((code) => toHeldSeat(flightId, byCode.get(code) as PricedSeatRow)),
+    };
   }
 
   if (rows.length === 0) {

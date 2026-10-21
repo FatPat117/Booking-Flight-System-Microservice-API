@@ -1,6 +1,6 @@
 import type { FareClass } from "../aircraft/seat-layout.js";
 import { formatSeatPosition } from "../aircraft/seat-position.js";
-import { isUuid } from "../types.js";
+import { type FlightFares, isUuid } from "../types.js";
 import type {
   FlightRepository,
   FlightSeat,
@@ -19,8 +19,13 @@ export type SeatMapRow = {
   seats: SeatMapSeat[];
 };
 
+/**
+ * `fares` once, not on every seat: a seat's price is its class's fare, and
+ * repeating it per seat would only make 180 copies of two numbers.
+ */
 export type SeatMap = {
   flightId: string;
+  fares: FlightFares;
   rows: SeatMapRow[];
 };
 
@@ -56,7 +61,7 @@ function groupByRow(seats: FlightSeat[]): SeatMapRow[] {
 
 /**
  * The public seat map of one flight (no auth, like the flight itself): which
- * seats exist, their fare class, and whether they are still free. A
+ * seats exist, their fare class and its price, and whether they are still free. A
  * malformed id is not-found, like getFlight.
  */
 export function createGetFlightSeatMap(dependencies: {
@@ -69,10 +74,16 @@ export function createGetFlightSeatMap(dependencies: {
       return { outcome: "not-found" };
     }
 
-    const seats = await flightRepository.findSeats(flightId);
+    const [flight, seats] = await Promise.all([
+      flightRepository.findById(flightId),
+      flightRepository.findSeats(flightId),
+    ]);
 
-    return seats === undefined
+    return flight === undefined || seats === undefined
       ? { outcome: "not-found" }
-      : { outcome: "found", seatMap: { flightId, rows: groupByRow(seats) } };
+      : {
+          outcome: "found",
+          seatMap: { flightId, fares: flight.fares, rows: groupByRow(seats) },
+        };
   };
 }
