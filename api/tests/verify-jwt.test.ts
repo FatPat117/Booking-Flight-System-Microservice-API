@@ -26,6 +26,7 @@ import {
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
+  createUnusedPayForBooking,
   createUnusedFlightSeatMap,
   createUnusedOpenFlight,
   createUnusedReferenceData,
@@ -287,6 +288,7 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
     }),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
+    ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
     listFlights: createListFlights({
       flightRepository,
@@ -342,6 +344,7 @@ test("GET /api/whoami returns 401 without a token", async () => {
     createBooking: async () => ({ outcome: "flight-not-found" as const }),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
+    ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
     listFlights: createListFlights({
       flightRepository,

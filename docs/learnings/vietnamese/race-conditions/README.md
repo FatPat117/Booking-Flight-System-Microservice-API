@@ -28,15 +28,18 @@ Postgres thật** chứng minh nó.
 
 | Huỷ đua với đặt lại ghế vừa nhả; nhiều lần huỷ cùng lúc | Huỷ + nhả ghế trong một câu (CTE) + `SKIP LOCKED` | Race test D, E Day 47 | [07](./07-huy-va-dat-lai-dong-thoi.md) |
 | Job quét chạy trên nhiều instance | Lô `FOR UPDATE SKIP LOCKED`, một transaction mỗi lô | Hết hạn giữ ghế | [08](./08-het-han-giu-ghe-va-bien-thoi-gian.md) |
-| Hai chuyển trạng thái theo thời gian đua nhau | Điều kiện bổ sung `<= now` / `> now` + row lock | Huỷ vs hết hạn (sau này: thanh toán vs hết hạn) | [08](./08-het-han-giu-ghe-va-bien-thoi-gian.md) |
+| Hai chuyển trạng thái theo thời gian đua nhau | Điều kiện bổ sung `<= now` / `> now` + row lock | Huỷ vs hết hạn; thanh toán vs hết hạn (Day 49B) | [08](./08-het-han-giu-ghe-va-bien-thoi-gian.md), [10](./10-thanh-toan-ba-pha-va-idempotency-key.md) |
 | Nhả nhiều ghế trong khi người khác giữ ghế đó | Khoá trước theo cùng thứ tự toàn cục, rồi mới update | Huỷ / hết hạn vs giữ ghế chỉ định | [08](./08-het-han-giu-ghe-va-bien-thoi-gian.md) |
 | Chụp giá trị ở bảng khác đúng lúc quyết định | Đọc trong **cùng câu ghi**, `FOR SHARE`, và CTE phải được JOIN | Giá vé lúc giữ ghế vs đổi giá | [09](./09-chup-gia-va-khoa-dong-gia.md) |
+| Gọi hệ thống ngoài giữa một lần ghi | Ba pha, gọi **ngoài** transaction; thua race thì ghi `REFUND_PENDING` rồi hoàn tiền | Thanh toán vs hết hạn / huỷ | [10](./10-thanh-toan-ba-pha-va-idempotency-key.md) |
+| Cùng một request gửi lặp lại | Idempotency-Key: claim `ON CONFLICT DO NOTHING`, fingerprint, lưu response cùng transaction | `POST …/payments` | [10](./10-thanh-toan-ba-pha-va-idempotency-key.md) |
+| "Tối đa một dòng ở trạng thái X" mỗi cha | Partial unique index + `ON CONFLICT (…) WHERE …` | Một `PROCESSING`, một `SUCCEEDED` mỗi booking | [10](./10-thanh-toan-ba-pha-va-idempotency-key.md) |
 
 Cách test tất cả những thứ trên: [06-cach-test-race-condition.md](./06-cach-test-race-condition.md).
 
-Năm file race test trong `api/tests/integration/`: `postgres-booking-race` (một ghế mỗi booking, Day 47),
+Sáu file race test trong `api/tests/integration/`: `postgres-booking-race` (một ghế mỗi booking, Day 47),
 `postgres-booking-hold-race` (nhiều ghế, Day 48A), `postgres-booking-expiry-race` (hết hạn giữ ghế, Day 48B),
-`postgres-fare-snapshot` (chụp giá, Day 49A), `flight-schedule-race.postgres` (lịch máy bay, Day 46).
+`postgres-fare-snapshot` (chụp giá, Day 49A), `postgres-payment-race` (thanh toán, Day 49B), `flight-schedule-race.postgres` (lịch máy bay, Day 46).
 
 ## Các con số đã đo (thuộc lòng để kể khi phỏng vấn)
 
@@ -53,3 +56,6 @@ Năm file race test trong `api/tests/integration/`: `postgres-booking-race` (m�
 | Day 48B E: nhả ghế ngược thứ tự, có cổng khoá 12A | deadlock 5/5; code thật 0 |
 | Day 49A B1: hold gặp lần đổi giá chưa commit; có / không `FOR SHARE` | chờ rồi lấy giá mới / không chờ, lấy giá cũ |
 | Day 49A B2: đổi giá giữa lúc transaction hold còn mở; có / không `FOR SHARE` | đổi giá chờ, booking commit trước / booking commit **sau** đổi giá mà vẫn giá cũ |
+| Day 49B A: 10 request cùng Idempotency-Key | 1 lần charge, 1×`201`, 9×`409 IDEMPOTENCY_KEY_IN_PROGRESS` |
+| Day 49B E: gateway trong transaction (charge 1 s) / ba pha | huỷ chờ 908–922 ms, job bỏ qua booking / huỷ 2–11 ms |
+| Day 49B C đúng hạn: pha 3 vs job, 20 vòng | 17–19 confirm thắng, phần còn lại expire + hoàn tiền; mỗi booking một kết cục |

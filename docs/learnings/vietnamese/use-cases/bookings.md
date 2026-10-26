@@ -117,7 +117,7 @@ Sau huỷ, hành khách vẫn giữ bản sao mã ghế làm lịch sử.
 ```text
 — → HELD (đặt)        HELD → CANCELLED (huỷ, khi hold > now)       CONFIRMED → CANCELLED (huỷ, booking cũ)
 HELD → EXPIRED (job, khi hold <= now; đọc thì thấy EXPIRED ngay từ lúc hạn)
-Chưa có: HELD → CONFIRMED (thanh toán, bước 6)
+HELD → CONFIRMED (thanh toán thành công, Day 49B; khi hold > now ở pha 3)
 ```
 Booking cũ được migrate `active → CONFIRMED`, `cancelled → CANCELLED`.
 
@@ -134,3 +134,45 @@ Booking cũ được migrate `active → CONFIRMED`, `cancelled → CANCELLED`.
 - Kết quả `{ expired, batches, exhausted }`; `exhausted` = chạm 20 lô → log warn
   `booking_hold_expiry_backlog`.
 - Lô lỗi → rollback cả lô, lô trước vẫn giữ, lần sau thử lại (head-of-line như outbox relay).
+
+## PayForBooking — `POST /api/bookings/:id/payments` (Day 49B)
+
+**Code:** `api/src/payments/pay-for-booking.ts`, route trong `api/src/app.ts`, validation
+`api/src/payments/payment-validation.ts`, response lưu kèm key `api/src/payments/payment-response.ts`.
+
+**Input:** header `Idempotency-Key` (1–255 ký tự ASCII hiển thị) + body
+`{ paymentMethodToken, amount: { amount, currency: "VND" } }`. Route validate **trước** khi claim key
+(lỗi validate không chiếm key), tính fingerprint từ `POST` + path + body đã validate.
+
+**Luồng ba pha:**
+
+```text
+Pha 1 (tx)   claim key ─┬─ đã COMPLETED, cùng fingerprint → phát lại response đã lưu (+ Idempotent-Replayed)
+                        ├─ khác fingerprint                → 422 IDEMPOTENCY_KEY_REUSED
+                        └─ IN_PROGRESS                      → 409 IDEMPOTENCY_KEY_IN_PROGRESS
+             đọc booking (scope chủ)  không thấy            → lưu 404
+             không HELD / còn ≤ 60 s                         → lưu 409 BOOKING_NOT_PAYABLE
+             amount ≠ total                                  → 422 PAYMENT_AMOUNT_MISMATCH (release key)
+             INSERT payment PROCESSING ─ đã có PROCESSING    → 409 PAYMENT_IN_PROGRESS (release key)
+             gắn payment vào key
+Pha 2        gateway.charge (không transaction)  ─ throw → payment ở lại PROCESSING, key IN_PROGRESS (49C)
+Pha 3 (tx)   declined  → FAILED, audit PAYMENT_FAILED, lưu 402
+             charged   → confirmHold thắng → SUCCEEDED, audit BOOKING_CONFIRMED, outbox booking-confirmed, lưu 201
+                         confirmHold thua  → REFUND_PENDING, lưu 409 → COMMIT → refund → REFUNDED (system/payment-refund)
+```
+
+| Outcome | HTTP | Lưu vào key? |
+|---|---|---|
+| confirmed | `201` `{ payment, booking }` | có |
+| declined | `402 PAYMENT_DECLINED` | có |
+| not-payable / thua race (đã hoàn tiền) | `409 BOOKING_NOT_PAYABLE` | có |
+| not-found / booking người khác | `404 BOOKING_NOT_FOUND` | có |
+| key-reused / key-in-progress | `422` / `409` | không |
+| amount-mismatch / payment-in-progress | `422` / `409` | không (key được release) |
+| lỗi validate / admin / 5xx | `422` / `403` / `500` | không |
+
+- Simulator: `tok_success` trừ tiền, `tok_decline` (và token lạ) bị từ chối. `PAYMENT_SIMULATOR_DELAY_MS`
+  làm chậm mỗi charge **và** refund — dùng để xem race bằng tay.
+- Trả được sau khi chuyến đóng bán (BR-PAY-06): không pha nào đọc trạng thái chuyến.
+- Không có `Location`, không có `GET` payment (chưa có user story).
+

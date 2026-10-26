@@ -63,6 +63,13 @@ import { connectPublisherWithRetry } from "../messaging/connect-with-retry.js";
 import type { MessagePublisher } from "../messaging/message-publisher.js";
 import { createOutboxRelayJob } from "../outbox/outbox-relay-job.js";
 import { createPostgresOutboxRepository } from "../outbox/postgres/postgres-outbox-repository.js";
+import { createPostgresIdempotencyRepository } from "../idempotency/postgres/postgres-idempotency-repository.js";
+import {
+  createPayForBooking,
+  type PayForBooking,
+} from "../payments/pay-for-booking.js";
+import { createPostgresPaymentRepository } from "../payments/postgres/postgres-payment-repository.js";
+import { createSimulatedPaymentGateway } from "../payments/simulated-payment-gateway.js";
 import {
   createConsoleLogger,
   type Logger,
@@ -96,6 +103,7 @@ export type Application = Readonly<{
   openFlight: OpenFlight;
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
+  payForBooking: PayForBooking;
   getBooking: GetBooking;
   getBookingByReference: GetBookingByReference;
   listBookings: ListBookings;
@@ -154,6 +162,11 @@ export async function createApplication(
   const aircraftRepository = createPostgresAircraftRepository(dataSource);
   const auditRecorder = createPostgresAuditRecorder(dataSource);
   const outboxRepository = createPostgresOutboxRepository(dataSource);
+  const paymentRepository = createPostgresPaymentRepository(dataSource);
+  const idempotencyRepository = createPostgresIdempotencyRepository(dataSource);
+  const paymentGateway = createSimulatedPaymentGateway({
+    delayMs: config.paymentSimulatorDelayMs,
+  });
   const transactionRunner = createPostgresTransactionRunner(dataSource);
   const healthChecks = createPostgresHealthChecks(dataSource);
 
@@ -205,6 +218,22 @@ export async function createApplication(
     auditRecorder,
     outboxRepository,
     transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
+  });
+
+  const payForBooking = createPayForBooking({
+    bookingRepository,
+    paymentRepository,
+    idempotencyRepository,
+    paymentGateway,
+    auditRecorder,
+    outboxRepository,
+    transactionRunner,
+    logger,
+    generatePaymentId: () => crypto.randomUUID(),
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
@@ -301,6 +330,7 @@ export async function createApplication(
     openFlight,
     createBooking,
     cancelBooking,
+    payForBooking,
     getBooking,
     getBookingByReference,
     listBookings,

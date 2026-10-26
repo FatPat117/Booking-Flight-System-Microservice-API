@@ -1,9 +1,9 @@
-# Danh sách migration (đến Day 48B)
+# Danh sách migration (đến Day 49B)
 
 Thư mục: `api/src/postgres/migrations/` (database `booking_db`) và
 `services/identity/src/migrations/` (database `identity_db`). Tên file = timestamp + tên lớp.
 
-## `booking_db` — 24 migration
+## `booking_db` — 26 migration
 
 | # | Migration | Day | Làm gì | Điểm hay / lý do |
 |---|---|---|---|---|
@@ -31,6 +31,8 @@ Thư mục: `api/src/postgres/migrations/` (database `booking_db`) và
 | 22 | `BackfillFlightFares` | 49A | Chuyến `VND` có ghế ECONOMY → giá ECONOMY = `price_in_cents` **giữ nguyên** | `price_in_cents` vốn đã là đồng (tên cột sai). **Không** đoán giá BUSINESS, **không** tỷ giá USD trong migration |
 | 23 | `ContractFlightFares` | 49A | Kiểm BR-FLT-09 rồi xoá `price_in_cents`, `currency` và 2 CHECK | Từ chối kèm danh sách + HINT khi hạng có ghế mà thiếu giá, hoặc có giá mà không có ghế. Thử trên dev: lần 1 từ chối VN902 (thiếu BUSINESS) và VN903 (USD); đặt giá bằng psql; thêm cố ý một giá thừa → lần 2 từ chối đúng nó; lần 3 qua. `down` mất dữ liệu (chỉ giữ một giá) và ghi rõ |
 | 24 | `AddPassengerFareSnapshot` | 49A | `booking_passengers.fare_class`, `price_vnd`; backfill theo **vị trí ghế** trên chuyến + giá **lúc chạy migration**; CHECK ghế/hạng/giá cùng NULL, giá > 0, ≤ 2^53 − 1 | Tìm ghế theo vị trí (không theo `booking_id`) để booking đã huỷ/hết hạn cũng có giá. Từ chối hành khách có ghế mà không ra giá (ghế không thuộc chuyến) |
+| 25 | `CreatePayments` | 49B | Bảng `payments` (5 trạng thái, `amount_vnd bigint` ≤ 2^53 − 1); CHECK: đã trừ tiền thì phải có `provider_reference`, `FAILED` phải có `failure_reason`; partial unique `(booking_id) WHERE status = 'SUCCEEDED'` và `… = 'PROCESSING'` | Dòng `PROCESSING` ghi ở pha 1, **trước** khi gọi gateway → request lặp, restart, đối soát đều thấy "đã bắt đầu". Partial index `SUCCEEDED` = BR-PAY-05 do **DB** giữ, không phải do key. Index `PROCESSING` làm trọng tài cho `ON CONFLICT … WHERE` (không `23505`) |
+| 26 | `CreateIdempotencyKeys` | 49B | Bảng `idempotency_keys`, PK `(account_id, operation, key)`, fingerprint, `IN_PROGRESS`/`COMPLETED`, `response_status` + `response_body json`, `payment_id` FK; CHECK `COMPLETED ⇔ có response`; index `created_at` | Key thuộc về account (Day 44). `response_body` là **`json`** chứ không `jsonb`: `jsonb` sắp lại key nên câu trả lời phát lại không giống từng byte (e2e phát hiện, sửa trước khi commit). Index `created_at` cho việc dọn key > 24 h (49C) |
 
 ## `identity_db` — 2 migration
 

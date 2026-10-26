@@ -18,6 +18,7 @@ import type { GetFlightSeatMap } from "./flights/get-flight-seat-map.js";
 import type { ListFlights } from "./flights/list-flights.js";
 import type { OpenFlight } from "./flights/open-flight.js";
 import type { HealthChecks } from "./health/health-checks.js";
+import { requestFingerprint } from "./idempotency/request-fingerprint.js";
 import {
   createErrorHandler,
   notFoundHandler,
@@ -29,6 +30,11 @@ import {
   type AuthenticatedUser,
 } from "./observability/request-context.js";
 import { createRequestObservabilityMiddleware } from "./observability/request-observability.js";
+import type { PayForBooking } from "./payments/pay-for-booking.js";
+import {
+  isValidIdempotencyKey,
+  validatePaymentInput,
+} from "./payments/payment-validation.js";
 
 export type AppDependencies = {
   getFlight: GetFlight;
@@ -37,6 +43,7 @@ export type AppDependencies = {
   openFlight: OpenFlight;
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
+  payForBooking: PayForBooking;
   getBooking: GetBooking;
   getBookingByReference: GetBookingByReference;
   listBookings: ListBookings;
@@ -77,6 +84,7 @@ export function createApp(dependencies: AppDependencies) {
     openFlight,
     createBooking,
     cancelBooking,
+    payForBooking,
     getBooking,
     getBookingByReference,
     listBookings,
@@ -419,6 +427,103 @@ export function createApp(dependencies: AppDependencies) {
       }
 
       return res.status(204).send();
+    },
+  );
+
+  // US-PAY-01 (Decision 14). Checked here, before the key is claimed, so a
+  // malformed request never takes a key: the Idempotency-Key header and the
+  // body. Everything after that is the use case's; a final outcome comes
+  // back as the stored response and is sent exactly as stored. Admins do
+  // not pay for bookings (BR-AUTH-03), hence role `user`. No Location and
+  // no GET: no story reads a payment.
+  app.post(
+    "/api/bookings/:id/payments",
+    requireJwt,
+    requireRole("user"),
+    async (req: Request<{ id: string }>, res) => {
+      const idempotencyKey = req.get("Idempotency-Key");
+
+      if (idempotencyKey === undefined) {
+        return sendApiError(res, 422, {
+          code: "IDEMPOTENCY_KEY_REQUIRED",
+          message: "Idempotency-Key header is required",
+        });
+      }
+
+      if (!isValidIdempotencyKey(idempotencyKey)) {
+        return sendApiError(res, 422, {
+          code: "VALIDATION_FAILED",
+          message: "Request contains an invalid Idempotency-Key",
+          details: [
+            {
+              field: "Idempotency-Key",
+              code: "INVALID_IDEMPOTENCY_KEY",
+              message: "Idempotency-Key must be 1-255 visible ASCII characters",
+            },
+          ],
+        });
+      }
+
+      const validation = validatePaymentInput(req.body);
+
+      if (!validation.success) {
+        return sendApiError(res, 422, {
+          code: "VALIDATION_FAILED",
+          message: "Request contains invalid payment data",
+          details: validation.issues,
+        });
+      }
+
+      const user = currentUser();
+      const result = await payForBooking(
+        req.params.id,
+        toBookingAccessScope(user),
+        toActor(user),
+        {
+          idempotencyKey,
+          // The route's own path, not req.originalUrl: a query string the
+          // route ignores must not make a repeat look like a new request.
+          fingerprint: requestFingerprint({
+            method: "POST",
+            path: `/api/bookings/${req.params.id}/payments`,
+            body: validation.value,
+          }),
+          ...validation.value,
+        },
+      );
+
+      if (result.outcome === "answered") {
+        if (result.replayed) {
+          res.set("Idempotent-Replayed", "true");
+        }
+        return res.status(result.response.status).json(result.response.body);
+      }
+
+      if (result.outcome === "idempotency-key-reused") {
+        return sendApiError(res, 422, {
+          code: "IDEMPOTENCY_KEY_REUSED",
+          message: "Idempotency-Key was already used with a different request",
+        });
+      }
+
+      if (result.outcome === "idempotency-key-in-progress") {
+        return sendApiError(res, 409, {
+          code: "IDEMPOTENCY_KEY_IN_PROGRESS",
+          message: "A request with this Idempotency-Key is still being processed",
+        });
+      }
+
+      if (result.outcome === "amount-mismatch") {
+        return sendApiError(res, 422, {
+          code: "PAYMENT_AMOUNT_MISMATCH",
+          message: `amount must equal the booking total: ${result.total.amount} ${result.total.currency}`,
+        });
+      }
+
+      return sendApiError(res, 409, {
+        code: "PAYMENT_IN_PROGRESS",
+        message: "Another payment for this booking is being processed",
+      });
     },
   );
 

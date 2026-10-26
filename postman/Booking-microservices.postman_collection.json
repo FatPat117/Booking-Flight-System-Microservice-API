@@ -76,7 +76,11 @@
     {
       "key": "day48bReference",
       "value": ""
-    }
+    },
+    { "key": "day49bFlightId", "value": "" },
+    { "key": "day49bBookingId", "value": "" },
+    { "key": "day49bKey", "value": "" },
+    { "key": "day49bConfirmedBody", "value": "" }
   ],
   "item": [
     {
@@ -2520,6 +2524,506 @@
                   "  const body = pm.response.json();",
                   "  pm.expect(body.passengers.map((p) => p.price.amount)).to.eql([4200000, 1500000]);",
                   "  pm.expect(body.total.amount).to.eql(5700000);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Day 49B — Payment",
+      "description": "Needs the dev seed (VN-B210, economy only), alice's accessToken (admin), bob's userAccessToken and carol's userBAccessToken.\nRun top to bottom on a database without VN493 on 2026-12-08. Each run draws a new Idempotency-Key prefix (day49bKey).\nPayment runs in three phases around the simulated gateway (ADR-009): tok_success is charged, tok_decline declined. A final answer is stored with the key and replayed byte for byte with Idempotent-Replayed: true. To watch the race with expiry by hand, start the app with PAYMENT_SIMULATOR_DELAY_MS=8000 and back-date hold_expires_at with psql while a payment runs (README, Day 49B).",
+      "item": [
+        {
+          "name": "POST /api/flights (VN493 on VN-B210, economy only → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN493\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-B210\",\n  \"departureAt\": \"2026-12-08T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-08T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000 }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// One Idempotency-Key prefix per run, so the folder can run again on the same database.",
+                  "pm.collectionVariables.set('day49bKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day49bFlightId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (→ 200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day49bFlightId}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OPEN', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:flightId/bookings as bob (2 passengers → 201 HELD, total 3 000 000)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day49bFlightId}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [{ \"name\": \"Bob Tran\" }, { \"name\": \"An Le\" }]\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 HELD, total 3000000 VND', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.status).to.eql('HELD');",
+                  "  pm.expect(body.total).to.eql({ amount: 3000000, currency: 'VND' });",
+                  "});",
+                  "pm.collectionVariables.set('day49bBookingId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments without Idempotency-Key (→ 422 IDEMPOTENCY_KEY_REQUIRED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49bBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_success\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 IDEMPOTENCY_KEY_REQUIRED', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_KEY_REQUIRED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments with an amount other than the total (→ 422 PAYMENT_AMOUNT_MISMATCH, key not kept)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49bKey}}-amount"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49bBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_success\",\n  \"amount\": { \"amount\": 1500000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 PAYMENT_AMOUNT_MISMATCH naming the total', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  pm.expect(pm.response.json().error).to.eql({ code: 'PAYMENT_AMOUNT_MISMATCH', message: 'amount must equal the booking total: 3000000 VND' });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments as carol (another account → 404 BOOKING_NOT_FOUND)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userBAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49bKey}}-carol"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49bBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_success\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 BOOKING_NOT_FOUND', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('BOOKING_NOT_FOUND');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments as alice (admin → 403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49bKey}}-admin"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49bBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_success\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 FORBIDDEN', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments with tok_decline (→ 402 PAYMENT_DECLINED, booking stays HELD)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49bKey}}-1"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49bBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_decline\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('402 PAYMENT_DECLINED', () => {",
+                  "  pm.response.to.have.status(402);",
+                  "  pm.expect(pm.response.json().error).to.eql({ code: 'PAYMENT_DECLINED', message: 'Payment was declined: card_declined' });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments with tok_success and a new key (→ 201 SUCCEEDED, booking CONFIRMED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49bKey}}-2"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49bBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_success\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201: payment SUCCEEDED for the total, booking CONFIRMED', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.payment.status).to.eql('SUCCEEDED');",
+                  "  pm.expect(body.payment.amount).to.eql({ amount: 3000000, currency: 'VND' });",
+                  "  pm.expect(body.booking.status).to.eql('CONFIRMED');",
+                  "  pm.expect(pm.response.headers.has('Idempotent-Replayed')).to.eql(false);",
+                  "  pm.expect(pm.response.headers.has('Location')).to.eql(false);",
+                  "});",
+                  "pm.collectionVariables.set('day49bConfirmedBody', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments again, same key and body (→ the identical 201, Idempotent-Replayed: true)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49bKey}}-2"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49bBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_success\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the stored 201, byte for byte, marked as a replay', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(pm.response.text()).to.eql(pm.collectionVariables.get('day49bConfirmedBody'));",
+                  "  pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.eql('true');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments, same key, different body (→ 422 IDEMPOTENCY_KEY_REUSED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49bKey}}-2"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49bBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_decline\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 IDEMPOTENCY_KEY_REUSED', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_KEY_REUSED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments with a third key on the CONFIRMED booking (→ 409 BOOKING_NOT_PAYABLE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49bKey}}-3"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49bBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_success\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 BOOKING_NOT_PAYABLE', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('BOOKING_NOT_PAYABLE');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id/seats (the paid seats are BOOKED)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day49bFlightId}}/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('exactly the seats of the paid booking are BOOKED, none HELD', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const seats = pm.response.json().rows.flatMap((row) => row.seats);",
+                  "  const paid = JSON.parse(pm.collectionVariables.get('day49bConfirmedBody')).booking.passengers.map((p) => p.seat);",
+                    "  pm.expect(seats.filter((s) => s.status === 'BOOKED').map((s) => s.code)).to.eql(paid);",
+                  "  pm.expect(seats.filter((s) => s.status === 'HELD')).to.have.lengthOf(0);",
                   "});"
                 ]
               }

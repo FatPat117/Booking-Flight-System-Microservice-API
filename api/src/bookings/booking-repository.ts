@@ -135,6 +135,15 @@ export type CancelBookingRepositoryResult =
   | { outcome: "not-found" };
 
 /**
+ * - not-payable: not HELD, or HELD with a lapsed hold (BR-BOOK-10), or not
+ *   in the scope. Nothing was written. Payment does not need to know which:
+ *   every one of them means "refund" (Decision 14).
+ */
+export type ConfirmHoldResult =
+  | { outcome: "confirmed"; booking: Booking }
+  | { outcome: "not-payable" };
+
+/**
  * Object-level authorization lives here, in the queries: every method that
  * reads or changes an existing booking takes a BookingAccessScope and applies
  * it to *every* query it runs — including the follow-up read that only picks
@@ -229,4 +238,19 @@ export type BookingRepository = Readonly<{
    * inside a transaction so a batch commits with them or not at all.
    */
   expireDueHolds(now: Date, limit: number): Promise<ExpiredHold[]>;
+  /**
+   * Payment phase 3 (Decision 14): HELD with a hold still valid at `now`
+   * (`holdExpiresAt > now`, BR-BOOK-10 — the same side as cancel) →
+   * CONFIRMED, only inside the scope (OCC), and every seat of the booking
+   * HELD → BOOKED in the same statement. Returns the booking as confirmed.
+   *
+   * Races with cancel and expiry are decided by the booking row: whoever
+   * updates it first wins, the other re-checks its condition and matches
+   * nothing. Seats are locked in (row, letter) order, like cancel.
+   */
+  confirmHold(
+    bookingId: string,
+    scope: BookingAccessScope,
+    now: Date,
+  ): Promise<ConfirmHoldResult>;
 }>;

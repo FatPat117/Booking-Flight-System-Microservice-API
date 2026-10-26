@@ -29,6 +29,8 @@ Migration có thư mục riêng: [../migrations/](../migrations/README.md).
 > thật, có control test đo được: không khoá thì 15–16/20 request báo hết ghế sai, khoá sai thứ tự
 > thì 98/100 vòng deadlock. Giá vé được **chụp** vào từng hành khách ngay trong câu giữ ghế, với
 > dòng giá bị khoá `FOR SHARE`, nên đổi giá giữa chừng không bao giờ cho ra booking lẫn giá.
+> Thanh toán gọi gateway **ngoài** transaction (ba pha), có Idempotency-Key để gửi lặp không trừ
+> tiền hai lần, và tự hoàn tiền khi booking hết hạn đúng lúc đang trừ tiền.
 >
 > Event đi qua **transactional outbox** nên không mất khi broker chết; consumer có DLQ, ack tay,
 > event có `eventId` và `correlationId` để truy vết. Bảo mật có BOLA: quyền sở hữu nằm ngay trong
@@ -42,6 +44,6 @@ Migration có thư mục riêng: [../migrations/](../migrations/README.md).
 
 - Mở bằng **vấn đề**, rồi cách giải, rồi **đánh đổi** — đừng chỉ nói tên pattern.
 - Luôn có một con số hoặc một lần "tôi đã sai và phát hiện ra nhờ…" (xem mục bẫy trong
-  [on-tap-nhanh-day-01-49a.md](../on-tap-nhanh-day-01-49a.md)).
-- Nói rõ cái **chưa làm** và vì sao (chưa có payment, sơ đồ ghế trễ tới ~60 s sau hạn, chưa dedupe consumer):
+  [on-tap-nhanh-day-01-49b.md](../on-tap-nhanh-day-01-49b.md)).
+- Nói rõ cái **chưa làm** và vì sao (chưa đối soát payment lỗi, sơ đồ ghế trễ tới ~60 s sau hạn, chưa dedupe consumer):
   biết giới hạn của mình được đánh giá cao.

@@ -22,6 +22,7 @@ const testConfigBase = {
   jwtSecret: TEST_JWT_SECRET,
   rabbitmqUrl: "amqp://guest:guest@localhost:5672",
   postgres: parsePostgresConfig(process.env),
+  paymentSimulatorDelayMs: 0,
 } as const;
 
 test("createApplication wires use cases, migrates the real database, and closes cleanly", async () => {

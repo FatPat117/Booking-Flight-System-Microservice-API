@@ -4,8 +4,9 @@
  * and `passenger/anonymous` actors — the log is append-only, so they stay
  * as written; no code writes them any more.
  *
- * `system` is the process itself acting on a schedule, with no account
- * behind it; `id` names the job (Day 48B: "booking-hold-expiry").
+ * `system` is the process itself acting with no account behind it; `id`
+ * names what acted (Day 48B: "booking-hold-expiry"; Day 49B:
+ * "payment-refund").
  */
 export type AuditActor =
   | {
@@ -33,6 +34,10 @@ export type AuditTarget =
   | {
       type: "aircraft";
       id: string;
+    }
+  | {
+      type: "payment";
+      id: string;
     };
 
 /**
@@ -45,6 +50,10 @@ export type AuditAction =
   | "BOOKING_CREATED"
   | "BOOKING_CANCELLED"
   | "BOOKING_EXPIRED"
+  | "BOOKING_CONFIRMED"
+  | "PAYMENT_FAILED"
+  | "PAYMENT_REFUND_PENDING"
+  | "PAYMENT_REFUNDED"
   | "AIRPORT_REGISTERED"
   | "AIRCRAFT_REGISTERED";
 

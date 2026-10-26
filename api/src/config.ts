@@ -16,6 +16,12 @@ export type AppConfig = Readonly<{
    * PASSWORD, so a misused api connection has no path to identity_db.
    */
   postgres: PostgresConfig;
+  /**
+   * Day 49B — how long the simulated gateway takes per call. Default 0. Only
+   * for reproducing the payment-vs-expiry race by hand (e2e); it does not
+   * change any rule. Capped at 60 s, the BR-PAY-07 margin.
+   */
+  paymentSimulatorDelayMs: number;
 }>;
 
 type Environment = Record<string, string | undefined>;
@@ -37,13 +43,40 @@ export function parseConfig(environment: Environment): AppConfig {
   const jwtSecret = parseJwtSecret(environment.JWT_SECRET);
   const rabbitmqUrl = parseRabbitmqUrl(environment.RABBITMQ_URL);
   const postgres = parsePostgresConfig(environment);
+  const paymentSimulatorDelayMs = parsePaymentSimulatorDelayMs(
+    environment.PAYMENT_SIMULATOR_DELAY_MS,
+  );
 
   return {
     port,
     jwtSecret,
     rabbitmqUrl,
     postgres,
+    paymentSimulatorDelayMs,
   };
+}
+
+const MAX_PAYMENT_SIMULATOR_DELAY_MS = 60_000;
+
+function parsePaymentSimulatorDelayMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") {
+    return 0;
+  }
+
+  const trimmed = raw.trim();
+  const delay = Number(trimmed);
+
+  if (
+    !/^\d+$/.test(trimmed) ||
+    !Number.isSafeInteger(delay) ||
+    delay > MAX_PAYMENT_SIMULATOR_DELAY_MS
+  ) {
+    throw new Error(
+      `Invalid PAYMENT_SIMULATOR_DELAY_MS: expected an integer between 0 and ${MAX_PAYMENT_SIMULATOR_DELAY_MS}`,
+    );
+  }
+
+  return delay;
 }
 
 function parsePostgresConfig(environment: Environment): PostgresConfig {

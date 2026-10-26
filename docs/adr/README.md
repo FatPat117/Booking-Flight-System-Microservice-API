@@ -30,5 +30,6 @@ ADRs do **not** describe how to implement the choice. That lives in code and day
 | [006](./006-sqlite-to-postgres-migration.md) | Move `api` Storage from SQLite to Postgres/TypeORM | Accepted |
 | [007](./007-domain-before-advanced-patterns.md) | Complete the Domain Before Introducing Advanced Patterns | Accepted |
 | [008](./008-time-derived-flight-status.md) | Derive Time-Based Flight Statuses Instead of Storing Them | Accepted |
+| [009](./009-external-calls-outside-transactions.md) | External Calls Stay Outside Database Transactions — Three-Phase Payment with Compensation | Accepted |
 
 See also: [architecture overview](../architecture-overview.md) — current topology and gap vs the destination architecture.

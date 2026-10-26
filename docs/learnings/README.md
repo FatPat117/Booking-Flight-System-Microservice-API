@@ -26,10 +26,11 @@ Personal notes on techniques and mechanisms this project actually uses — writt
 | [flight-lifecycle-state-machine.md](./flight-lifecycle-state-machine.md) | State machine as a lookup table, guards, stored vs time-derived status, compare-and-set on status change |
 | [exclusion-constraints.md](./exclusion-constraints.md) | Overlap rules across rows, GiST + `btree_gist`, `IMMUTABLE` wrapper, `40P01` deadlock on concurrent inserts |
 | [evolving-event-contracts.md](./evolving-event-contracts.md) | Expand → contract for messages, optional fields, explicit payload mapping |
-| [vietnamese/](./vietnamese/README.md) | **Tiếng Việt** — ôn tập Day 1 → 49A, race condition, hỏi–đáp phỏng vấn, tra cứu từng use case |
+| [vietnamese/](./vietnamese/README.md) | **Tiếng Việt** — ôn tập Day 1 → 49B, race condition, hỏi–đáp phỏng vấn, tra cứu từng use case |
 | [all-or-nothing-holds-and-lock-ordering.md](./all-or-nothing-holds-and-lock-ordering.md) | Multi-row holds in one statement, the half-commit trap, `SKIP LOCKED` vs waiting, global lock order against `40P01` |
 | [hold-expiry-and-time-boundaries.md](./hold-expiry-and-time-boundaries.md) | Job vs derive-on-read vs deadline-in-`WHERE`, complementary `<=`/`>` boundary, batched `SKIP LOCKED` sweep, release lock order proved with a gate |
 | [money-and-price-snapshots.md](./money-and-price-snapshots.md) | `Money` in whole đồng, `bigint` ↔ `number` safely, one fare per class, snapshot at hold time, `FOR SHARE` on the fares (and the CTE that must be read) |
+| [payments-and-idempotency-keys.md](./payments-and-idempotency-keys.md) | Gateway outside the transaction (three phases), compensation by refund, record-before-act, Idempotency-Key claim + fingerprint, `json` vs `jsonb` for replays |
 
 Add a row here whenever you add a note.
 

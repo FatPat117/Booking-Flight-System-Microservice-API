@@ -18,6 +18,7 @@ import { createListFlights } from "../src/flights/list-flights.js";
 import { createOpenFlight } from "../src/flights/open-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { Logger } from "../src/observability/logger.js";
+import { createPayForBooking } from "../src/payments/pay-for-booking.js";
 import { nextBookingReference } from "./fixtures/bookings.js";
 import {
   FIXTURE_TWO_CLASS_AIRCRAFT_ID,
@@ -28,13 +29,17 @@ import {
 import {
   createInMemoryAircraftRepository,
   createInMemoryAirportRepository,
+  createFakePaymentGateway,
   createInMemoryAuditRecorder,
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
+  createInMemoryIdempotencyRepository,
+  createInMemoryPaymentRepository,
   createInMemoryTransactionRunner,
   createUnusedReferenceData,
+  type FakePaymentGateway,
   type InMemoryAuditRecorder,
   type InMemoryBookingRepository,
 } from "./fakes/in-memory.js";
@@ -79,6 +84,8 @@ function createContext(): {
   clock: TestClock;
   /** For the expiry job's sweep, which no route exposes. */
   bookingRepository: InMemoryBookingRepository;
+  /** Scripted charges and refunds; counts every call. */
+  gateway: FakePaymentGateway;
 } {
   const clock: TestClock = { now: FIXED_TIME };
   const getCurrentTime = () => clock.now;
@@ -89,6 +96,7 @@ function createContext(): {
   const bookingRepository = createInMemoryBookingRepository({ flights });
   const audit = createInMemoryAuditRecorder();
   const transactionRunner = createInMemoryTransactionRunner();
+  const gateway = createFakePaymentGateway();
   const common = {
     auditRecorder: audit,
     outboxRepository: createNoopOutboxRepository(),
@@ -117,6 +125,15 @@ function createContext(): {
       generateReference: nextBookingReference,
     }),
     cancelBooking: createCancelBooking({ ...common, bookingRepository }),
+    payForBooking: createPayForBooking({
+      ...common,
+      bookingRepository,
+      paymentRepository: createInMemoryPaymentRepository(),
+      idempotencyRepository: createInMemoryIdempotencyRepository(),
+      paymentGateway: gateway,
+      logger: createMemoryLogger(),
+      generatePaymentId: () => crypto.randomUUID(),
+    }),
     getBooking: createGetBooking({ bookingRepository, getCurrentTime }),
     getBookingByReference: createGetBookingByReference({ bookingRepository, getCurrentTime }),
     listBookings: createListBookings({ bookingRepository, getCurrentTime }),
@@ -128,7 +145,7 @@ function createContext(): {
   });
 
   seedAccess.set(app, aircraftRepository);
-  return { app, audit, clock, bookingRepository };
+  return { app, audit, clock, bookingRepository, gateway };
 }
 
 let flightSequence = 0;
@@ -524,6 +541,10 @@ test("every booking endpoint returns 401 without a token", async () => {
     request(app).get(`/api/bookings/${bookingId}`),
     request(app).get("/api/bookings/by-reference/K7Q4PZ"),
     request(app).delete(`/api/bookings/${bookingId}`),
+    request(app)
+      .post(`/api/bookings/${bookingId}/payments`)
+      .set("Idempotency-Key", "key-1")
+      .send({ paymentMethodToken: "tok_success", amount: { amount: 1_500_000, currency: "VND" } }),
   ]);
 
   for (const response of responses) {
@@ -764,4 +785,180 @@ test("another account's lapsed hold is 404 on DELETE; the owner 1 ms before the 
   assert.equal(owner.status, 204);
   assert.equal(other.status, 404);
   assert.equal(other.body.error.code, "BOOKING_NOT_FOUND");
+});
+
+// ---------------------------------------------------------------------------
+// Paying for a booking (Day 49B, Decision 14)
+// ---------------------------------------------------------------------------
+
+/** The total of seedBooking's one ECONOMY passenger. */
+const PAYMENT_BODY = {
+  paymentMethodToken: "tok_success",
+  amount: { amount: 1_500_000, currency: "VND" },
+};
+
+function pay(
+  app: Express,
+  accessToken: string,
+  bookingId: string,
+  { key = "key-1", body = PAYMENT_BODY }: { key?: string | null; body?: unknown } = {},
+) {
+  const call = request(app)
+    .post(`/api/bookings/${bookingId}/payments`)
+    .set(as(accessToken));
+  return (key === null ? call : call.set("Idempotency-Key", key)).send(body as object);
+}
+
+test("POST payment answers 201 with the payment and the CONFIRMED booking, whose seat is now BOOKED", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app, 2);
+  const booked = await book(app, USER_A, flightId);
+  const bookingId = booked.body.id as string;
+
+  const paid = await pay(app, USER_A, bookingId);
+
+  assert.equal(paid.status, 201);
+  assert.equal(paid.headers["idempotent-replayed"], undefined);
+  assert.equal(paid.headers.location, undefined);
+  assert.equal(paid.body.payment.status, "SUCCEEDED");
+  assert.equal(paid.body.payment.bookingId, bookingId);
+  assert.deepEqual(paid.body.payment.amount, { amount: 1_500_000, currency: "VND" });
+  assert.match(paid.body.payment.providerReference, /^fake_ch_/);
+  assert.deepEqual(paid.body.booking, { ...booked.body, status: "CONFIRMED" });
+
+  const fetched = await request(app).get(`/api/bookings/${bookingId}`).set(as(USER_A));
+  assert.equal(fetched.body.status, "CONFIRMED");
+  assert.deepEqual(await seatStatuses(app, flightId), { "1A": "BOOKED", "1B": "AVAILABLE" });
+});
+
+test("a repeat with the same key and body gets the identical status and body, marked Idempotent-Replayed, charged once", async () => {
+  const { app, gateway } = createContext();
+  const bookingId = await seedBooking(app, USER_A);
+  const first = await pay(app, USER_A, bookingId);
+
+  // Same body, keys in another order: the same request (canonical fingerprint).
+  const repeat = await pay(app, USER_A, bookingId, {
+    body: { amount: { currency: "VND", amount: 1_500_000 }, paymentMethodToken: "tok_success" },
+  });
+
+  assert.equal(repeat.status, first.status);
+  assert.deepEqual(repeat.body, first.body);
+  assert.equal(repeat.headers["idempotent-replayed"], "true");
+  assert.equal(gateway.charges.length, 1);
+});
+
+test("the same key with a different body is 422 IDEMPOTENCY_KEY_REUSED and charges nothing (BR-PAY-02)", async () => {
+  const { app, gateway } = createContext();
+  const bookingId = await seedBooking(app, USER_A);
+  await pay(app, USER_A, bookingId);
+
+  const reused = await pay(app, USER_A, bookingId, {
+    body: { ...PAYMENT_BODY, paymentMethodToken: "tok_decline" },
+  });
+
+  assert.equal(reused.status, 422);
+  assert.equal(reused.body.error.code, "IDEMPOTENCY_KEY_REUSED");
+  assert.equal(gateway.charges.length, 1);
+});
+
+test("a missing key is 422 IDEMPOTENCY_KEY_REQUIRED; a malformed key or body is 422 VALIDATION_FAILED; none of them takes the key", async () => {
+  const { app, gateway } = createContext();
+  const bookingId = await seedBooking(app, USER_A);
+
+  const missing = await pay(app, USER_A, bookingId, { key: null });
+  const badKey = await pay(app, USER_A, bookingId, { key: "has space" });
+  const badBody = await pay(app, USER_A, bookingId, {
+    body: { paymentMethodToken: "", amount: { amount: 1.5, currency: "USD" } },
+  });
+
+  assert.equal(missing.status, 422);
+  assert.equal(missing.body.error.code, "IDEMPOTENCY_KEY_REQUIRED");
+  assert.equal(badKey.status, 422);
+  assert.equal(badKey.body.error.code, "VALIDATION_FAILED");
+  assert.deepEqual(
+    badKey.body.error.details.map((issue: { field: string }) => issue.field),
+    ["Idempotency-Key"],
+  );
+  assert.equal(badBody.status, 422);
+  assert.equal(badBody.body.error.code, "VALIDATION_FAILED");
+  assert.deepEqual(
+    badBody.body.error.details.map((issue: { field: string }) => issue.field),
+    ["paymentMethodToken", "amount.amount", "amount.currency"],
+  );
+  assert.equal(gateway.charges.length, 0);
+
+  // key-1 was never claimed by the malformed body, so it is free.
+  assert.equal((await pay(app, USER_A, bookingId)).status, 201);
+});
+
+test("an amount other than the booking total is 422 PAYMENT_AMOUNT_MISMATCH naming the total; the key stays usable", async () => {
+  const { app, gateway } = createContext();
+  const bookingId = await seedBooking(app, USER_A);
+
+  const mismatch = await pay(app, USER_A, bookingId, {
+    body: { ...PAYMENT_BODY, amount: { amount: 1_000_000, currency: "VND" } },
+  });
+
+  assert.equal(mismatch.status, 422);
+  assert.deepEqual(mismatch.body, {
+    error: {
+      code: "PAYMENT_AMOUNT_MISMATCH",
+      message: "amount must equal the booking total: 1500000 VND",
+    },
+  });
+  assert.equal(gateway.charges.length, 0);
+  assert.equal((await pay(app, USER_A, bookingId)).status, 201);
+});
+
+test("a declined card is 402 PAYMENT_DECLINED and the booking stays HELD; a new key can pay", async () => {
+  const { app, gateway } = createContext();
+  const bookingId = await seedBooking(app, USER_A);
+  gateway.willCharge({ outcome: "declined", reason: "card_declined" });
+
+  const declined = await pay(app, USER_A, bookingId, {
+    body: { ...PAYMENT_BODY, paymentMethodToken: "tok_decline" },
+  });
+
+  assert.equal(declined.status, 402);
+  assert.deepEqual(declined.body, {
+    error: { code: "PAYMENT_DECLINED", message: "Payment was declined: card_declined" },
+  });
+  const fetched = await request(app).get(`/api/bookings/${bookingId}`).set(as(USER_A));
+  assert.equal(fetched.body.status, "HELD");
+  assert.equal((await pay(app, USER_A, bookingId, { key: "key-2" })).status, 201);
+});
+
+test("a CONFIRMED booking, or a hold with 60 s or less left, is 409 BOOKING_NOT_PAYABLE without a charge", async () => {
+  const { app, gateway, clock } = createContext();
+  const confirmed = await seedBooking(app, USER_A);
+  await pay(app, USER_A, confirmed);
+  const nearlyLapsed = await seedBooking(app, USER_A);
+
+  const again = await pay(app, USER_A, confirmed, { key: "key-2" });
+  clock.now = new Date(FIXED_TIME.getTime() + 14 * 60_000);
+  const late = await pay(app, USER_A, nearlyLapsed, { key: "key-3" });
+
+  for (const response of [again, late]) {
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, "BOOKING_NOT_PAYABLE");
+  }
+  assert.equal(gateway.charges.length, 1);
+});
+
+test("another account's booking is 404 BOOKING_NOT_FOUND and an admin is 403; neither charges", async () => {
+  const { app, gateway } = createContext();
+  const bookingOfA = await seedBooking(app, USER_A);
+
+  const byB = await pay(app, USER_B, bookingOfA);
+  const byAdmin = await pay(app, ADMIN, bookingOfA);
+
+  assert.equal(byB.status, 404);
+  assert.deepEqual(byB.body, {
+    error: { code: "BOOKING_NOT_FOUND", message: "Booking was not found" },
+  });
+  assert.equal(byAdmin.status, 403);
+  assert.equal(byAdmin.body.error.code, "FORBIDDEN");
+  assert.equal(gateway.charges.length, 0);
+  const fetched = await request(app).get(`/api/bookings/${bookingOfA}`).set(as(USER_A));
+  assert.equal(fetched.body.status, "HELD");
 });

@@ -1,8 +1,8 @@
-# Ôn tập nhanh: Day 1 → Day 49A
+# Ôn tập nhanh: Day 1 → Day 49B
 
 > Sổ tay tiếng Việt để đọc lại nhanh. Mỗi mục gồm: **vấn đề → cách xử lý → vì sao**, kèm đường dẫn tới code thật.
 > Các note tiếng Anh khác trong `docs/learnings/` đi sâu từng chủ đề; file này là bản đồ tổng.
-> Cập nhật đến: **Day 49A** (2026-10-21). Số test hiện tại: api unit 400, integration 152, notifier 14, identity 12.
+> Cập nhật đến: **Day 49B** (2026-10-26). Số test hiện tại: api unit 459, integration 181, notifier 16, identity 12.
 
 ---
 
@@ -10,8 +10,8 @@
 
 ```text
 npm workspaces
-├── packages/contracts      kiểu event dùng chung + parser (flight-created, booking-held, booking-expired, booking-created cũ)
-├── api                     Express: flights (có giá theo hạng), airports, aircraft, bookings (chụp giá); outbox relay; job hết hạn giữ ghế; Postgres booking_db
+├── packages/contracts      kiểu event dùng chung + parser (flight-created, booking-held, booking-expired, booking-confirmed, booking-created cũ)
+├── api                     Express: flights (có giá theo hạng), airports, aircraft, bookings (chụp giá), thanh toán (3 pha + Idempotency-Key); outbox relay; job hết hạn giữ ghế; Postgres booking_db
 ├── services/identity       register/login, phát JWT (Postgres identity_db)
 └── services/flight-notifier  consumer RabbitMQ (log event, DLQ)
 
@@ -98,6 +98,7 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 | 48A | Nhiều hành khách + mã đặt chỗ | Giữ ghế tất cả-hoặc-không trong 1 câu lệnh; thứ tự khoá toàn cục |
 | 48B | Job hết hạn giữ ghế | Job trả ghế, đọc thì suy ra `EXPIRED`, quyết định tự kiểm hạn; biên `<=`/`>` bổ sung chính xác; nhả ghế cũng theo thứ tự khoá |
 | 49A | Giá vé: `Money`, giá theo hạng, chụp giá lúc giữ ghế | Tiền là số nguyên đồng (không ×100); `bigint` về JS là **chuỗi**; câu giữ ghế đọc giá `FOR SHARE`; CTE không ai đọc thì **không chạy** (không khoá) |
+| 49B | Thanh toán giả lập + Idempotency-Key, `HELD → CONFIRMED` | Gọi gateway **ngoài** transaction (3 pha); thua race thì **ghi `REFUND_PENDING` rồi mới hoàn tiền**; key claim bằng `ON CONFLICT DO NOTHING`; `jsonb` **đổi thứ tự key** → lưu response bằng `json` |
 
 ---
 
@@ -138,6 +139,8 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 | **Chờ khoá + thứ tự khoá toàn cục**          | Tài nguyên khách **đã chọn đích danh**                          | Giữ ghế chỉ định: `ORDER BY row, letter FOR UPDATE`        |
 | `**FOR SHARE OF flight**`                    | Đọc điều kiện ở dòng khác mà không cho nó đổi                   | Cửa sổ bán vé lúc giữ ghế                                  |
 | **`FOR SHARE` dòng giá trong cùng câu**      | Chụp một giá trị ở bảng khác đúng lúc quyết định               | Day 49A: CTE `fares` trong câu giữ ghế                      |
+| **Partial unique index + `ON CONFLICT … WHERE`** | "Tối đa một dòng ở trạng thái X" cho mỗi cha                | Day 49B: một `PROCESSING`, một `SUCCEEDED` mỗi booking      |
+| **Idempotency-Key claim**                    | Cùng một request gửi lặp lại                                    | Day 49B: `idempotency_keys`, claim thứ hai **chờ** claim đầu |
 
 Những điều **đo được** (không đoán):
 
@@ -172,6 +175,14 @@ Chụp giá lúc giữ ghế (Day 49A, Decision 13):
 - Đo (cổng = transaction đổi giá chưa commit): code thật **chờ** rồi lấy giá mới; đối chứng không `FOR SHARE` **không chờ**, và ở kịch bản ngược booking commit **sau** lần đổi giá mà vẫn mang giá cũ.
 - Test "không bao giờ trộn giá cũ/mới" **vẫn xanh khi bỏ khoá** — một câu lệnh đã đọc một snapshot. Khoá chỉ được chứng minh bởi test có bên phải **chờ** (B1/B2).
 
+Thanh toán (Day 49B, Decision 14, ADR-009):
+
+- **Ba pha**: (1) transaction ngắn — claim key, kiểm booking, ghi payment `PROCESSING`; (2) **không transaction** — gọi gateway; (3) transaction ngắn — ghi kết quả + lưu response vào key, thành công thì `confirmHold` (`HELD → CONFIRMED`, ghế `BOOKED`, một câu lệnh).
+- **Thua race ở pha 3** (booking vừa hết hạn/bị huỷ khi đang trừ tiền): `REFUND_PENDING` → **commit** → gọi refund → `REFUNDED`. Ghi ý định trước hành động: crash giữa chừng vẫn còn dấu vết cho 49C.
+- **Biên 60 s** (BR-PAY-07): chỉ **bắt đầu** trả khi hold còn > 60 s → hoàn tiền hiếm. Không "đóng băng" job hết hạn khi đang thanh toán: phải sửa câu quét Day 48B, và crash sau pha 1 sẽ giữ ghế mãi khi chưa có 49C.
+- Đo (race test E, charge 1 s): gọi gateway **trong** transaction → huỷ phải chờ **908–922 ms**, job hết hạn (`SKIP LOCKED`) **bỏ qua** booking; ba pha → huỷ **2–11 ms**. Pha 3 đúng giây hết hạn chạy cùng job: 17–19/20 confirm thắng, còn lại expire thắng + hoàn tiền — mỗi booking đúng **một** kết cục.
+- Race test A: 10 request cùng key → **1** lần charge, 1×`201`, 9×`409 IDEMPOTENCY_KEY_IN_PROGRESS`.
+
 ### 2.5 Migration an toàn
 
 - **Expand → backfill → contract** (Day 44, 46, 47, 48A): thêm cột nullable → điền dữ liệu → khối `DO` **đối soát và từ chối kèm danh sách + HINT** thay vì xoá dữ liệu, rồi mới `NOT NULL`/drop.
@@ -190,6 +201,7 @@ Chụp giá lúc giữ ghế (Day 49A, Decision 13):
 - **Tiến hoá contract**: thêm trường optional (expand); **không đổi nghĩa tên event** → tạo `booking-held` mới thay vì để `booking-created` mang nghĩa khác; giữ consumer cũ đọc message còn tồn.
 - **Không log PII**: consumer `booking-held` log reference + số hành khách, không log tên; `booking-expired` (Day 48B) log reference + số ghế.
 - **Field cũ mất nghĩa nhưng consumer còn đọc** (Day 49A): `priceInCents`/`currency` không còn trên `Flight`, producer vẫn gửi giá trị suy ra (giá ECONOMY, `"VND"`) và đánh dấu `@deprecated`; thêm `fares`, `total` dạng optional.
+- **`booking-confirmed`** (Day 49B): event đầu tiên nghĩa là "khách thật sự có ghế"; mọi field bắt buộc vì chưa có message cũ cần tương thích. Consumer log reference + số tiền, không log tên.
 - **Event do job sinh ra** (Day 48B) không có request phía sau → `correlationId` = chính `eventId`. Actor audit là `system/booking-hold-expiry`.
 - **Reconnect lười trong process** (Day 41): app không crash nên Docker không có tín hiệu restart → publisher tự nối lại khi publish tiếp theo.
 
@@ -214,6 +226,8 @@ Chụp giá lúc giữ ghế (Day 49A, Decision 13):
 - **Cổng bằng transaction chưa commit** (Day 49A): giữ một `UPDATE flight_fares` mở, rồi kiểm "hold còn pending sau 50 ms không" → chứng minh **có chờ**. Kịch bản ngược: dừng CreateBooking ở bước ghi audit (recorder chờ tín hiệu) để transaction hold còn mở.
 - **Mutation "khai báo CTE nhưng không đọc"** (Day 49A): lấy giá bằng subquery thay vì JOIN CTE `fares` → giá vẫn đúng, **mất khoá**; chỉ race test B bắt được.
 - **Đồng hồ giả nhảy ngay sau khi bị đọc**: bắt được code đọc `now` nhiều lần trong một lần chạy.
+- **`deepEqual` không thấy thứ tự key** (Day 49B): contract test lưu/đọc response xanh trên Postgres dù `jsonb` đã đổi thứ tự key; e2e so sánh từng byte mới bắt được. Giờ test so `JSON.stringify`.
+- **Fake gateway có hook `onCharge`**: chặn ở pha 2 bằng cổng (promise mở tay) để chạy job hết hạn/huỷ **trong lúc** đang trừ tiền.
 - **Đối chiếu số test** sau mỗi thay đổi; đừng tin "xanh" mà không nhìn số (`tests `** bỏ sót 23 file ở Day 36).
 - `--test-concurrency=1` cho integration: các file `TRUNCATE` chéo nhau.
 
@@ -245,6 +259,9 @@ Chụp giá lúc giữ ghế (Day 49A, Decision 13):
 14. Cột `price_in_cents` thật ra chứa **đồng** — tên cột không phải đơn vị; đơn vị nằm trong kiểu/tên (`amount_vnd`) (Day 49A).
 15. `pg` trả `bigint` dưới dạng **chuỗi**; `Number("")` là `0`, `Number("9007199254740993")` làm tròn im lặng → parse bằng regex + kiểm safe integer (Day 49A).
 16. CTE `SELECT … FOR SHARE` mà không ai đọc thì Postgres **không chạy** → không có khoá nào (Day 49A).
+17. `jsonb` lưu bản chuẩn hoá: **sắp lại thứ tự key** → response "phát lại" không giống từng byte. Cần trả nguyên văn thì dùng `json` (Day 49B).
+18. Fingerprint thiếu path → cùng chuỗi key cho booking khác sẽ phát lại câu trả lời của booking cũ (race test B tự dính khi dùng lại key giữa các vòng, Day 49B).
+19. Chạy `npm run test:integration` trên `booking_db` **xoá sạch dữ liệu dev** (TRUNCATE) — test và dev đang dùng chung database (Day 49B).
 
 ---
 
@@ -262,11 +279,15 @@ Chụp giá lúc giữ ghế (Day 49A, Decision 13):
 10. Huỷ đúng tại giây hết hạn trả gì? Vì sao không để "huỷ thắng khi dòng còn ghi HELD"?
 11. Vì sao tiền VND lưu số đồng nguyên chứ không nhân 100? `bigint` đi từ Postgres sang JS thế nào cho an toàn?
 12. Giá đổi sau khi giữ ghế thì khách trả giá nào? `FOR SHARE` trên dòng giá thêm được bảo đảm gì mà snapshot của một câu lệnh chưa có?
+13. Vì sao không gọi gateway trong transaction? Hai hậu quả đo được ở race test E là gì?
+14. Vì sao ghi `REFUND_PENDING` **trước** khi gọi refund, không phải sau?
+15. Idempotency-Key chặn được gì và **không** chặn được gì? Cái gì chặn hai tab với hai key khác nhau?
+16. Gateway ném lỗi không rõ đã trừ tiền chưa: vì sao **không** release key?
 
 ---
 
 ## 5. Tiếp theo
 
-**Day 49B**: thanh toán giả lập với Idempotency-Key. Số tiền đã có sẵn: `booking.total` (chụp lúc giữ ghế, Day 49A). Câu `HELD → CONFIRMED` dùng phía `hold_expires_at > now` của BR-BOOK-10 và có race test thanh toán vs hết hạn (mục 2.4).
+**Day 49C**: lỗi thanh toán — timeout, kết quả không rõ, đối soát (reconciliation): payment kẹt `PROCESSING`, `REFUND_PENDING` mà refund thất bại, dọn Idempotency-Key quá 24 h.
 
-Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008, `.cursor/progress/DAY-*.md`.
+Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [payments-and-idempotency-keys.md](../payments-and-idempotency-keys.md), [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008/009, `.cursor/progress/DAY-*.md`.

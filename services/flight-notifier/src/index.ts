@@ -3,6 +3,7 @@ import {
   connectConsumerWithRetry,
   redactAmqpUrl,
 } from "./messaging/connect-with-retry.js";
+import { createBookingConfirmedConsumer } from "./messaging/booking-confirmed-consumer.js";
 import { createBookingCreatedConsumer } from "./messaging/booking-created-consumer.js";
 import { createBookingExpiredConsumer } from "./messaging/booking-expired-consumer.js";
 import { createBookingHeldConsumer } from "./messaging/booking-held-consumer.js";
@@ -13,6 +14,7 @@ export const FLIGHT_CREATED_QUEUE = "flight-created";
 export const BOOKING_CREATED_QUEUE = "booking-created";
 export const BOOKING_HELD_QUEUE = "booking-held";
 export const BOOKING_EXPIRED_QUEUE = "booking-expired";
+export const BOOKING_CONFIRMED_QUEUE = "booking-confirmed";
 
 const logger = createConsoleLogger();
 
@@ -46,6 +48,10 @@ async function main() {
   await consumer.subscribe(
     BOOKING_EXPIRED_QUEUE,
     createBookingExpiredConsumer({ logger }),
+  );
+  await consumer.subscribe(
+    BOOKING_CONFIRMED_QUEUE,
+    createBookingConfirmedConsumer({ logger }),
   );
 
   logger.info("flight_notifier_ready", {});

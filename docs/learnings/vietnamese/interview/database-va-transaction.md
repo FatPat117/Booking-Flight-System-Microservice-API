@@ -90,3 +90,19 @@ thấy một dòng, FK chỉ trỏ một chiều → không ràng buộc nào n�
 trả `422 MISSING_FARE` / `FARE_CLASS_NOT_ON_AIRCRAFT`; migration contract kiểm dữ liệu cũ và từ chối
 kèm danh sách; câu giữ ghế **throw** nếu gặp ghế không có giá (bất biến hỏng phải ồn ào). Trigger
 làm được nhưng chưa đáng khi chỉ một use case ghi giá.
+
+### 12. `json` hay `jsonb`? Một lần chọn sai (Day 49B)
+
+**Trả lời:** `jsonb` lưu dạng nhị phân đã chuẩn hoá: query/index bên trong được, nhưng **sắp xếp
+lại key** và bỏ khoảng trắng. `json` lưu nguyên văn. Response của Idempotency-Key ban đầu là
+`jsonb`; e2e so từng byte thấy câu trả lời phát lại có `details` đứng trước `message`. Contract test
+không bắt được vì dùng `deepEqual` (không quan tâm thứ tự key). Sửa: cột `json`, test so
+`JSON.stringify`. Quy tắc: cần truy vấn bên trong → `jsonb`; cần trả lại đúng như đã nhận → `json`.
+
+### 13. Partial unique index để làm gì? `ON CONFLICT` với nó viết thế nào? (Day 49B)
+
+**Trả lời:** Ràng buộc "tối đa một dòng ở trạng thái X cho mỗi cha":
+`CREATE UNIQUE INDEX … ON payments (booking_id) WHERE status = 'SUCCEEDED'` (BR-PAY-05). Insert
+dùng `ON CONFLICT ("booking_id") WHERE "status" = 'PROCESSING' DO NOTHING` — phải **lặp lại
+predicate** để Postgres suy ra đúng partial index làm trọng tài. Trùng thì `INSERT 0 0`, không có
+`23505`, nên transaction vẫn dùng tiếp được (bắt `23505` trong transaction sẽ làm nó bị abort).

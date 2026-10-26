@@ -813,6 +813,84 @@ export function runBookingRepositoryContract(
     assert.equal((await subject.repository.findById(swept.id, ADMIN))?.status, "EXPIRED");
   });
 
+  test(name("confirmHold 1 ms before the deadline confirms the booking and books every seat"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 3);
+    const held = await seedHold(subject, flight, NOW, { kind: "auto", count: 2 });
+
+    const result = await subject.repository.confirmHold(
+      held.id,
+      ownerScope(ACCOUNT_A),
+      new Date(NOW.getTime() - 1),
+    );
+
+    const confirmed: Booking = {
+      ...withSeats(held, economy("1A", "1B")),
+      status: "CONFIRMED",
+    };
+    assert.deepEqual(result, { outcome: "confirmed", booking: confirmed });
+    assert.deepEqual(await subject.repository.findById(held.id, ADMIN), confirmed);
+    assert.deepEqual(await statuses(subject, flight.id), ["1A:BOOKED", "1B:BOOKED", "1C:AVAILABLE"]);
+    // A booked seat belongs to the booking, as a held one did.
+    assert.ok(
+      (await subject.seats(flight.id))
+        .filter((seat) => seat.status === "BOOKED")
+        .every((seat) => seat.bookingId === held.id),
+    );
+  });
+
+  test(name("confirmHold at the exact deadline is not-payable and writes nothing — the sweep at that instant expires it"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 1);
+    const due = await seedHold(subject, flight, NOW);
+
+    assert.deepEqual(
+      await subject.repository.confirmHold(due.id, ownerScope(ACCOUNT_A), NOW),
+      { outcome: "not-payable" },
+    );
+    assert.equal((await subject.repository.findById(due.id, ADMIN))?.status, "HELD");
+    assert.deepEqual(await statuses(subject, flight.id), ["1A:HELD"]);
+    assert.equal((await subject.repository.expireDueHolds(NOW, 50)).length, 1);
+  });
+
+  test(name("confirmHold of a CANCELLED, EXPIRED or already CONFIRMED booking is not-payable and changes no seat"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 3);
+    const before = new Date(NOW.getTime() - 1);
+    const cancelled = await seedHold(subject, flight, NOW);
+    await subject.repository.cancel(cancelled.id, ADMIN, before);
+    const expired = await seedHold(subject, flight, NOW);
+    await subject.repository.expireDueHolds(NOW, 50);
+    const confirmed = await seedHold(subject, flight, NOW);
+    await subject.repository.confirmHold(confirmed.id, ADMIN, before);
+    const seatsBefore = await statuses(subject, flight.id);
+
+    for (const booking of [cancelled, expired, confirmed]) {
+      assert.deepEqual(
+        await subject.repository.confirmHold(booking.id, ADMIN, before),
+        { outcome: "not-payable" },
+      );
+    }
+    assert.equal((await subject.repository.findById(cancelled.id, ADMIN))?.status, "CANCELLED");
+    assert.equal((await subject.repository.findById(expired.id, ADMIN))?.status, "EXPIRED");
+    assert.equal((await subject.repository.findById(confirmed.id, ADMIN))?.status, "CONFIRMED");
+    assert.deepEqual(await statuses(subject, flight.id), seatsBefore);
+  });
+
+  test(name("confirmHold of another account's HELD booking is not-payable and leaves it HELD (BR-AUTH-02)"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 1);
+    const held = await seedHold(subject, flight, NOW);
+    const before = new Date(NOW.getTime() - 1);
+
+    assert.deepEqual(
+      await subject.repository.confirmHold(held.id, ownerScope(ACCOUNT_B), before),
+      { outcome: "not-payable" },
+    );
+    assert.equal((await subject.repository.findById(held.id, ADMIN))?.status, "HELD");
+    assert.deepEqual(await statuses(subject, flight.id), ["1A:HELD"]);
+  });
+
   test(name("findPage with the admin scope returns every account's bookings"), async () => {
     const subject = await setup();
     await seedHeldBooking(subject, ACCOUNT_A, "2026-07-20T00:00:00.000Z");

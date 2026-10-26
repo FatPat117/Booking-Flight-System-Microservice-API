@@ -27,6 +27,7 @@ test("uses defaults for optional configuration", () => {
         password: "booking_dev_password",
         database: "booking_db",
       },
+      paymentSimulatorDelayMs: 0,
     },
   );
 });
@@ -40,6 +41,7 @@ test("parses valid configuration overrides", () => {
       POSTGRES_PORT: "6543",
       BOOKING_POSTGRES_USER: " booking ",
       BOOKING_POSTGRES_PASSWORD: " s3cret ",
+      PAYMENT_SIMULATOR_DELAY_MS: " 2000 ",
     }),
     {
       port: 4100,
@@ -52,8 +54,25 @@ test("parses valid configuration overrides", () => {
         password: "s3cret",
         database: "booking_db",
       },
+      paymentSimulatorDelayMs: 2000,
     },
   );
+});
+
+test("rejects invalid PAYMENT_SIMULATOR_DELAY_MS values", async (t) => {
+  for (const value of ["-1", "1.5", "abc", "60001"]) {
+    await t.test(`rejects PAYMENT_SIMULATOR_DELAY_MS=${JSON.stringify(value)}`, () => {
+      assert.throws(
+        () =>
+          parseConfig({
+            JWT_SECRET: TEST_JWT_SECRET,
+            ...validPostgresEnv,
+            PAYMENT_SIMULATOR_DELAY_MS: value,
+          }),
+        /Invalid PAYMENT_SIMULATOR_DELAY_MS/,
+      );
+    });
+  }
 });
 
 test("rejects missing JWT_SECRET", () => {
@@ -122,6 +141,7 @@ test("parses RABBITMQ_URL override", () => {
         password: "booking_dev_password",
         database: "booking_db",
       },
+      paymentSimulatorDelayMs: 0,
     },
   );
 });

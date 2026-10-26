@@ -48,6 +48,7 @@ Object creation happens only in the Composition Root. Routes and use cases recei
 | `BOOKING_POSTGRES_PASSWORD` | Yes | none | Password for that role |
 | `JWT_SECRET` | Yes | none | Shared with Identity to verify Bearer JWTs (≥32 chars) |
 | `RABBITMQ_URL` | No | `amqp://guest:guest@localhost:5672` | AMQP URL (`rabbitmq` host inside compose) |
+| `PAYMENT_SIMULATOR_DELAY_MS` | No | `0` | How long the simulated gateway takes per charge and per refund (`0–60000`); only for watching a payment race by hand |
 
 `JWT_SECRET` is required at startup. The application fails fast if it is missing, blank, or shorter than 32 characters.
 
@@ -88,6 +89,7 @@ Identity (`services/identity`, port `3001`) issues JWTs: `POST /api/identity/reg
 | `GET /api/bookings` | any valid JWT — a user sees their own bookings, an admin sees all |
 | `GET /api/bookings/:id`, `GET /api/bookings/by-reference/:reference` | any valid JWT — owner or admin |
 | `DELETE /api/bookings/:id` | JWT with `role=user`, owner only |
+| `POST /api/bookings/:id/payments` | JWT with `role=user`, owner only (an admin gets `403`) |
 
 Promote an account to admin once with `npm run promote-to-admin -- <email>` in the identity workspace, then log in again to get a token carrying the new role.
 
@@ -190,7 +192,7 @@ Rules: BR-BOOK-01/02/04/05/09, BR-SEAT-02 and Decision 11 in [docs/product/domai
 A `HELD` booking expires at `holdExpiresAt` (15 minutes after the hold, BR-BOOK-04). Three places care, each in its own way (Decision 12):
 
 - **Reads derive it.** From the deadline on, `GET /api/bookings/:id`, `/by-reference/:reference` and `GET /api/bookings` show the booking as `EXPIRED`, even if the row still says `HELD`.
-- **Decisions check it themselves.** `DELETE /api/bookings/:id` on a lapsed hold answers `409 BOOKING_EXPIRED` and writes nothing — before or after the job swept it. Another account still gets `404`. The boundary is exact (BR-BOOK-10): at instant `t` a hold is expired when `holdExpiresAt <= t`; cancel (and payment, step 6) need `holdExpiresAt > t`.
+- **Decisions check it themselves.** `DELETE /api/bookings/:id` on a lapsed hold answers `409 BOOKING_EXPIRED` and writes nothing — before or after the job swept it. Another account still gets `404`. The boundary is exact (BR-BOOK-10): at instant `t` a hold is expired when `holdExpiresAt <= t`; cancel and payment (Day 49B) need `holdExpiresAt > t`.
 - **A job frees the seats.** `booking-hold-expiry-job` runs every 60 s: batches of 50 lapsed holds, at most 20 batches per run, each batch one transaction that marks them `EXPIRED`, releases their seats, writes a `BOOKING_EXPIRED` audit entry (actor `system` / `booking-hold-expiry`) and a `booking-expired` event per booking. Batches are taken with `FOR UPDATE SKIP LOCKED`, so several instances can sweep at once without waiting on or double-expiring each other. A run that hits its batch limit logs `booking_hold_expiry_backlog`.
 
 ```http
@@ -231,6 +233,37 @@ POST /api/flights/:flightId/bookings
 
 Rules: BR-MONEY-01, BR-FLT-09, BR-BOOK-03 and Decision 13 in [docs/product/domain-model.md](docs/product/domain-model.md).
 
+## Payment with an Idempotency-Key (Day 49B)
+
+```http
+POST /api/bookings/:id/payments
+Idempotency-Key: 6f1c2a7e-pay-1
+{ "paymentMethodToken": "tok_success", "amount": { "amount": 3000000, "currency": "VND" } }
+→ 201 { "payment": { "id": "…", "bookingId": "…", "status": "SUCCEEDED",
+                     "amount": { "amount": 3000000, "currency": "VND" },
+                     "providerReference": "sim_ch_…", "createdAt": "…" },
+        "booking": { …, "status": "CONFIRMED" } }
+
+(same key, same body again) → the identical 201, plus  Idempotent-Replayed: true
+```
+
+- **Simulated gateway.** `tok_success` is charged; `tok_decline` and any other token are declined (`card_declined` / `unknown_payment_method`). It runs in the process: no network, no timeout. `PAYMENT_SIMULATOR_DELAY_MS` slows every charge and refund, to watch a race by hand.
+- **Three phases, the gateway outside any transaction** ([ADR-009](docs/adr/009-external-calls-outside-transactions.md), Decision 14). Phase 1 (short transaction) claims the key, checks the booking and records a `PROCESSING` payment. Phase 2 calls the gateway with nothing locked. Phase 3 (short transaction) records the outcome and confirms the booking: `HELD → CONFIRMED`, seats `HELD → BOOKED`, `booking-confirmed` through the outbox. Measured (race test E, a 1 s charge): with the charge inside one transaction a cancel waits ~0.9 s and the expiry job skips the locked booking; with three phases the cancel takes 2–11 ms.
+- **The race with expiry and cancel.** Confirmation is decided at phase 3 with BR-BOOK-10's `holdExpiresAt > now`. If the booking expired or was cancelled while the gateway charged, the payment becomes `REFUND_PENDING`, that commits, the gateway refunds, and the payment becomes `REFUNDED` (audit actor `system` / `payment-refund`). The answer is `409 BOOKING_NOT_PAYABLE`. To make that rare, a payment only **starts** while the hold has more than 60 s left (BR-PAY-07).
+- **Idempotency-Key.** Required, 1–255 visible ASCII characters, scoped to the account. The final answer (`201`, `402`, `409 BOOKING_NOT_PAYABLE`, `404`) is stored with the key in the same transaction as the outcome, as `json` so a replay is byte for byte the first response. The same key with a different body (fingerprint: SHA-256 of method, path and validated body, keys sorted) is `422 IDEMPOTENCY_KEY_REUSED`; while the first request is still running, `409 IDEMPOTENCY_KEY_IN_PROGRESS`. Validation errors, `PAYMENT_AMOUNT_MISMATCH` and `PAYMENT_IN_PROGRESS` are not stored: the key stays usable.
+- **Two keys, one booking** (two tabs): at most one `PROCESSING` and one `SUCCEEDED` payment per booking (partial unique indexes); the second gets `409 PAYMENT_IN_PROGRESS`.
+
+| Answer | When |
+|---|---|
+| `201` | Charged and confirmed |
+| `402 PAYMENT_DECLINED` | Declined; the booking stays `HELD`, pay again with a new key |
+| `409 BOOKING_NOT_PAYABLE` | Not `HELD`, hold lapsed, 60 s or less left, or lost to expiry/cancel during the charge (then refunded) |
+| `409 IDEMPOTENCY_KEY_IN_PROGRESS` / `409 PAYMENT_IN_PROGRESS` | The same key / another key is paying this booking right now |
+| `422 IDEMPOTENCY_KEY_REQUIRED` / `IDEMPOTENCY_KEY_REUSED` / `PAYMENT_AMOUNT_MISMATCH` / `VALIDATION_FAILED` | Key missing / reused with another body / amount ≠ total / malformed key or body |
+| `404 BOOKING_NOT_FOUND` / `403` | Another account's booking / an admin |
+
+No `Location` and no `GET` for a payment: no story reads one. Rules: BR-PAY-01..07 and Decision 14 in [docs/product/domain-model.md](docs/product/domain-model.md).
+
 ## Audit trail
 
 Every successful write records an audit entry in the `audit_logs` table, in the same Postgres transaction as the write itself. If the audit insert fails, the whole write rolls back.
@@ -242,6 +275,10 @@ Every successful write records an audit entry in the `audit_logs` table, in the 
 | `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` (metadata: `reference`, `passengerCount`, `seats`, `totalVnd`, `holdExpiresAt` — no passenger names) |
 | `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` |
 | `BOOKING_EXPIRED` | `booking-hold-expiry-job` | `system` / `booking-hold-expiry` (metadata: `reference`, `seats`, `holdExpiresAt`) |
+| `BOOKING_CONFIRMED` | `POST /api/bookings/:id/payments` (charged and confirmed) | `account` / payer's JWT `sub` (metadata: `reference`, `paymentId`, `amountVnd`) |
+| `PAYMENT_FAILED` | same, gateway declined | `account` / payer's JWT `sub`; target `payment` (metadata: `bookingId`, `reason`) |
+| `PAYMENT_REFUND_PENDING` | same, charged but the booking expired or was cancelled | `account` / payer's JWT `sub`; target `payment` |
+| `PAYMENT_REFUNDED` | the refund after it | `system` / `payment-refund`; target `payment` |
 | `AIRPORT_REGISTERED` | `POST /api/airports` | `account` / admin's JWT `sub` |
 | `AIRCRAFT_REGISTERED` | `POST /api/aircraft` | `account` / admin's JWT `sub` (metadata: seats per fare class) |
 
@@ -351,7 +388,7 @@ docker compose exec app sh -c "getent hosts rabbitmq"
 
 ## Messaging
 
-Every successful write enqueues an outbox row in the same Postgres transaction as the write and its audit entry: `flight-created`, `booking-held` (`booking-created` before Day 48A), `booking-cancelled`, `booking-expired` (written by the expiry job, Day 48B). `outbox-relay-job` (default every 5s) reads unpublished rows and publishes each to the durable queue named after its event type.
+Every successful write enqueues an outbox row in the same Postgres transaction as the write and its audit entry: `flight-created`, `booking-held` (`booking-created` before Day 48A), `booking-cancelled`, `booking-expired` (written by the expiry job, Day 48B), `booking-confirmed` (a paid booking, Day 49B). `outbox-relay-job` (default every 5s) reads unpublished rows and publishes each to the durable queue named after its event type.
 
 | Decision | Choice | Why |
 |----------|--------|-----|
@@ -515,7 +552,8 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No route cancels a flight yet (phase D step 9); a status change other than the creation has no event
 - `Flight` is both the write model and the read shape; only `status` is mapped to a separate `FlightView`
 - Two overlapping flights of one aircraft inserted at the same instant can deadlock (`40P01`) instead of failing the exclusion constraint; the loser is answered `409 AIRCRAFT_UNAVAILABLE`, which is safe to retry if the winner also rolled back
-- **No payment yet: a `HELD` booking never becomes `CONFIRMED`** (payment is phase D step 6), so since Day 48B **every new booking expires after 15 minutes**. There is deliberately no shortcut route to confirm a booking (Decision 11)
+- Payment failures are not reconciled yet (phase D step 6c, Day 49C): a gateway error of unknown outcome leaves the payment `PROCESSING` and its key in progress (a retry with that key gets `409 IDEMPOTENCY_KEY_IN_PROGRESS`, another key `409 PAYMENT_IN_PROGRESS`, until the hold expires); a refund the gateway refuses leaves `REFUND_PENDING` with a `payment_refund_failed` warning; Idempotency-Keys are never deleted (24 h cleanup is 49C)
+- The refund runs inside the paying request, after the commit: a slow refund delays that request's `409` (with `PAYMENT_SIMULATOR_DELAY_MS=8000` the answer took 16 s)
 - After a hold lapses, its seats stay `HELD` on the seat map until the expiry job's next run — up to ~60 s plus the run itself. The seat cannot be sold twice in that gap and the booking already reads `EXPIRED`; accepted (Decision 12)
 - A failing expiry batch rolls back whole and is retried on the next run: one booking that keeps failing holds back the others of its batch (head-of-line, like the outbox relay). The hold duration (15 min) is a constant, not configuration
 - No endpoint changes a fare (only psql); one that is added must keep BR-FLT-09 and go through `UPDATE flight_fares`, so the hold's share lock still orders it against holds. Passengers of bookings made before Day 49A carry the fare at migration time, not the one at their hold (it was never recorded)

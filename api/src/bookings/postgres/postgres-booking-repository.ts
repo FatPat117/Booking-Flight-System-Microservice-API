@@ -404,33 +404,38 @@ async function holdChosenSeats(
 }
 
 /**
- * Two CTEs that free every seat of the bookings in CTE `source` (it must
- * expose "id"), shared by cancel() and expireDueHolds() (Decision 12):
+ * Two CTEs that change every seat of the bookings in CTE `source` (it must
+ * expose "id"), shared by cancel(), expireDueHolds() (Decision 12) and
+ * confirmHold() (Decision 14):
  * - `locked` locks the seats in (flight, row, letter) order before anything
  *   updates them — the order a chosen-seat hold locks seats in
  *   (holdChosenSeats), whatever their status. `UPDATE … WHERE booking_id`
  *   alone would lock them in scan order, and a hold holding 12A and waiting
  *   for 12B could meet a release holding 12B and waiting for 12A: 40P01.
- * - `released` updates exactly the rows `locked` already holds. `letter`
+ * - `changed` updates exactly the rows `locked` already holds. `letter`
  *   keeps its column type in `locked`, so this join can use PK_flight_seats
  *   instead of comparing a cast.
  * Callers read seats from `locked`, not the table: every CTE sees the
  * snapshot from before the statement's own writes.
  */
-function releaseSeatsOf(source: string): string {
+function updateSeatsOf(source: string, assignments: string): string {
   return `locked AS (
        SELECT seat."flight_id", seat."row", seat."letter", seat."booking_id"
        FROM "flight_seats" seat
        WHERE seat."booking_id" IN (SELECT "id" FROM ${source})
        ORDER BY seat."flight_id", seat."row", seat."letter"
        FOR UPDATE
-     ), released AS (
+     ), changed AS (
        UPDATE "flight_seats" seat
-       SET "status" = 'AVAILABLE', "booking_id" = NULL
+       SET ${assignments}
        FROM locked
        WHERE seat."flight_id" = locked."flight_id"
          AND seat."row" = locked."row" AND seat."letter" = locked."letter"
      )`;
+}
+
+function releaseSeatsOf(source: string): string {
+  return updateSeatsOf(source, `"status" = 'AVAILABLE', "booking_id" = NULL`);
 }
 
 export function createPostgresBookingRepository(
@@ -621,6 +626,39 @@ export function createPostgresBookingRepository(
         holdExpiresAt: row.hold_expires_at.toISOString(),
         seats: row.seats,
       }));
+    },
+
+    // One statement, like cancel(): the seats are booked only for the row
+    // the booking UPDATE actually confirmed, so a payment that lost to a
+    // cancel or the expiry job (it re-checks the WHERE after waiting and
+    // matches nothing) touches no seat. `> $2` is BR-BOOK-10's still-valid
+    // side, at phase 3's own instant.
+    async confirmHold(bookingId, scope, now) {
+      const manager = resolveEntityManager(dataSource);
+      const ownerCondition =
+        scope.kind === "owner" ? `AND "owner_account_id" = $3` : "";
+      const rows = (await manager.query(
+        `WITH confirmed AS (
+           UPDATE "bookings" SET "status" = 'CONFIRMED'
+           WHERE "id" = $1 AND "status" = 'HELD' AND "hold_expires_at" > $2
+             ${ownerCondition}
+           RETURNING "id"
+         ), ${updateSeatsOf("confirmed", `"status" = 'BOOKED'`)}
+         SELECT "id" FROM confirmed`,
+        scope.kind === "owner"
+          ? [bookingId, now, scope.accountId]
+          : [bookingId, now],
+      )) as Array<{ id: string }>;
+
+      if (rows.length === 0) {
+        return { outcome: "not-payable" };
+      }
+
+      const entity = await manager
+        .getRepository(BookingEntity)
+        .findOneByOrFail({ id: bookingId });
+      const [booking] = await mapBookings(manager, [entity]);
+      return { outcome: "confirmed", booking: booking as Booking };
     },
   };
 }

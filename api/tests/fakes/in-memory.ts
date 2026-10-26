@@ -48,6 +48,25 @@ import type {
   OutboxEntry,
   OutboxRepository,
 } from "../../src/outbox/outbox-repository.js";
+import type {
+  ClaimResult,
+  IdempotencyRepository,
+  IdempotencyScope,
+  StoredResponse,
+} from "../../src/idempotency/idempotency-repository.js";
+import type {
+  ChargeRequest,
+  ChargeResult,
+  PaymentGateway,
+  RefundRequest,
+  RefundResult,
+} from "../../src/payments/payment-gateway.js";
+import type { PayForBooking } from "../../src/payments/pay-for-booking.js";
+import type {
+  Payment,
+  PaymentRepository,
+  PaymentStatus,
+} from "../../src/payments/payment-repository.js";
 import type { TransactionRunner } from "../../src/transactions/transaction-runner.js";
 import type { Flight } from "../../src/types.js";
 import { makeSeats, TEST_AIRCRAFT } from "../fixtures/flights.js";
@@ -423,6 +442,31 @@ export function createInMemoryBookingRepository(deps: {
       });
     },
 
+    // Same condition as the Postgres UPDATE: in scope, HELD and still valid
+    // at `now` (BR-BOOK-10).
+    async confirmHold(bookingId, scope, now) {
+      const booking = bookings.get(bookingId);
+
+      if (
+        booking === undefined ||
+        !isInScope(booking, scope) ||
+        booking.status !== "HELD" ||
+        booking.holdExpiresAt === null ||
+        isHoldLapsed(booking.holdExpiresAt, now)
+      ) {
+        return { outcome: "not-payable" };
+      }
+
+      const confirmed: Booking = { ...booking, status: "CONFIRMED" };
+      bookings.set(bookingId, confirmed);
+      for (const seat of seats.get(booking.flightId) ?? []) {
+        if (seat.bookingId === bookingId) {
+          seat.status = "BOOKED";
+        }
+      }
+      return { outcome: "confirmed", booking: read(confirmed) };
+    },
+
     peek(id) {
       const booking = bookings.get(id);
       return booking === undefined ? undefined : read(booking);
@@ -591,6 +635,219 @@ export function createInMemoryTransactionRunner(): TransactionRunner {
   };
 }
 
+type InMemoryIdempotencyRecord = {
+  fingerprint: string;
+  paymentId?: string;
+  response?: StoredResponse;
+};
+
+export type InMemoryIdempotencyRepository = IdempotencyRepository &
+  Readonly<{
+    /** Test-only read of the payment a key was attached to. */
+    paymentIdOf(scope: IdempotencyScope, key: string): string | undefined;
+  }>;
+
+/**
+ * Mirrors the Postgres adapter's outcomes. It cannot mirror the wait: a
+ * second claim of a key whose first claim is uncommitted blocks on Postgres
+ * and gets "in-progress" afterwards; here everything is committed at once.
+ * The concurrent case is proven on Postgres (race test A).
+ */
+export function createInMemoryIdempotencyRepository(): InMemoryIdempotencyRepository {
+  const records = new Map<string, InMemoryIdempotencyRecord>();
+  const id = (scope: IdempotencyScope, key: string) =>
+    JSON.stringify([scope.accountId, scope.operation, key]);
+
+  function claimed(scope: IdempotencyScope, key: string) {
+    const record = records.get(id(scope, key));
+    if (record === undefined || record.response !== undefined) {
+      throw new Error(`Idempotency key ${key} is not in progress`);
+    }
+    return record;
+  }
+
+  return {
+    async claim(scope, key, fingerprint): Promise<ClaimResult> {
+      const record = records.get(id(scope, key));
+
+      if (record === undefined) {
+        records.set(id(scope, key), { fingerprint });
+        return { outcome: "claimed" };
+      }
+
+      return record.response === undefined
+        ? { outcome: "in-progress", fingerprint: record.fingerprint }
+        : {
+            outcome: "completed",
+            fingerprint: record.fingerprint,
+            response: structuredClone(record.response),
+          };
+    },
+
+    async attachPayment(scope, key, paymentId) {
+      claimed(scope, key).paymentId = paymentId;
+    },
+
+    async complete(scope, key, response) {
+      claimed(scope, key).response = structuredClone(response);
+    },
+
+    async release(scope, key) {
+      if (records.get(id(scope, key))?.response === undefined) {
+        records.delete(id(scope, key));
+      }
+    },
+
+    paymentIdOf(scope, key) {
+      return records.get(id(scope, key))?.paymentId;
+    },
+  };
+}
+
+/**
+ * Mirrors the Postgres adapter, the two partial unique indexes included: a
+ * second PROCESSING payment for a booking is payment-in-progress, a second
+ * SUCCEEDED one throws (BR-PAY-05, a 23505 on Postgres).
+ */
+export function createInMemoryPaymentRepository(): PaymentRepository {
+  const payments = new Map<string, Payment>();
+
+  function transition(
+    paymentId: string,
+    from: PaymentStatus,
+    to: PaymentStatus,
+    now: Date,
+    set: Partial<Pick<Payment, "providerReference" | "failureReason">> = {},
+  ): void {
+    const payment = payments.get(paymentId);
+    if (payment?.status !== from) {
+      throw new Error(`Payment ${paymentId} is not ${from}; cannot move it to ${to}`);
+    }
+    if (
+      to === "SUCCEEDED" &&
+      [...payments.values()].some(
+        (other) => other.bookingId === payment.bookingId && other.status === "SUCCEEDED",
+      )
+    ) {
+      throw new Error(`Booking ${payment.bookingId} already has a SUCCEEDED payment`);
+    }
+    payments.set(paymentId, {
+      ...payment,
+      ...set,
+      status: to,
+      updatedAt: now.toISOString(),
+    });
+  }
+
+  return {
+    async start(payment) {
+      if (payments.has(payment.id)) {
+        throw new Error(`duplicate payment id: ${payment.id}`);
+      }
+      if (
+        [...payments.values()].some(
+          (other) => other.bookingId === payment.bookingId && other.status === "PROCESSING",
+        )
+      ) {
+        return { outcome: "payment-in-progress" };
+      }
+
+      payments.set(payment.id, {
+        ...structuredClone(payment),
+        status: "PROCESSING",
+        providerReference: null,
+        failureReason: null,
+        updatedAt: payment.createdAt,
+      });
+      return { outcome: "started" };
+    },
+
+    async markSucceeded(paymentId, providerReference, now) {
+      transition(paymentId, "PROCESSING", "SUCCEEDED", now, { providerReference });
+    },
+
+    async markFailed(paymentId, reason, now) {
+      transition(paymentId, "PROCESSING", "FAILED", now, { failureReason: reason });
+    },
+
+    async markRefundPending(paymentId, providerReference, now) {
+      transition(paymentId, "PROCESSING", "REFUND_PENDING", now, { providerReference });
+    },
+
+    async markRefunded(paymentId, now) {
+      transition(paymentId, "REFUND_PENDING", "REFUNDED", now);
+    },
+
+    async findById(paymentId) {
+      const payment = payments.get(paymentId);
+      return payment === undefined ? undefined : structuredClone(payment);
+    },
+  };
+}
+
+export type FakePaymentGateway = PaymentGateway &
+  Readonly<{
+    /** Every charge call, in order — tests count them (Day 49B race tests). */
+    readonly charges: readonly ChargeRequest[];
+    readonly refunds: readonly RefundRequest[];
+    /** Queue the next charge results; when empty, a charge succeeds. */
+    willCharge(...results: ChargeResult[]): void;
+    /** Queue the next refund results; when empty, a refund succeeds. */
+    willRefund(...results: RefundResult[]): void;
+  }>;
+
+/**
+ * A scripted gateway for unit and integration tests. Unlike the simulator it
+ * does not repeat a result per paymentId: a test that charges twice must see
+ * two calls. `onCharge` runs inside the call, before the result is returned —
+ * a test moves its clock past the hold deadline there, or awaits a gate to
+ * hold the payment between phase 1 and phase 3.
+ */
+export function createFakePaymentGateway(
+  options: {
+    onCharge?: (request: ChargeRequest) => void | Promise<void>;
+  } = {},
+): FakePaymentGateway {
+  const charges: ChargeRequest[] = [];
+  const refunds: RefundRequest[] = [];
+  const chargeResults: ChargeResult[] = [];
+  const refundResults: RefundResult[] = [];
+
+  return {
+    async charge(request) {
+      charges.push(structuredClone(request));
+      await options.onCharge?.(request);
+      return (
+        chargeResults.shift() ?? {
+          outcome: "succeeded",
+          providerReference: `fake_ch_${request.paymentId}`,
+        }
+      );
+    },
+
+    async refund(request) {
+      refunds.push(structuredClone(request));
+      return refundResults.shift() ?? { outcome: "refunded" };
+    },
+
+    willCharge(...results) {
+      chargeResults.push(...results);
+    },
+
+    willRefund(...results) {
+      refundResults.push(...results);
+    },
+
+    get charges() {
+      return structuredClone(charges);
+    },
+
+    get refunds() {
+      return structuredClone(refunds);
+    },
+  };
+}
+
 export function createInMemoryHealthChecks(
   status: HealthStatus = "ok",
 ): HealthChecks {
@@ -636,6 +893,14 @@ export function createUnusedReferenceData(): {
     }),
     registerAircraft: async () => ({ outcome: "duplicate" }),
   };
+}
+
+/**
+ * For HTTP tests that build createApp() but never pay for a booking. Payment
+ * itself is tested in bookings.api.test.ts with the real use case.
+ */
+export function createUnusedPayForBooking(): { payForBooking: PayForBooking } {
+  return { payForBooking: async () => ({ outcome: "payment-in-progress" }) };
 }
 
 /**

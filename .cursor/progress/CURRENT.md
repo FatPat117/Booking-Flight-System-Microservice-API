@@ -1,49 +1,48 @@
 # CURRENT PROGRESS
 
-**Last completed day:** Day 49A
-**Current day:** Day 49A — Fares: `Money`, price per fare class, price snapshot at hold time (phase D step 6a)
-**Status:** ✅ Complete — unit 400/400, flight-notifier 14/14, identity 12/12, integration
-152/152, fare race file 10× in a row, end-to-end verified (HTTP + psql + app/notifier logs +
-newman). Amounts are `Money` in whole đồng (never ×100), `bigint` capped at 2^53 − 1. A flight
-has one fare per fare class (`flight_fares`) for exactly the classes its aircraft has
-(BR-FLT-09: `422 MISSING_FARE` / `FARE_CLASS_NOT_ON_AIRCRAFT`); `priceInCents`/`currency` are
-rejected. The hold statement reads the fares `FOR SHARE` and copies each seat's fare onto its
-passenger (BR-BOOK-03); `Booking.total` is derived. Old data migrated expand → backfill →
-contract (refused on dev data until BUSINESS/USD fares were set by hand). `flight-created` gains
-`fares` (old fields deprecated), `booking-held` gains prices and `total`.
+**Last completed day:** Day 49B
+**Current day:** Day 49B — Simulated payment with an Idempotency-Key, `HELD → CONFIRMED` (phase D step 6b)
+**Status:** ✅ Complete — unit 459/459, flight-notifier 16/16, identity 12/12, integration
+181/181, payment race file 10× in a row, end-to-end verified (HTTP + psql + app/notifier logs +
+queues + newman). `POST /api/bookings/:id/payments` charges `booking.total` through a simulated
+gateway called **outside any transaction** (ADR-009): phase 1 claims the Idempotency-Key and records
+a `PROCESSING` payment, phase 2 charges, phase 3 confirms (`HELD → CONFIRMED`, seats `BOOKED`,
+`booking-confirmed`) with BR-BOOK-10's `> now`, or — when the booking expired or was cancelled
+meanwhile — records `REFUND_PENDING`, commits, refunds, records `REFUNDED`. A payment starts only
+with more than 60 s left (BR-PAY-07). Final answers are stored with the key (`json`, replayed byte
+for byte with `Idempotent-Replayed: true`); one `PROCESSING` and one `SUCCEEDED` payment per booking
+(partial unique indexes).
 
-## Day 49A delivered
+## Day 49B delivered
 
 ```text
-Step 0: plan-test comments (deterministic without ANALYZE), "English notes are primary",
-  phase D step 6 split into 6a fares / 6b payment / 6c payment failures (+ roadmap history row)
-Step 1: domain-model Decision 13 (8 choices with reasons), BR-FLT-09
-Step 2: api/src/money/money.ts (vnd, addMoney, sumMoney, parseVndFromDatabase) + 8 tests
-Step 3: CreateFlightFares / BackfillFlightFares / ContractFlightFares / AddPassengerFareSnapshot;
-  refused on shaped dev data, fixed by psql, re-run; down + up tested; safe-integer CHECKs added
-Step 4: flights have fares (types, validation, CreateFlight BR-FLT-09, repository, seat map,
-  flight-created event, fixtures with a two-class aircraft, contract + HTTP tests)
-Step 5: hold statements read fares FOR SHARE (SHARE_LOCKED_FARES), HeldSeat with price,
-  passengers priced, total derived (bookingTotal), booking-held prices, audit totalVnd
-Step 6: race tests A–C with controls and gates, 5 mutations (FOR SHARE, unread CTE ×2, missing
-  fare, ×100), e2e 6 scenarios, Postman (13 bodies + Day 49A folder), README, ADR-004 addendum,
-  learnings (EN + VI)
+Step 0: lock order table — fare share lock on holds, new "confirm payment" row
+Step 1: domain-model Decision 14, Payment lifecycle (PROCESSING … REFUNDED), BR-PAY-07, ADR-009
+Step 2: CreatePayments / CreateIdempotencyKeys (refused on dev data until BUSINESS fares set by hand)
+Step 3: PaymentGateway port, simulator (PAYMENT_SIMULATOR_DELAY_MS), scripted fake
+Step 4: requestFingerprint, IdempotencyRepository (+ Postgres, fake, contract, concurrency tests)
+Step 5: PaymentRepository, BookingRepository.confirmHold (updateSeatsOf), createPayForBooking,
+  payment-response, audit actions, booking-confirmed contract + notifier consumer, wiring
+Step 6: route POST /api/bookings/:id/payments (header + body validated before the claim)
+Step 7: race tests A–E (+ C at the deadline) 10×, e2e 6 scenarios (found jsonb reordering keys →
+  json), Postman Day 49B folder (newman 13/13), README, learnings (EN + VI), BR-PAY-01..07 ✅
 ```
 
-## Previous day (Day 48B) recap
+## Previous day (Day 49A) recap
 
 ```text
-Hold expiry: batched SKIP LOCKED job frees seats, reads derive EXPIRED, cancel checks the
-deadline itself (409 BOOKING_EXPIRED); <= / > boundary; ordered-lock release CTE.
+Fares: Money in whole đồng, one fare per fare class (BR-FLT-09), the hold copies each seat's fare
+FOR SHARE (BR-BOOK-03), Booking.total derived.
 ```
 
 ## Next
 
-Day 49B — Phase D step 6b: simulated payment with an Idempotency-Key (US-PAY-01, BR-PAY-01..06).
-The amount is `booking.total` (fixed at hold time since Day 49A). `HELD → CONFIRMED` takes the
-`> now` side of BR-BOOK-10, seats `HELD → BOOKED` in the same transaction, and gets the
-payment-vs-expiry race test. Then 49C: payment failures. Per
+Day 49C — Phase D step 6c: payment failures. A gateway call of unknown outcome (timeout, crash after
+phase 1) leaves a payment `PROCESSING` and its key `IN_PROGRESS`; a refused refund leaves
+`REFUND_PENDING`; Idempotency-Keys are never cleaned up (24 h). Reconciliation finishes them, using
+the payment id the gateway already received as its idempotency key. Per
 [`docs/product/domain-model.md`](../../docs/product/domain-model.md#phase-d-order).
-Open items carried (see DAY-49A "Not today"): no fare-change endpoint, deprecated
-`priceInCents` in `flight-created`, removing the `booking-created` contract once its queue is
-empty, the release `ORDER BY` survivor, the outbox relay not being multi-instance safe.
+Open items carried (see DAY-49B "Not today"): **a separate test database** (integration tests
+`TRUNCATE` dev data, and a running `app`'s expiry job sweeps test bookings — both happened on Day
+49B), no fare-change endpoint, deprecated `priceInCents`, removing the `booking-created` contract,
+the release `ORDER BY` survivor, the outbox relay not being multi-instance safe.

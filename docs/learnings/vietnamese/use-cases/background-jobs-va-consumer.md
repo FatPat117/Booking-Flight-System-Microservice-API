@@ -30,6 +30,7 @@ relay. Message không mất vì dòng outbox vẫn chưa publish.
 | `flight-created` | `createFlightCreatedConsumer` | `flight_created_consumed` |
 | `booking-held` | `createBookingHeldConsumer` | `booking_held_consumed` (reference, số khách, hạn giữ — **không tên**) |
 | `booking-expired` (Day 48B) | `createBookingExpiredConsumer` | `booking_expired_consumed` (reference, số ghế, hạn; `correlationId` = `eventId` vì không có request) |
+| `booking-confirmed` (Day 49B) | `createBookingConfirmedConsumer` | `booking_confirmed_consumed` (reference, số khách, `paymentId`, số tiền — không tên) |
 | `booking-created` | `createBookingCreatedConsumer` | chỉ còn để đọc message cũ trước Day 48A |
 
 - `prefetch(1)`, ack tay; parse bằng `packages/contracts` → sai shape thì `rejected` → `nack(requeue:false)` → `<queue>.dlx` → `<queue>.dlq`.

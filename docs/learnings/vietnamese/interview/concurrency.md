@@ -103,3 +103,27 @@ từ đó. Giá được đọc **trong chính câu giữ ghế**, khoá dòng g
 không có khoá, mà giá trả về vẫn đúng. Mutation "lấy giá bằng subquery thay vì JOIN CTE" chỉ race
 test bắt được. Và test "không bao giờ trộn giá" **vẫn xanh khi bỏ khoá** — nên tôi không dùng nó để
 chứng minh khoá; test chứng minh là test có một bên phải **chờ**.
+
+### 14. Gọi một hệ thống bên ngoài (payment gateway) giữa một lần ghi thì làm sao? (Day 49B)
+
+**Trả lời:** Không gọi trong transaction. Tôi chia ba pha: transaction ngắn ghi payment
+`PROCESSING` và claim Idempotency-Key → gọi gateway **không giữ khoá nào** → transaction ngắn ghi
+kết quả và xác nhận booking bằng câu `UPDATE … WHERE status = 'HELD' AND hold_expires_at > now`
+(cùng điều kiện với huỷ). Nếu booking đã hết hạn/bị huỷ trong lúc trừ tiền thì câu đó không khớp:
+tôi ghi `REFUND_PENDING`, **commit**, rồi mới gọi refund, cuối cùng ghi `REFUNDED`.
+**Bằng chứng:** race test E dựng phiên bản "gọi gateway trong transaction" (charge 1 s): huỷ phải
+chờ 908–922 ms, còn job hết hạn dùng `SKIP LOCKED` thì **bỏ qua** booking. Bản ba pha: huỷ 2–11 ms.
+**Điểm cộng khi kể:** "ghi ý định trước hành động" — crash sau commit `REFUND_PENDING` vẫn để lại
+dấu vết cho đối soát; làm ngược thì tiền đã hoàn mà DB vẫn nói thanh toán thành công.
+
+### 15. Idempotency-Key hoạt động thế nào, và nó **không** chặn được gì? (Day 49B)
+
+**Trả lời:** Client gửi header `Idempotency-Key`. Server claim bằng
+`INSERT … ON CONFLICT DO NOTHING` trên `(account, operation, key)`; claim thứ hai gặp dòng chưa
+commit thì **chờ** rồi thấy "đang xử lý" (`409`). Lưu kèm fingerprint SHA-256 của method + path +
+body đã validate: cùng key khác body → `422`. Kết quả cuối lưu **cùng transaction** với dữ liệu, gửi
+lặp → trả lại y hệt kèm `Idempotent-Replayed: true`.
+**Không chặn:** hai request **khác key** cho cùng booking (hai tab). Cái đó do database chặn:
+partial unique index — tối đa một payment `PROCESSING` và một `SUCCEEDED` mỗi booking.
+**Bằng chứng:** race test A — 10 request cùng key → 1 lần charge; race test B — 5 key khác nhau →
+đúng 1 `SUCCEEDED`, các key còn lại `409 PAYMENT_IN_PROGRESS`.
