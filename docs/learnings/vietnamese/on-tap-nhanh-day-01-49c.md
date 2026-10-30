@@ -1,8 +1,8 @@
-# Ôn tập nhanh: Day 1 → Day 49B
+# Ôn tập nhanh: Day 1 → Day 49C
 
 > Sổ tay tiếng Việt để đọc lại nhanh. Mỗi mục gồm: **vấn đề → cách xử lý → vì sao**, kèm đường dẫn tới code thật.
 > Các note tiếng Anh khác trong `docs/learnings/` đi sâu từng chủ đề; file này là bản đồ tổng.
-> Cập nhật đến: **Day 49B** (2026-10-26). Số test hiện tại: api unit 459, integration 181, notifier 16, identity 12.
+> Cập nhật đến: **Day 49C** (2026-10-30). Số test hiện tại: api unit 494, integration 199 (trên `booking_test`), notifier 16, identity 12.
 
 ---
 
@@ -99,6 +99,7 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 | 48B | Job hết hạn giữ ghế | Job trả ghế, đọc thì suy ra `EXPIRED`, quyết định tự kiểm hạn; biên `<=`/`>` bổ sung chính xác; nhả ghế cũng theo thứ tự khoá |
 | 49A | Giá vé: `Money`, giá theo hạng, chụp giá lúc giữ ghế | Tiền là số nguyên đồng (không ×100); `bigint` về JS là **chuỗi**; câu giữ ghế đọc giá `FOR SHARE`; CTE không ai đọc thì **không chạy** (không khoá) |
 | 49B | Thanh toán giả lập + Idempotency-Key, `HELD → CONFIRMED` | Gọi gateway **ngoài** transaction (3 pha); thua race thì **ghi `REFUND_PENDING` rồi mới hoàn tiền**; key claim bằng `ON CONFLICT DO NOTHING`; `jsonb` **đổi thứ tự key** → lưu response bằng `json` |
+| 49C | Lỗi thanh toán: kết quả không rõ, đối soát, dọn key; DB test riêng | Ba kết quả: thành công / từ chối / **không rõ** — không rõ thì **không bao giờ** `FAILED`, trả `202`; job đối soát **charge lại cùng `paymentId`**; `next_attempt_at` = ngưỡng tuổi + lease + backoff; một pha 3 dùng chung; refund chỉ ở job, 5 lần rồi `REFUND_FAILED`; test chạy trên `booking_test` có hàng rào |
 
 ---
 
@@ -141,6 +142,7 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 | **`FOR SHARE` dòng giá trong cùng câu**      | Chụp một giá trị ở bảng khác đúng lúc quyết định               | Day 49A: CTE `fares` trong câu giữ ghế                      |
 | **Partial unique index + `ON CONFLICT … WHERE`** | "Tối đa một dòng ở trạng thái X" cho mỗi cha                | Day 49B: một `PROCESSING`, một `SUCCEEDED` mỗi booking      |
 | **Idempotency-Key claim**                    | Cùng một request gửi lặp lại                                    | Day 49B: `idempotency_keys`, claim thứ hai **chờ** claim đầu |
+| **Lease trong cột thời gian + `SKIP LOCKED`** | Job nhiều instance mà phải gọi ra ngoài **ngoài** transaction   | Day 49C: claim đẩy `next_attempt_at` lên rồi commit; không lease → **30 lời gọi trùng** / 30 payment |
 
 Những điều **đo được** (không đoán):
 
@@ -182,6 +184,16 @@ Thanh toán (Day 49B, Decision 14, ADR-009):
 - **Biên 60 s** (BR-PAY-07): chỉ **bắt đầu** trả khi hold còn > 60 s → hoàn tiền hiếm. Không "đóng băng" job hết hạn khi đang thanh toán: phải sửa câu quét Day 48B, và crash sau pha 1 sẽ giữ ghế mãi khi chưa có 49C.
 - Đo (race test E, charge 1 s): gọi gateway **trong** transaction → huỷ phải chờ **908–922 ms**, job hết hạn (`SKIP LOCKED`) **bỏ qua** booking; ba pha → huỷ **2–11 ms**. Pha 3 đúng giây hết hạn chạy cùng job: 17–19/20 confirm thắng, còn lại expire thắng + hoàn tiền — mỗi booking đúng **một** kết cục.
 - Race test A: 10 request cùng key → **1** lần charge, 1×`201`, 9×`409 IDEMPOTENCY_KEY_IN_PROGRESS`.
+
+Lỗi thanh toán và đối soát (Day 49C, Decision 15, ADR-010):
+
+- **Ba kết quả, không phải hai.** Timeout / mất kết nối / crash ngay sau khi gửi = **không rõ**: provider có thể đã trừ tiền. Adapter tự cắt (`AbortController`) và trả `{ outcome: "unknown" }`; request trả **`202`**, payment giữ `PROCESSING`, key giữ `IN_PROGRESS`. Đánh `FAILED` → khách trả lại → **trừ hai lần**.
+- **Đối soát = charge lại với cùng `paymentId`** (idempotency key phía provider): có rồi thì trả lại kết quả cũ, chưa có thì trừ bây giờ → sau lời gọi chỉ có **một** kết quả. "Chỉ hỏi" yếu hơn: "không tìm thấy" rồi request kẹt trên mạng tới sau vẫn trừ tiền. Giá phải trả: giữ token khi `PROCESSING` (CHECK xoá khi rời trạng thái).
+- **`next_attempt_at` làm ba việc**: ngưỡng tuổi (pha 1 đặt = timeout + 30 s, sau request sống), **lease** (claim đẩy lên rồi commit, instance khác bỏ qua khi đang gọi gateway), backoff. `SKIP LOCKED` một mình không đủ vì khoá mất khi commit.
+- **Một pha 3 dùng chung** (`SettlePayment`) cho request và job; key hoàn tất theo `payment_id`. Bên đến sau: transition có điều kiện không khớp → throw → rollback **cả** confirm booking.
+- **Refund chỉ ở job**: 1, 2, 4, 8 phút; lần 5 hoặc lỗi vĩnh viễn → `REFUND_FAILED` + log error — ý tưởng DLQ cho tiền. `PROCESSING` thì **không** có trạng thái cuối do job đặt (sẽ là đoán).
+- **Key hết hạn, bất biến thì không**: xoá key `COMPLETED` sau 24 h; gửi lại → booking `CONFIRMED` trả `409`, `UQ_payments_booking_succeeded` chặn trừ lần hai.
+- Đo (e2e, timeout 4 s, delay 2 s): `tok_lost_response` → `202` sau 4,0 s; cùng key `409` trong 7 ms; sau job → `201` phát lại. Huỷ lúc đang trừ tiền → `409` sau **2,0 s** (Day 49B: 16 s vì chờ refund).
 
 ### 2.5 Migration an toàn
 
@@ -228,8 +240,11 @@ Thanh toán (Day 49B, Decision 14, ADR-009):
 - **Đồng hồ giả nhảy ngay sau khi bị đọc**: bắt được code đọc `now` nhiều lần trong một lần chạy.
 - **`deepEqual` không thấy thứ tự key** (Day 49B): contract test lưu/đọc response xanh trên Postgres dù `jsonb` đã đổi thứ tự key; e2e so sánh từng byte mới bắt được. Giờ test so `JSON.stringify`.
 - **Fake gateway có hook `onCharge`**: chặn ở pha 2 bằng cổng (promise mở tay) để chạy job hết hạn/huỷ **trong lúc** đang trừ tiền.
+- **Tiêm lỗi + một hàm bất biến toàn cục** (Day 49C): mỗi test dừng ở một điểm (sau pha 1, trong lúc charge, mất câu trả lời, sau `REFUND_PENDING`, refund lỗi), cho job chạy, rồi gọi `assertMoneyInvariants` so **ledger của fake** (provider thật sự làm gì) với DB. Fake phải **nhớ theo `paymentId`** như provider thật, không thì test thấy "trừ hai lần" giả.
+- **Mutation phải hợp lệ** (Day 49C): bỏ lease bằng comment làm `$2` thừa → Postgres lỗi kiểu, mọi test fail — đó là test chết vì cú pháp, không phải vì lease. Làm lại bằng `least($1, $2)` → chỉ race hai instance fail.
 - **Đối chiếu số test** sau mỗi thay đổi; đừng tin "xanh" mà không nhìn số (`tests `** bỏ sót 23 file ở Day 36).
 - `--test-concurrency=1` cho integration: các file `TRUNCATE` chéo nhau.
+- **Database test riêng có hàng rào** (Day 49C): `test:integration` đặt `BOOKING_POSTGRES_DB=booking_test` và `--import` một file từ chối chạy nếu tên không kết thúc `_test` — chạy **trước mọi** `TRUNCATE`. Chứng minh bằng cách cố tình trỏ vào `booking_db`.
 
 ### 2.9 Vận hành
 
@@ -261,7 +276,10 @@ Thanh toán (Day 49B, Decision 14, ADR-009):
 16. CTE `SELECT … FOR SHARE` mà không ai đọc thì Postgres **không chạy** → không có khoá nào (Day 49A).
 17. `jsonb` lưu bản chuẩn hoá: **sắp lại thứ tự key** → response "phát lại" không giống từng byte. Cần trả nguyên văn thì dùng `json` (Day 49B).
 18. Fingerprint thiếu path → cùng chuỗi key cho booking khác sẽ phát lại câu trả lời của booking cũ (race test B tự dính khi dùng lại key giữa các vòng, Day 49B).
-19. Chạy `npm run test:integration` trên `booking_db` **xoá sạch dữ liệu dev** (TRUNCATE) — test và dev đang dùng chung database (Day 49B).
+19. Chạy `npm run test:integration` trên `booking_db` **xoá sạch dữ liệu dev** (TRUNCATE) — test và dev đang dùng chung database (Day 49B; sửa ở Day 49C bằng `booking_test`).
+20. `catch` chung quanh lời gọi gateway biến mọi lỗi thành `FAILED` → khách trả lại → trừ hai lần. Kết quả không rõ phải là một **giá trị riêng** (Day 49C).
+21. Job gọi gateway tuần tự trong một lô 20 payment có thể chạy 20 × timeout, **vượt lease** của payment cuối → instance khác lấy lại. Gọi song song trong lô (Day 49C).
+22. Trong zsh, `set -- $chuoi` **không** tách từ như bash → script e2e gửi key có dấu cách (Day 49C).
 
 ---
 
@@ -283,11 +301,15 @@ Thanh toán (Day 49B, Decision 14, ADR-009):
 14. Vì sao ghi `REFUND_PENDING` **trước** khi gọi refund, không phải sau?
 15. Idempotency-Key chặn được gì và **không** chặn được gì? Cái gì chặn hai tab với hai key khác nhau?
 16. Gateway ném lỗi không rõ đã trừ tiền chưa: vì sao **không** release key?
+17. "Không rõ" khác "thất bại" thế nào? Vì sao đối soát **charge lại cùng id** chứ không chỉ hỏi trạng thái?
+18. Ngưỡng tuổi, lease và chuyển trạng thái có điều kiện: mỗi cái chặn được gì, thiếu cái nào thì sao?
+19. Vì sao timeout tối đa 20 s mà không phải 30 s?
+20. Xoá Idempotency-Key sau 24 h có mở ra khả năng trừ tiền hai lần không? Cái gì chặn?
 
 ---
 
 ## 5. Tiếp theo
 
-**Day 49C**: lỗi thanh toán — timeout, kết quả không rõ, đối soát (reconciliation): payment kẹt `PROCESSING`, `REFUND_PENDING` mà refund thất bại, dọn Idempotency-Key quá 24 h.
+**Day 50** (phase D bước 7): chính sách huỷ booking `CONFIRMED` (không huỷ trong vòng 24 h trước giờ bay, BR-BOOK-06) và đổi ghế cùng hạng khi chuyến còn `OPEN` (BR-BOOK-07).
 
-Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [payments-and-idempotency-keys.md](../payments-and-idempotency-keys.md), [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008/009, `.cursor/progress/DAY-*.md`.
+Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [payments-and-idempotency-keys.md](../payments-and-idempotency-keys.md) (có mục Day 49C), [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008/009/010, `.cursor/progress/DAY-*.md`.

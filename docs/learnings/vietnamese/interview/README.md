@@ -44,6 +44,6 @@ Migration có thư mục riêng: [../migrations/](../migrations/README.md).
 
 - Mở bằng **vấn đề**, rồi cách giải, rồi **đánh đổi** — đừng chỉ nói tên pattern.
 - Luôn có một con số hoặc một lần "tôi đã sai và phát hiện ra nhờ…" (xem mục bẫy trong
-  [on-tap-nhanh-day-01-49b.md](../on-tap-nhanh-day-01-49b.md)).
+  [on-tap-nhanh-day-01-49c.md](../on-tap-nhanh-day-01-49c.md)).
 - Nói rõ cái **chưa làm** và vì sao (chưa đối soát payment lỗi, sơ đồ ghế trễ tới ~60 s sau hạn, chưa dedupe consumer):
   biết giới hạn của mình được đánh giá cao.

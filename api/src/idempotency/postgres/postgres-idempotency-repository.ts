@@ -117,6 +117,38 @@ export function createPostgresIdempotencyRepository(
       }
     },
 
+    async completeForPayment(paymentId, response, now) {
+      const updated = (await resolveEntityManager(dataSource).query(
+        `UPDATE "idempotency_keys"
+         SET "status" = 'COMPLETED', "response_status" = $2,
+             "response_body" = $3::json, "completed_at" = $4
+         WHERE "payment_id" = $1 AND "status" = 'IN_PROGRESS'`,
+        [paymentId, response.status, JSON.stringify(response.body), now],
+      )) as [unknown[], number];
+
+      if (updated[1] !== 1) {
+        throw new Error(`The idempotency key of payment ${paymentId} is not in progress`);
+      }
+    },
+
+    async deleteCompletedBefore(cutoff, limit) {
+      // Picked through IDX_idempotency_keys_created_at; the status filter is
+      // part of the guarantee, not an optimisation.
+      const deleted = (await resolveEntityManager(dataSource).query(
+        `DELETE FROM "idempotency_keys"
+         WHERE ("account_id", "operation", "key") IN (
+           SELECT "account_id", "operation", "key" FROM "idempotency_keys"
+           WHERE "status" = 'COMPLETED' AND "created_at" < $1
+           ORDER BY "created_at"
+           LIMIT $2
+           FOR UPDATE SKIP LOCKED
+         )`,
+        [cutoff, limit],
+      )) as [unknown[], number];
+
+      return deleted[1];
+    },
+
     async release(scope, key) {
       await resolveEntityManager(dataSource).query(
         `DELETE FROM "idempotency_keys"

@@ -82,11 +82,45 @@ retry or reconciliation safe (49C).
 - Three phases cost code: three small transactions, a compensation path and a state
   (`PROCESSING`) a single transaction would not need. For a call that is local and fast (a cache,
   an in-process function) one transaction is simpler and fine.
-- The refund runs inside the paying request after the commit: a slow refund delays that request's
-  `409` (8 s simulator delay → 16 s answer in the e2e). A queue would decouple it; not worth it
-  before 49C.
+- On Day 49B the refund ran inside the paying request after the commit: a slow refund delayed that
+  request's `409` (8 s simulator delay → 16 s answer in the e2e). Day 49C moved it to the
+  reconciliation job (below): the `409` now takes only the charge.
 - Idempotency-Keys are needed where a repeat is *harmful* (money, emails, external side effects).
   A `GET`, or a `PUT` that sets a value, is already idempotent.
+
+## Day 49C — when the gateway does not answer
+
+A call has three results: charged, declined, **unknown**. Unknown (timeout, reset connection,
+crash right after sending) means the provider may have charged, may not have, or may still charge
+when a delayed request lands. Calling it a failure lets the customer pay again: charged twice.
+So:
+
+- **The adapter owns the timeout** (`AbortController`, `PAYMENT_GATEWAY_TIMEOUT_MS`) and returns
+  `{ outcome: "unknown" }` as a value. The request answers `202`, stores nothing, keeps the key
+  `IN_PROGRESS`. A `catch` around the charge that turns every error into `FAILED` is the worst bug
+  this design can have.
+- **Reconciliation charges again with the same payment id.** The id is the provider's idempotency
+  key, so the second call returns the first charge or makes it now; afterwards there is exactly one
+  result. Only *asking* ("what happened to this id?") is weaker: "not found" can be followed by a
+  delayed request that charges. Cost: the payment keeps its payment-method token while
+  `PROCESSING` (cleared on every transition out, enforced by a CHECK).
+- **One column, three jobs.** `next_attempt_at` is the age gate (phase 1 sets it to timeout + 30 s,
+  past the live request), the lease (the claim moves it forward before committing, so a second
+  instance skips the row while the gateway call runs outside any transaction) and the backoff.
+  `SKIP LOCKED` alone is not enough once the claim has committed: the control test without the
+  lease made 30 duplicate gateway calls on 30 payments; with it, 0.
+- **One phase 3.** `SettlePayment` is shared by the request and the job; the key is completed by
+  `payment_id`, the only thing the job knows. A transition that finds the payment already moved
+  throws and rolls back everything, booking confirmation included.
+- **Bounded refunds, and a state for people.** 1, 2, 4, 8 minutes, then `REFUND_FAILED` + an error
+  log — the dead-letter idea applied to money. `PROCESSING` never gets such an end: its outcome is
+  unknown, and any terminal state would be a guess.
+- **Keys expire, invariants do not.** After 24 h a `COMPLETED` key is deleted; the same request is
+  then refused by the `CONFIRMED` booking and `UQ_payments_booking_succeeded`, not by the key.
+- **Verified by fault injection**, one place per test (after phase 1, during the charge, lost
+  answer, after `REFUND_PENDING`, refunds failing), each ending on one global invariant checked
+  against the fake provider's ledger: money taken ⇔ `SUCCEEDED` + `CONFIRMED`, or refunded, or
+  `REFUND_FAILED`.
 
 ## Gotchas
 
@@ -105,7 +139,8 @@ retry or reconciliation safe (49C).
 
 ## Related
 
-ADR-009, domain-model Decision 14 and BR-PAY-01..07, Day 49B log, race tests in
-`api/tests/integration/postgres-payment-race.integration.test.ts`;
+ADR-009, ADR-010, domain-model Decisions 14–15 and BR-PAY-01..10, Day 49B and 49C logs, race tests in
+`api/tests/integration/postgres-payment-race.integration.test.ts` and
+`api/tests/integration/postgres-payment-reconciliation.integration.test.ts`;
 [hold-expiry-and-time-boundaries.md](./hold-expiry-and-time-boundaries.md),
 [outbox-and-relay.md](./outbox-and-relay.md).

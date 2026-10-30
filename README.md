@@ -46,9 +46,11 @@ Object creation happens only in the Composition Root. Routes and use cases recei
 | `POSTGRES_PORT` | No | `5432` | Postgres port |
 | `BOOKING_POSTGRES_USER` | Yes | none | api's own role on `booking_db` (not identity's `POSTGRES_USER`) |
 | `BOOKING_POSTGRES_PASSWORD` | Yes | none | Password for that role |
+| `BOOKING_POSTGRES_DB` | No | `booking_db` | api's database; `npm run test:integration` sets `booking_test` |
 | `JWT_SECRET` | Yes | none | Shared with Identity to verify Bearer JWTs (≥32 chars) |
 | `RABBITMQ_URL` | No | `amqp://guest:guest@localhost:5672` | AMQP URL (`rabbitmq` host inside compose) |
 | `PAYMENT_SIMULATOR_DELAY_MS` | No | `0` | How long the simulated gateway takes per charge and per refund (`0–60000`); only for watching a payment race by hand |
+| `PAYMENT_GATEWAY_TIMEOUT_MS` | No | `10000` | How long the api waits for the gateway before the outcome is unknown (`1–20000`); reconciliation takes the payment over 30 s later (Day 49C) |
 
 `JWT_SECRET` is required at startup. The application fails fast if it is missing, blank, or shorter than 32 characters.
 
@@ -247,22 +249,42 @@ Idempotency-Key: 6f1c2a7e-pay-1
 (same key, same body again) → the identical 201, plus  Idempotent-Replayed: true
 ```
 
-- **Simulated gateway.** `tok_success` is charged; `tok_decline` and any other token are declined (`card_declined` / `unknown_payment_method`). It runs in the process: no network, no timeout. `PAYMENT_SIMULATOR_DELAY_MS` slows every charge and refund, to watch a race by hand.
+- **Simulated gateway.** `tok_success` is charged; `tok_decline` and any other token are declined (`card_declined` / `unknown_payment_method`). It runs in the process. `PAYMENT_SIMULATOR_DELAY_MS` slows every charge and refund, to watch a race by hand; since Day 49C a call is cut at `PAYMENT_GATEWAY_TIMEOUT_MS`, and four more tokens reproduce failures (see Day 49C below).
 - **Three phases, the gateway outside any transaction** ([ADR-009](docs/adr/009-external-calls-outside-transactions.md), Decision 14). Phase 1 (short transaction) claims the key, checks the booking and records a `PROCESSING` payment. Phase 2 calls the gateway with nothing locked. Phase 3 (short transaction) records the outcome and confirms the booking: `HELD → CONFIRMED`, seats `HELD → BOOKED`, `booking-confirmed` through the outbox. Measured (race test E, a 1 s charge): with the charge inside one transaction a cancel waits ~0.9 s and the expiry job skips the locked booking; with three phases the cancel takes 2–11 ms.
-- **The race with expiry and cancel.** Confirmation is decided at phase 3 with BR-BOOK-10's `holdExpiresAt > now`. If the booking expired or was cancelled while the gateway charged, the payment becomes `REFUND_PENDING`, that commits, the gateway refunds, and the payment becomes `REFUNDED` (audit actor `system` / `payment-refund`). The answer is `409 BOOKING_NOT_PAYABLE`. To make that rare, a payment only **starts** while the hold has more than 60 s left (BR-PAY-07).
+- **The race with expiry and cancel.** Confirmation is decided at phase 3 with BR-BOOK-10's `holdExpiresAt > now`. If the booking expired or was cancelled while the gateway charged, the payment becomes `REFUND_PENDING` and the request answers `409 BOOKING_NOT_PAYABLE` at once; since Day 49C the reconciliation job makes the refund (on Day 49B the request did, after its commit). To make that rare, a payment only **starts** while the hold has more than 60 s left (BR-PAY-07).
 - **Idempotency-Key.** Required, 1–255 visible ASCII characters, scoped to the account. The final answer (`201`, `402`, `409 BOOKING_NOT_PAYABLE`, `404`) is stored with the key in the same transaction as the outcome, as `json` so a replay is byte for byte the first response. The same key with a different body (fingerprint: SHA-256 of method, path and validated body, keys sorted) is `422 IDEMPOTENCY_KEY_REUSED`; while the first request is still running, `409 IDEMPOTENCY_KEY_IN_PROGRESS`. Validation errors, `PAYMENT_AMOUNT_MISMATCH` and `PAYMENT_IN_PROGRESS` are not stored: the key stays usable.
 - **Two keys, one booking** (two tabs): at most one `PROCESSING` and one `SUCCEEDED` payment per booking (partial unique indexes); the second gets `409 PAYMENT_IN_PROGRESS`.
 
 | Answer | When |
 |---|---|
 | `201` | Charged and confirmed |
+| `202` | The gateway's answer is unknown (Day 49C): payment `PROCESSING`, not stored; retry with the same key for the final answer |
 | `402 PAYMENT_DECLINED` | Declined; the booking stays `HELD`, pay again with a new key |
-| `409 BOOKING_NOT_PAYABLE` | Not `HELD`, hold lapsed, 60 s or less left, or lost to expiry/cancel during the charge (then refunded) |
+| `409 BOOKING_NOT_PAYABLE` | Not `HELD`, hold lapsed, 60 s or less left, or lost to expiry/cancel during the charge (then refunded by the job) |
 | `409 IDEMPOTENCY_KEY_IN_PROGRESS` / `409 PAYMENT_IN_PROGRESS` | The same key / another key is paying this booking right now |
 | `422 IDEMPOTENCY_KEY_REQUIRED` / `IDEMPOTENCY_KEY_REUSED` / `PAYMENT_AMOUNT_MISMATCH` / `VALIDATION_FAILED` | Key missing / reused with another body / amount ≠ total / malformed key or body |
 | `404 BOOKING_NOT_FOUND` / `403` | Another account's booking / an admin |
 
 No `Location` and no `GET` for a payment: no story reads one. Rules: BR-PAY-01..07 and Decision 14 in [docs/product/domain-model.md](docs/product/domain-model.md).
+
+## Payment failures and reconciliation (Day 49C)
+
+```http
+POST /api/bookings/:id/payments          (the provider charges, but its answer never arrives)
+Idempotency-Key: 6f1c2a7e-pay-2
+{ "paymentMethodToken": "tok_lost_response", "amount": { "amount": 3000000, "currency": "VND" } }
+→ 202 { "payment": { "id": "…", "status": "PROCESSING", "providerReference": null, … } }   after the timeout
+
+(same key, at once)          → 409 IDEMPOTENCY_KEY_IN_PROGRESS   no second charge
+(same key, once reconciled)  → 201 …SUCCEEDED…, Idempotent-Replayed: true
+```
+
+- **Three results, not two** ([ADR-010](docs/adr/010-payment-reconciliation.md), Decision 15). A gateway call is charged, declined, or **unknown**: the adapter cuts it at `PAYMENT_GATEWAY_TIMEOUT_MS` and answers `unknown`. Unknown is never `FAILED` (BR-PAY-08): the provider may have taken the money. The payment stays `PROCESSING`, its key `IN_PROGRESS`, the booking `HELD`, and the customer gets `202`.
+- **`payment-reconciliation-job`** (every 30 s) finishes every payment a request could not. It takes due payments in batches (`FOR UPDATE SKIP LOCKED`), leases them by moving `next_attempt_at` forward, commits, and only then calls the gateway (ADR-009). A `PROCESSING` payment is due 30 s after the gateway timeout, past the live request; it is **charged again with the same payment id** (the provider's idempotency key), so the first charge's result comes back or the charge is made now — never twice. The answer goes through the request's own phase 3 (`SettlePayment`), which also completes the key. Still unknown: retried 1, 2, 4 … (at most 10) minutes later.
+- **Refunds happen only in the job.** `REFUND_PENDING` is due at once; a failed refund is retried 1, 2, 4, 8 minutes later. The fifth failure, or one the provider calls permanent, ends in `REFUND_FAILED`, audited and logged as an error (`payment_refund_needs_attention`) for a person (BR-PAY-09).
+- **`idempotency-key-cleanup-job`** (hourly) deletes `COMPLETED` keys older than 24 h, in batches of 500; never one in progress (BR-PAY-10). The same request after that is a new request, and the `CONFIRMED` booking answers `409 BOOKING_NOT_PAYABLE` without a charge.
+- **Failure tokens** (simulator): `tok_timeout_before_charge` (the first charge never reaches the provider), `tok_lost_response` (charged, answer lost), `tok_refund_fails_twice`, `tok_refund_fails_permanently`. The provider's memory lives in the api process, so a restart forgets its charges.
+- **Measured** (e2e, timeout 4 s, simulator delay 2 s): `tok_lost_response` → `202` in 4.0 s, same key `409` in 7 ms, `CONFIRMED` and the replayed `201` after the job; a booking cancelled during the charge → `409` in 2.0 s (16 s on Day 49B, which waited for the refund) and `REFUNDED` by the job.
 
 ## Audit trail
 
@@ -275,10 +297,11 @@ Every successful write records an audit entry in the `audit_logs` table, in the 
 | `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` (metadata: `reference`, `passengerCount`, `seats`, `totalVnd`, `holdExpiresAt` — no passenger names) |
 | `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` |
 | `BOOKING_EXPIRED` | `booking-hold-expiry-job` | `system` / `booking-hold-expiry` (metadata: `reference`, `seats`, `holdExpiresAt`) |
-| `BOOKING_CONFIRMED` | `POST /api/bookings/:id/payments` (charged and confirmed) | `account` / payer's JWT `sub` (metadata: `reference`, `paymentId`, `amountVnd`) |
-| `PAYMENT_FAILED` | same, gateway declined | `account` / payer's JWT `sub`; target `payment` (metadata: `bookingId`, `reason`) |
-| `PAYMENT_REFUND_PENDING` | same, charged but the booking expired or was cancelled | `account` / payer's JWT `sub`; target `payment` |
-| `PAYMENT_REFUNDED` | the refund after it | `system` / `payment-refund`; target `payment` |
+| `BOOKING_CONFIRMED` | `POST /api/bookings/:id/payments` (charged and confirmed), or `payment-reconciliation-job` | `account` / payer's JWT `sub`, or `system` / `payment-reconciliation` (metadata: `reference`, `paymentId`, `amountVnd`) |
+| `PAYMENT_FAILED` | same, gateway declined | same actors; target `payment` (metadata: `bookingId`, `reason`) |
+| `PAYMENT_REFUND_PENDING` | same, charged but the booking expired or was cancelled | same actors; target `payment` |
+| `PAYMENT_REFUNDED` | `payment-reconciliation-job` | `system` / `payment-reconciliation` (Day 49B rows: `payment-refund`); target `payment` |
+| `PAYMENT_REFUND_FAILED` | `payment-reconciliation-job`, refund given up (BR-PAY-09) | `system` / `payment-reconciliation`; target `payment` (metadata: `reason`, `attempts`) |
 | `AIRPORT_REGISTERED` | `POST /api/airports` | `account` / admin's JWT `sub` |
 | `AIRCRAFT_REGISTERED` | `POST /api/aircraft` | `account` / admin's JWT `sub` (metadata: seats per fare class) |
 
@@ -296,7 +319,8 @@ Config + Logger
   → Flight/Booking repositories, AuditRecorder, OutboxRepository, TransactionRunner, HealthChecks
   → CreateFlight / ListFlights / CreateBooking / CancelBooking / ExpireHolds
   → MessagePublisher (RabbitMQ, private)
-  → JobScheduler + flights-summary-job + outbox-relay-job + booking-hold-expiry-job (private; started on boot)
+  → JobScheduler + flights-summary-job + outbox-relay-job + booking-hold-expiry-job
+      + payment-reconciliation-job + idempotency-key-cleanup-job (private; started on boot)
   → Application { ... , close() }
 ```
 
@@ -317,6 +341,8 @@ Current jobs:
 | `flights-summary-job` | 60s (default) | Logs `flights_summary` with total flight count via `Logger` |
 | `outbox-relay-job` | 5s (default) | Publishes unpublished outbox rows (see Messaging) |
 | `booking-hold-expiry-job` | 60s (default) | Expires lapsed holds in batches of 50, at most 20 per run (see Hold expiry) |
+| `payment-reconciliation-job` | 30s (default) | Finishes `PROCESSING` / `REFUND_PENDING` payments in leased batches of 20, at most 5 per run (see Day 49C) |
+| `idempotency-key-cleanup-job` | 1h (default) | Deletes `COMPLETED` Idempotency-Keys older than 24 h, batches of 500, at most 20 per run |
 
 Design notes:
 
@@ -324,7 +350,7 @@ Design notes:
 - Failures are logged; they do not crash the process or other jobs.
 - Recursive `setTimeout` avoids overlapping runs of the same job.
 - `stop()` waits for the run in progress before it resolves (Day 48B), so `close()` never destroys the `DataSource` under a running transaction.
-- Multi-instance deployments would duplicate job execution (accepted while a single instance runs — no distributed lock).
+- Multi-instance deployments would duplicate job execution (accepted while a single instance runs — no distributed lock). The expiry, reconciliation and key cleanup jobs are safe to run twice (`SKIP LOCKED`, and the reconciliation lease); the outbox relay is not.
 - Flight count reuses `FlightRepository.findPage({ limit: 1 }).totalItems` (`COUNT(*)` in the database), avoiding a new repository method for one consumer.
 
 ## Docker
@@ -442,6 +468,8 @@ The application runs TypeORM migrations (`api/src/postgres/migrations/`) on star
 | `AddBookingHoldExpiryIndex` | partial index `idx_bookings_held_expiry` on `(hold_expires_at, id) WHERE status = 'HELD'`: the expiry sweep reads its batch in order and stops at `LIMIT` (no sort of every due hold) |
 | `CreateFlightFares` / `BackfillFlightFares` / `ContractFlightFares` | `flight_fares` (PK `flight_id, fare_class`, `amount_vnd bigint` between 1 and 2^53 − 1); a `VND` flight's `price_in_cents` becomes its ECONOMY fare unchanged; the contract refuses with a list while a class with seats has no fare (BUSINESS, `USD` flights) or a fare has no seats, else drops `price_in_cents` and `currency` |
 | `AddPassengerFareSnapshot` | `booking_passengers.fare_class`, `price_vnd`, priced from the seat's class at migration time; refuses with a list if a seated passenger cannot be priced; CHECK seat, class and price are NULL together |
+| `CreatePayments` / `CreateIdempotencyKeys` | `payments` (status CHECK, partial unique indexes: one `PROCESSING` and one `SUCCEEDED` per booking) and `idempotency_keys` (PK account, operation, key; response stored as `json`) — Day 49B |
+| `AddPaymentReconciliation` | `payments.payment_method_token` (only while `PROCESSING`), `attempts`, `next_attempt_at` (only while `PROCESSING`/`REFUND_PENDING`), status `REFUND_FAILED`, partial index `IDX_payments_due`, `UQ_idempotency_keys_payment_id`; refuses with a list while a `PROCESSING` payment exists (it has no token to charge again with) — Day 49C |
 
 Since Day 46 each migration runs in its own transaction (`migrationsTransactionMode: "each"`): a refused contract migration keeps the expand and backfill, so the missing data can be fixed by hand and the migrations re-run. The aircraft of an existing flight cannot be guessed, so it is assigned by hand, e.g. `UPDATE flights SET aircraft_id = (SELECT id FROM aircraft WHERE registration = 'VN-A321') WHERE flight_number = 'VN123';`. A fare cannot be guessed either (no exchange rate belongs in a migration): `INSERT INTO flight_fares (flight_id, fare_class, amount_vnd) VALUES ('<id>', 'BUSINESS', 4200000);`.
 
@@ -499,6 +527,11 @@ Request
 
 JobScheduler → booking-hold-expiry-job → ExpireHolds
   → TransactionRunner (one per batch): expire due holds + release seats, audit, outbox (booking-expired)
+
+JobScheduler → payment-reconciliation-job → ReconcilePayments
+  → TransactionRunner: claim due payments (SKIP LOCKED, lease) → commit
+  → PaymentGateway (no transaction): charge again with the same id | refund
+  → SettlePayment / record refund (one short transaction per payment)
 ```
 
 Every response includes header `x-request-id` (generated or echoed from the client).
@@ -536,10 +569,23 @@ npm run typecheck
 npm run typecheck:test
 npm run build
 npm test                                                          # unit + HTTP tier, no infrastructure
-npm run test:integration --workspace=@booking-flight-system/api   # needs Postgres; TRUNCATEs booking_db tables
+npm run test:integration --workspace=@booking-flight-system/api   # needs Postgres; TRUNCATEs booking_test tables, never booking_db
 npm run seed:reference --workspace=@booking-flight-system/api     # dev airports + aircraft; safe to re-run
 npm run dev --workspace=@booking-flight-system/api
 npm start --workspace=@booking-flight-system/api
+```
+
+**Integration tests run on their own database, `booking_test` (Day 49C).** They `TRUNCATE` every
+table they use, so `test:integration` sets `BOOKING_POSTGRES_DB=booking_test` and a preloaded guard
+(`api/tests/integration/require-test-database.ts`) stops the run before any test unless the database
+name ends in `_test`. The dev stack can keep running meanwhile: its data and its background jobs
+never see the test rows. A fresh volume creates `booking_test` from
+`docker/postgres-init/02-create-booking-test-db.sh`; an existing volume needs it once by hand:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres \
+  -c "CREATE DATABASE booking_test OWNER \"$BOOKING_POSTGRES_USER\";" \
+  -c "REVOKE CONNECT ON DATABASE booking_test FROM PUBLIC;"'
 ```
 
 ## Postman
@@ -552,8 +598,10 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - No route cancels a flight yet (phase D step 9); a status change other than the creation has no event
 - `Flight` is both the write model and the read shape; only `status` is mapped to a separate `FlightView`
 - Two overlapping flights of one aircraft inserted at the same instant can deadlock (`40P01`) instead of failing the exclusion constraint; the loser is answered `409 AIRCRAFT_UNAVAILABLE`, which is safe to retry if the winner also rolled back
-- Payment failures are not reconciled yet (phase D step 6c, Day 49C): a gateway error of unknown outcome leaves the payment `PROCESSING` and its key in progress (a retry with that key gets `409 IDEMPOTENCY_KEY_IN_PROGRESS`, another key `409 PAYMENT_IN_PROGRESS`, until the hold expires); a refund the gateway refuses leaves `REFUND_PENDING` with a `payment_refund_failed` warning; Idempotency-Keys are never deleted (24 h cleanup is 49C)
-- The refund runs inside the paying request, after the commit: a slow refund delays that request's `409` (with `PAYMENT_SIMULATOR_DELAY_MS=8000` the answer took 16 s)
+- `REFUND_FAILED` has no endpoint: a person settles it with the provider and psql, and the only alert is an error log line and an audit row until phase G
+- The simulated provider remembers charges in the api process: after a restart, reconciliation of a payment whose first charge went through charges it again (a real provider keeps its idempotency keys)
+- A request still charging when reconciliation has already settled its payment (it outlived timeout + 30 s) answers `500`; its phase 3 rolls back and the same key then gets the job's answer (Day 49C race test)
+- A payment whose first request never reached the provider is charged when reconciliation runs, up to about a minute after the customer pressed "pay"; if the hold lapsed meanwhile, it is refunded
 - After a hold lapses, its seats stay `HELD` on the seat map until the expiry job's next run — up to ~60 s plus the run itself. The seat cannot be sold twice in that gap and the booking already reads `EXPIRED`; accepted (Decision 12)
 - A failing expiry batch rolls back whole and is retried on the next run: one booking that keeps failing holds back the others of its batch (head-of-line, like the outbox relay). The hold duration (15 min) is a constant, not configuration
 - No endpoint changes a fare (only psql); one that is added must keep BR-FLT-09 and go through `UPDATE flight_fares`, so the hold's share lock still orders it against holds. Passengers of bookings made before Day 49A carry the fare at migration time, not the one at their hold (it was never recorded)

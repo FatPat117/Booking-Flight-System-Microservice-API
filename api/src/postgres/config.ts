@@ -3,16 +3,17 @@ export type PostgresConfig = Readonly<{
   port: number;
   username: string;
   password: string;
-  /** Fixed: booking_db is a second logical database in the same Postgres
-   * container as identity_db (Day 36) — not driven by POSTGRES_DB, which
-   * still names identity's database. */
+  /** booking_db by default, a second logical database in the same Postgres
+   * container as identity_db (Day 36). BOOKING_POSTGRES_DB, not POSTGRES_DB
+   * (which names identity's), overrides it — the integration tests point it
+   * at booking_test (Day 49C). */
   database: string;
 }>;
 
 type Environment = Record<string, string | undefined>;
 
 const DEFAULT_POSTGRES_PORT = 5432;
-const BOOKING_DATABASE_NAME = "booking_db";
+export const DEFAULT_BOOKING_DATABASE_NAME = "booking_db";
 
 /**
  * Test-convenience config for the *.integration.test.ts files: soft
@@ -37,7 +38,8 @@ export function parsePostgresConfig(environment: Environment): PostgresConfig {
     username: environment.BOOKING_POSTGRES_USER?.trim() || "booking",
     password:
       environment.BOOKING_POSTGRES_PASSWORD?.trim() || "booking_dev_password",
-    database: BOOKING_DATABASE_NAME,
+    database:
+      environment.BOOKING_POSTGRES_DB?.trim() || DEFAULT_BOOKING_DATABASE_NAME,
   };
 }
 

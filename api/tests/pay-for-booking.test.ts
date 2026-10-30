@@ -11,11 +11,10 @@ import { createCreateBooking } from "../src/bookings/create-booking.js";
 import { vnd } from "../src/money/money.js";
 import type { Logger } from "../src/observability/logger.js";
 import {
-  BOOKING_CONFIRMED_QUEUE,
   createPayForBooking,
-  PAYMENT_REFUND_ACTOR,
   type PaymentRequest,
 } from "../src/payments/pay-for-booking.js";
+import { BOOKING_CONFIRMED_QUEUE } from "../src/payments/settle-payment.js";
 import type { Actor, Flight } from "../src/types.js";
 import {
   createFakePaymentGateway,
@@ -38,6 +37,8 @@ const ACTOR_A: Actor = { accountId: FIXTURE_ACCOUNT_A };
 const SCOPE_A: BookingAccessScope = { kind: "owner", accountId: FIXTURE_ACCOUNT_A };
 const SCOPE_B: BookingAccessScope = { kind: "owner", accountId: FIXTURE_ACCOUNT_B };
 const TOTAL = vnd(3_000_000);
+/** Gateway timeout + reconciliation margin, as the Composition Root wires it. */
+const RECONCILE_AFTER_MS = 40_000;
 
 function request(overrides: Partial<PaymentRequest> = {}): PaymentRequest {
   return {
@@ -120,6 +121,7 @@ async function createRuntime(
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => "request-1",
     getCurrentTime: () => clock.now,
+    reconcileAfterMs: RECONCILE_AFTER_MS,
   };
 
   const cancelBooking = createCancelBooking({
@@ -286,7 +288,7 @@ test("a declined charge answers 402, records FAILED with the reason, and leaves 
   assert.equal(retried.outcome === "answered" && retried.response.status, 201);
 });
 
-test("a charge that lands after the hold lapsed is refunded: 409 BOOKING_NOT_PAYABLE, payment REFUNDED, seats untouched", async () => {
+test("a charge that lands after the hold lapsed answers 409 at once and leaves the refund to reconciliation: REFUND_PENDING, due now, no refund call in the request", async () => {
   const runtime = await createRuntime({
     onCharge: () => {
       runtime.clock.now = new Date(DEADLINE_MS);
@@ -303,29 +305,26 @@ test("a charge that lands after the hold lapsed is refunded: 409 BOOKING_NOT_PAY
       error: {
         code: "BOOKING_NOT_PAYABLE",
         message:
-          "Booking was cancelled or expired while the payment was processed; the payment was refunded",
+          "Booking was cancelled or expired while the payment was processed; the payment is being refunded",
       },
     },
   });
   assert.equal(runtime.bookingRepository.peek(booking.id)?.status, "HELD");
   assert.deepEqual(seatStatuses(runtime), ["1A:HELD", "1B:HELD", "1C:AVAILABLE"]);
   const payment = await runtime.paymentRepository.findById(FIRST_PAYMENT_ID);
-  assert.equal(payment?.status, "REFUNDED");
-  assert.deepEqual(runtime.gateway.refunds, [
-    {
-      paymentId: FIRST_PAYMENT_ID,
-      providerReference: `fake_ch_${FIRST_PAYMENT_ID}`,
-      amount: TOTAL,
-    },
-  ]);
+  assert.equal(payment?.status, "REFUND_PENDING");
+  assert.equal(payment?.providerReference, `fake_ch_${FIRST_PAYMENT_ID}`);
+  assert.equal(payment?.nextAttemptAt, new Date(DEADLINE_MS).toISOString());
+  assert.equal(payment?.paymentMethodToken, null);
+  assert.deepEqual(runtime.gateway.refunds, []);
   assert.deepEqual(
     runtime.auditRecorder.records.map(({ action, actor }) => `${action}:${actor.id}`),
-    [`PAYMENT_REFUND_PENDING:${FIXTURE_ACCOUNT_A}`, `PAYMENT_REFUNDED:${PAYMENT_REFUND_ACTOR.id}`],
+    [`PAYMENT_REFUND_PENDING:${FIXTURE_ACCOUNT_A}`],
   );
   assert.equal(runtime.outboxRepository.entries.length, 0);
 });
 
-test("a charge that lands after the owner cancelled is refunded too", async () => {
+test("a charge that lands after the owner cancelled is left for refund too", async () => {
   const runtime = await createRuntime({
     onCharge: async () => {
       const cancelled = await runtime.cancelBooking(runtime.booking.id, SCOPE_A, ACTOR_A);
@@ -337,31 +336,10 @@ test("a charge that lands after the owner cancelled is refunded too", async () =
 
   assert.equal(result.outcome === "answered" && result.response.status, 409);
   assert.equal(runtime.bookingRepository.peek(runtime.booking.id)?.status, "CANCELLED");
-  assert.equal((await runtime.paymentRepository.findById(FIRST_PAYMENT_ID))?.status, "REFUNDED");
-});
-
-test("a refund the gateway refuses leaves the payment REFUND_PENDING and logs a warning; the answer is still 409", async () => {
-  const runtime = await createRuntime({
-    onCharge: () => {
-      runtime.clock.now = new Date(DEADLINE_MS);
-    },
-  });
-  runtime.gateway.willRefund({ outcome: "failed", reason: "unknown_charge" });
-
-  const result = await runtime.payForBooking(runtime.booking.id, SCOPE_A, ACTOR_A, request());
-
-  assert.equal(result.outcome === "answered" && result.response.status, 409);
-  assert.equal((await runtime.paymentRepository.findById(FIRST_PAYMENT_ID))?.status, "REFUND_PENDING");
-  assert.deepEqual(runtime.warnings, [
-    {
-      message: "payment_refund_failed",
-      fields: {
-        paymentId: FIRST_PAYMENT_ID,
-        bookingId: runtime.booking.id,
-        reason: "unknown_charge",
-      },
-    },
-  ]);
+  assert.equal(
+    (await runtime.paymentRepository.findById(FIRST_PAYMENT_ID))?.status,
+    "REFUND_PENDING",
+  );
 });
 
 test("an amount other than the booking total is amount-mismatch, charges nothing, and frees the key (BR-PAY-03)", async () => {
@@ -482,7 +460,73 @@ test("a second request while the first is charging: same key is in-progress, ano
   assert.equal(runtime.gateway.charges.length, 1);
 });
 
-test("a gateway error leaves the payment PROCESSING and the key in progress, so a retry cannot charge twice", async () => {
+test("an unknown gateway outcome is processing, never FAILED, even when the provider took the money: payment PROCESSING, key in progress, seats HELD, charged once (BR-PAY-08)", async () => {
+  const runtime = await createRuntime();
+  runtime.gateway.willCharge({ outcome: "lost-response" });
+
+  const result = await runtime.payForBooking(runtime.booking.id, SCOPE_A, ACTOR_A, request());
+
+  const startedAt = runtime.clock.now.toISOString();
+  assert.deepEqual(result, {
+    outcome: "processing",
+    payment: {
+      id: FIRST_PAYMENT_ID,
+      bookingId: runtime.booking.id,
+      accountId: FIXTURE_ACCOUNT_A,
+      amount: TOTAL,
+      status: "PROCESSING",
+      providerReference: null,
+      failureReason: null,
+      paymentMethodToken: "tok_success",
+      attempts: 0,
+      nextAttemptAt: new Date(runtime.clock.now.getTime() + RECONCILE_AFTER_MS).toISOString(),
+      createdAt: startedAt,
+      updatedAt: startedAt,
+    },
+  });
+  assert.deepEqual(
+    await runtime.paymentRepository.findById(FIRST_PAYMENT_ID),
+    result.outcome === "processing" ? result.payment : undefined,
+  );
+  assert.deepEqual(runtime.gateway.ledger.charged, [FIRST_PAYMENT_ID]);
+  assert.equal(runtime.bookingRepository.peek(runtime.booking.id)?.status, "HELD");
+  assert.deepEqual(seatStatuses(runtime), ["1A:HELD", "1B:HELD", "1C:AVAILABLE"]);
+  assert.equal(runtime.auditRecorder.records.length, 0);
+  assert.deepEqual(runtime.warnings, [
+    {
+      message: "payment_outcome_unknown",
+      fields: { paymentId: FIRST_PAYMENT_ID, bookingId: runtime.booking.id, reason: "timeout" },
+    },
+  ]);
+
+  assert.deepEqual(
+    await runtime.payForBooking(runtime.booking.id, SCOPE_A, ACTOR_A, request()),
+    { outcome: "idempotency-key-in-progress" },
+  );
+  assert.deepEqual(
+    await runtime.payForBooking(
+      runtime.booking.id,
+      SCOPE_A,
+      ACTOR_A,
+      request({ idempotencyKey: "key-2" }),
+    ),
+    { outcome: "payment-in-progress" },
+  );
+  assert.equal(runtime.gateway.charges.length, 1);
+});
+
+test("a confirmed payment keeps no payment-method token and is never due for reconciliation", async () => {
+  const runtime = await createRuntime();
+
+  await runtime.payForBooking(runtime.booking.id, SCOPE_A, ACTOR_A, request());
+
+  const payment = await runtime.paymentRepository.findById(FIRST_PAYMENT_ID);
+  assert.equal(payment?.status, "SUCCEEDED");
+  assert.equal(payment?.paymentMethodToken, null);
+  assert.equal(payment?.nextAttemptAt, null);
+});
+
+test("a gateway call that throws instead of answering leaves the payment PROCESSING and the key in progress, so a retry cannot charge twice", async () => {
   const runtime = await createRuntime({
     onCharge: () => {
       throw new Error("gateway timeout");

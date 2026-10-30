@@ -10,10 +10,12 @@
 | `outbox-relay-job` (mặc định 5 giây) | Đọc dòng outbox chưa publish → publish lên queue cùng tên `event_type` → `markPublished` | Dừng ở lỗi publish đầu tiên để giữ thứ tự; log `outbox_publish_failed` |
 | `flights-summary-job` | Log tổng số chuyến bay | Dùng lại `findPage({ limit: 1 }).totalItems` thay vì thêm `count()` cho một caller |
 | `booking-hold-expiry-job` (60 giây, Day 48B) | Gọi `ExpireHolds`: lô 50, tối đa 20 lô, `SKIP LOCKED`, mỗi lô một transaction | Im lặng khi không có gì; log `booking_holds_expired`; warn `booking_hold_expiry_backlog` khi chạm 20 lô |
+| `payment-reconciliation-job` (30 giây, Day 49C) | Gọi `ReconcilePayments`: claim lô 20 (`SKIP LOCKED` + lease `next_attempt_at`), commit, gọi gateway **song song**, ghi từng kết quả trong transaction ngắn; tối đa 5 lô | Log `payments_reconciled`; warn `payment_reconciliation_backlog`; error `payment_refund_needs_attention` từ use case |
+| `idempotency-key-cleanup-job` (1 giờ, Day 49C) | Gọi `CleanupIdempotencyKeys`: xoá key `COMPLETED` > 24 h, lô 500, tối đa 20 lô | Log `idempotency_keys_deleted`; warn `idempotency_key_cleanup_backlog` |
 
 **Vì sao không dùng RabbitMQ để lên lịch:** một process, không có bài toán liên service. Đánh đổi
-đã biết: chạy nhiều instance thì job chạy trùng — riêng job hết hạn an toàn nhờ `SKIP LOCKED`
-(mỗi instance lấy lô khác nhau), outbox relay thì chưa.
+đã biết: chạy nhiều instance thì job chạy trùng — job hết hạn, đối soát và dọn key an toàn nhờ
+`SKIP LOCKED` (đối soát thêm **lease**, vì nó gọi gateway sau khi đã commit), outbox relay thì chưa.
 
 **Thứ tự tắt:** dừng job → đóng publisher → đóng DB. Từ Day 48B `stop()` trả `Promise` và **chờ
 lượt đang chạy** xong (một lượt job hết hạn là một transaction) — trước đó nó chỉ xoá timer.

@@ -66,10 +66,11 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
     Folder 2 reads `EXPIRED` at once, gets `409 BOOKING_EXPIRED` on cancel, then waits 65 s for the job (every 60 s) and checks the seats are back. Headless: two `newman run … --folder "<name>"` calls with the psql line between them
 16. Folder **Day 49A — Fares** → the seed, alice's `accessToken` and bob's `userAccessToken`; run top to bottom on a database without VN491 on 2026-12-07
 17. Folder **Day 49B — Payment** → the seed, alice's `accessToken`, bob's `userAccessToken` and carol's `userBAccessToken`; run top to bottom on a database without VN493 on 2026-12-08 (each run draws its own Idempotency-Key prefix). Headless like step 14. To watch a payment lose to expiry by hand, see README, Day 49B (`PAYMENT_SIMULATOR_DELAY_MS`)
+18. Folder **Day 49C — Payment failures** → the seed, alice's `accessToken`, bob's `userAccessToken`, and the app's reconciliation job running (docker compose `app` or `npm run dev`); run top to bottom on a database without VN496 on 2026-12-11. `tok_lost_response` answers `202` after the gateway timeout (`PAYMENT_GATEWAY_TIMEOUT_MS`, default 10 s); request 7 waits 75 s for the job, so the folder takes about 1.5 min. Headless like step 13
 
 **Booking body since Day 48A:** `{ "passengers": [{ "name": "…", "seat": "12A" }] }` — 1 to 9 passengers, `seat` on every passenger or on none. The old `{ "passengerName": … }` answers `422 UNSUPPORTED_FIELD`. A new booking is `HELD` (seats `HELD` on the map) and the notifier logs `booking_held_consumed`.
 
-## Coverage (through Day 49B)
+## Coverage (through Day 49C)
 
 - Health: `/live`, `/health`, `/ready` (booking api `:3000`; `/ready` checks Postgres)
 - Flights / bookings / cancel / correlation probes
@@ -84,3 +85,4 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 - **Hold expiry (Day 48B)**: a fresh hold reads `HELD` with its seats `HELD`; once its deadline has passed (psql) the list and by-reference read `EXPIRED` before the job runs; `DELETE` → `409 BOOKING_EXPIRED` for the owner, `404` for another account; after the job the seats are `AVAILABLE` and another account holds exactly them; the old booking still answers `409 BOOKING_EXPIRED`
 - **Fares (Day 49A)**: `422 MISSING_FARE` / `FARE_CLASS_NOT_ON_AIRCRAFT` / `UNSUPPORTED_FIELD` for the old `priceInCents` body; a two-class flight answers one `Money` per class; a booking copies each passenger's fare and sums the `total`
 - **Payment (Day 49B)**: `POST /api/bookings/:id/payments` without `Idempotency-Key` → `422 IDEMPOTENCY_KEY_REQUIRED`; amount ≠ total → `422 PAYMENT_AMOUNT_MISMATCH`; another account → `404`, admin → `403`; `tok_decline` → `402 PAYMENT_DECLINED`; a new key with `tok_success` → `201` (`SUCCEEDED`, booking `CONFIRMED`, no `Location`); the same key and body → the identical response byte for byte with `Idempotent-Replayed: true`; the same key with another body → `422 IDEMPOTENCY_KEY_REUSED`; a third key → `409 BOOKING_NOT_PAYABLE`; the seat map shows exactly the booking's seats `BOOKED`
+- **Payment failures (Day 49C)**: `tok_lost_response` (the provider charges, the answer is lost) → `202` with the `PROCESSING` payment after the gateway timeout, only the six public fields, no `Idempotent-Replayed`; the same key at once → `409 IDEMPOTENCY_KEY_IN_PROGRESS` and the booking stays `HELD`; after the reconciliation job, the same key → the final `201` replayed (`SUCCEEDED`, booking `CONFIRMED`)

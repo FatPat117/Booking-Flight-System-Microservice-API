@@ -6,7 +6,8 @@
  *
  * `system` is the process itself acting with no account behind it; `id`
  * names what acted (Day 48B: "booking-hold-expiry"; Day 49B:
- * "payment-refund").
+ * "payment-refund", replaced on Day 49C by "payment-reconciliation", the
+ * only system actor in payments since).
  */
 export type AuditActor =
   | {
@@ -54,6 +55,7 @@ export type AuditAction =
   | "PAYMENT_FAILED"
   | "PAYMENT_REFUND_PENDING"
   | "PAYMENT_REFUNDED"
+  | "PAYMENT_REFUND_FAILED"
   | "AIRPORT_REGISTERED"
   | "AIRCRAFT_REGISTERED";
 

@@ -127,3 +127,24 @@ lặp → trả lại y hệt kèm `Idempotent-Replayed: true`.
 partial unique index — tối đa một payment `PROCESSING` và một `SUCCEEDED` mỗi booking.
 **Bằng chứng:** race test A — 10 request cùng key → 1 lần charge; race test B — 5 key khác nhau →
 đúng 1 `SUCCEEDED`, các key còn lại `409 PAYMENT_IN_PROGRESS`.
+
+### 16. Gọi gateway bị timeout — đã trừ tiền hay chưa? Xử lý thế nào? (Day 49C)
+
+**Trả lời:** Không biết, và **không được đoán**. Timeout không phải thất bại: provider có thể đã trừ,
+hoặc request kẹt trên mạng sẽ trừ sau. Đánh `FAILED` → khách trả lại → trừ hai lần. Nên adapter trả
+`unknown`, request trả `202`, payment giữ `PROCESSING`, key giữ `IN_PROGRESS`. Một job đối soát lấy
+payment quá hạn và **charge lại với cùng `paymentId`** — id đó là idempotency key phía provider, nên
+lần trước đã trừ thì nhận lại đúng kết quả cũ, chưa trừ thì trừ bây giờ; sau lời gọi chỉ có một kết
+quả. Chỉ "hỏi trạng thái" thì yếu hơn: "không tìm thấy" vẫn có thể bị một request đến muộn phủ định.
+**Bằng chứng:** test tiêm lỗi "mất câu trả lời": ledger của fake ghi 1 lần trừ tiền, 2 lần gọi,
+booking `CONFIRMED`, gửi lại key → `201`.
+
+### 17. Job chạy nhiều instance mà phải gọi ra ngoài thì làm sao không gọi trùng? (Day 49C)
+
+**Trả lời:** Không được giữ row lock trong lúc gọi mạng (ADR-009), nên `SKIP LOCKED` chỉ có tác dụng
+lúc claim — commit xong là khoá mất. Thêm **lease**: transaction claim đẩy `next_attempt_at` lên
+`now + timeout + 30 s` rồi commit; instance khác thấy chưa đến hạn nên bỏ qua. Lease chỉ hết khi
+instance đang giữ chết. Cuối cùng vẫn có chuyển trạng thái có điều kiện làm lưới an toàn.
+**Bằng chứng:** control không lease, instance 2 chạy sau khi instance 1 commit claim → **30 lời gọi
+trùng** trên 30 payment (vẫn mỗi payment một lần trừ tiền nhờ idempotency của provider); có lease → 0.
+

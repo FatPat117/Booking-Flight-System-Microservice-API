@@ -1,4 +1,3 @@
-import type { BookingConfirmedEvent } from "@booking-flight-system/contracts";
 import type { AuditActor, AuditRecorder } from "../audit/audit-recorder.js";
 import type {
   Booking,
@@ -14,23 +13,25 @@ import {
 import type { Money } from "../money/money.js";
 import type { Logger } from "../observability/logger.js";
 import type { OutboxRepository } from "../outbox/outbox-repository.js";
-import { resolveCorrelationId } from "../outbox/resolve-correlation-id.js";
 import type { TransactionRunner } from "../transactions/transaction-runner.js";
 import { isUuid, type Actor } from "../types.js";
 import type { PaymentGateway } from "./payment-gateway.js";
-import type { Payment, PaymentRepository } from "./payment-repository.js";
+import type {
+  NewPayment,
+  Payment,
+  PaymentRepository,
+} from "./payment-repository.js";
 import { toStoredResponse, type PaymentDecision } from "./payment-response.js";
-
-export const BOOKING_CONFIRMED_QUEUE = "booking-confirmed";
+import { createSettlePayment } from "./settle-payment.js";
 
 /** BR-PAY-07: a payment starts only while the hold has more than this left. */
 export const PAYMENT_START_MARGIN_MS = 60_000;
 
-/** Who refunds a charge whose booking was lost: no account, the system. */
-export const PAYMENT_REFUND_ACTOR: AuditActor = {
-  type: "system",
-  id: "payment-refund",
-};
+/**
+ * How long after the gateway timeout reconciliation may take a PROCESSING
+ * payment: room for the live request's phase 3 to commit first (Decision 15).
+ */
+export const PAYMENT_RECONCILIATION_MARGIN_MS = 30_000;
 
 /**
  * The request as the route validated it. `fingerprint` covers method, path
@@ -52,13 +53,17 @@ export type PaymentRequest = Readonly<{
  *   finished.
  * - amount-mismatch: the amount is not the booking total (BR-PAY-03).
  * - payment-in-progress: another key is paying this booking right now.
+ * - processing: the gateway's answer is unknown (BR-PAY-08). Nothing is
+ *   stored and the key stays in progress until reconciliation finishes the
+ *   payment; the same key then gets the final answer.
  */
 export type PayForBookingResult =
   | Readonly<{ outcome: "answered"; response: StoredResponse; replayed: boolean }>
   | Readonly<{ outcome: "idempotency-key-reused" }>
   | Readonly<{ outcome: "idempotency-key-in-progress" }>
   | Readonly<{ outcome: "amount-mismatch"; total: Money }>
-  | Readonly<{ outcome: "payment-in-progress" }>;
+  | Readonly<{ outcome: "payment-in-progress" }>
+  | Readonly<{ outcome: "processing"; payment: Payment }>;
 
 /**
  * `scope` decides which bookings the caller can reach (BR-AUTH-02); the
@@ -85,9 +90,11 @@ type PayForBookingDependencies = {
   generateOutboxId: () => string;
   getRequestId: () => string | undefined;
   getCurrentTime: () => Date;
+  /** Gateway timeout + PAYMENT_RECONCILIATION_MARGIN_MS (Decision 15). */
+  reconcileAfterMs: number;
 };
 
-type Started = Readonly<{ outcome: "started"; booking: Booking; payment: Payment }>;
+type Started = Readonly<{ outcome: "started"; payment: Payment }>;
 
 function canStartPayment(booking: Booking, now: Date): boolean {
   return (
@@ -109,13 +116,15 @@ function isSameMoney(left: Money, right: Money): boolean {
  *    the key.
  * 2. No transaction: charge. Nothing is locked while the gateway works.
  * 3. Transaction: record the outcome and complete the key with its
- *    response. On a charge, confirm the hold at phase 3's own `now`; if the
- *    booking was cancelled or expired meanwhile, mark REFUND_PENDING, commit,
- *    and only then refund (and record REFUNDED in a short transaction).
+ *    response — SettlePayment, the same code reconciliation runs
+ *    (Decision 15). On a charge, confirm the hold at phase 3's own `now`; if
+ *    the booking was cancelled or expired meanwhile, mark REFUND_PENDING —
+ *    the reconciliation job refunds it.
  *
- * A gateway call that throws leaves the payment PROCESSING and the key in
- * progress: the charge may have happened, so a retry must not start another
- * (reconciliation, 49C). The error reaches the caller.
+ * An unknown outcome (BR-PAY-08) and a gateway call that throws both leave
+ * the payment PROCESSING and the key in progress: the charge may have
+ * happened, so a retry must not start another. Reconciliation finishes the
+ * payment once its next_attempt_at, set in phase 1, has passed.
  */
 export function createPayForBooking(
   dependencies: PayForBookingDependencies,
@@ -125,16 +134,18 @@ export function createPayForBooking(
     paymentRepository,
     idempotencyRepository,
     paymentGateway,
-    auditRecorder,
-    outboxRepository,
     transactionRunner,
     logger,
     generatePaymentId,
-    generateAuditId,
-    generateOutboxId,
-    getRequestId,
     getCurrentTime,
+    reconcileAfterMs,
   } = dependencies;
+  // Audit, outbox, ids and request id are phase 3's alone.
+  const settle = createSettlePayment(dependencies);
+
+  function answered(response: StoredResponse): PayForBookingResult {
+    return { outcome: "answered", response, replayed: false };
+  }
 
   /** Store a final outcome with the key, inside the caller's transaction. */
   async function answer(
@@ -191,228 +202,32 @@ export function createPayForBooking(
       return { outcome: "amount-mismatch", total: booking.total };
     }
 
-    const createdAt = now.toISOString();
-    const payment: Payment = {
+    const newPayment: NewPayment = {
       id: generatePaymentId(),
       bookingId: booking.id,
       accountId: actor.accountId,
       amount: booking.total,
-      status: "PROCESSING",
-      providerReference: null,
-      failureReason: null,
-      createdAt,
-      updatedAt: createdAt,
+      paymentMethodToken: request.paymentMethodToken,
+      nextAttemptAt: new Date(now.getTime() + reconcileAfterMs).toISOString(),
+      createdAt: now.toISOString(),
     };
 
-    const started = await paymentRepository.start(payment);
+    const started = await paymentRepository.start(newPayment);
     if (started.outcome === "payment-in-progress") {
       await idempotencyRepository.release(keyScope, key);
       return { outcome: "payment-in-progress" };
     }
 
+    const payment: Payment = {
+      ...newPayment,
+      status: "PROCESSING",
+      providerReference: null,
+      failureReason: null,
+      attempts: 0,
+      updatedAt: newPayment.createdAt,
+    };
     await idempotencyRepository.attachPayment(keyScope, key, payment.id);
-    return { outcome: "started", booking, payment };
-  }
-
-  async function recordDecline(
-    actor: Actor,
-    keyScope: IdempotencyScope,
-    key: string,
-    payment: Payment,
-    reason: string,
-  ): Promise<PayForBookingResult> {
-    return transactionRunner.run(async () => {
-      const now = getCurrentTime();
-      await paymentRepository.markFailed(payment.id, reason, now);
-
-      const requestId = getRequestId();
-      await auditRecorder.record({
-        id: generateAuditId(),
-        action: "PAYMENT_FAILED",
-        actor: { type: "account", id: actor.accountId },
-        target: { type: "payment", id: payment.id },
-        ...(requestId === undefined ? {} : { requestId }),
-        occurredAt: now.toISOString(),
-        metadata: {
-          bookingId: payment.bookingId,
-          amountVnd: payment.amount.amount,
-          reason,
-        },
-      });
-
-      const failed: Payment = {
-        ...payment,
-        status: "FAILED",
-        failureReason: reason,
-        updatedAt: now.toISOString(),
-      };
-      return answer(keyScope, key, { outcome: "declined", payment: failed }, now);
-    });
-  }
-
-  /**
-   * Phase 3 after a charge. `refund` is set when the booking was lost: the
-   * caller refunds after this transaction has committed REFUND_PENDING.
-   */
-  async function recordCharge(
-    booking: Booking,
-    scope: BookingAccessScope,
-    actor: Actor,
-    keyScope: IdempotencyScope,
-    key: string,
-    payment: Payment,
-    providerReference: string,
-  ): Promise<{ result: PayForBookingResult; refund: boolean }> {
-    return transactionRunner.run(async () => {
-      const now = getCurrentTime();
-      const occurredAt = now.toISOString();
-      const requestId = getRequestId();
-      const confirmation = await bookingRepository.confirmHold(booking.id, scope, now);
-
-      if (confirmation.outcome === "not-payable") {
-        await paymentRepository.markRefundPending(payment.id, providerReference, now);
-        await auditRecorder.record({
-          id: generateAuditId(),
-          action: "PAYMENT_REFUND_PENDING",
-          actor: { type: "account", id: actor.accountId },
-          target: { type: "payment", id: payment.id },
-          ...(requestId === undefined ? {} : { requestId }),
-          occurredAt,
-          metadata: {
-            bookingId: booking.id,
-            amountVnd: payment.amount.amount,
-            providerReference,
-          },
-        });
-        const result = await answer(
-          keyScope,
-          key,
-          { outcome: "not-payable", reason: "refunded" },
-          now,
-        );
-        return { result, refund: true };
-      }
-
-      const confirmed = confirmation.booking;
-      await paymentRepository.markSucceeded(payment.id, providerReference, now);
-
-      const eventId = generateOutboxId();
-      const correlationId = resolveCorrelationId(requestId, eventId);
-
-      await auditRecorder.record({
-        id: generateAuditId(),
-        action: "BOOKING_CONFIRMED",
-        actor: { type: "account", id: actor.accountId },
-        target: { type: "booking", id: confirmed.id },
-        ...(requestId === undefined ? {} : { requestId }),
-        occurredAt,
-        metadata: {
-          flightId: confirmed.flightId,
-          reference: confirmed.reference,
-          paymentId: payment.id,
-          amountVnd: payment.amount.amount,
-          correlationId,
-        },
-      });
-
-      const payload: BookingConfirmedEvent = {
-        eventId,
-        correlationId,
-        type: "booking.confirmed",
-        occurredAt,
-        booking: {
-          id: confirmed.id,
-          reference: confirmed.reference,
-          flightId: confirmed.flightId,
-          // Field by field: the event is a contract, not the domain type.
-          passengers: confirmed.passengers.map(({ name, seat, fareClass, price }) => {
-            if (seat === null || fareClass === null || price === null) {
-              // Only legacy cancelled bookings lack these; they are never HELD.
-              throw new Error(`Confirmed booking ${confirmed.id} has a passenger without a seat`);
-            }
-            return {
-              name,
-              seat,
-              fareClass,
-              price: { amount: price.amount, currency: price.currency },
-            };
-          }),
-          total: { amount: confirmed.total.amount, currency: confirmed.total.currency },
-        },
-        payment: {
-          id: payment.id,
-          amount: { amount: payment.amount.amount, currency: payment.amount.currency },
-        },
-      };
-
-      await outboxRepository.enqueue({
-        id: eventId,
-        eventType: BOOKING_CONFIRMED_QUEUE,
-        payload,
-        createdAt: occurredAt,
-      });
-
-      const succeeded: Payment = {
-        ...payment,
-        status: "SUCCEEDED",
-        providerReference,
-        updatedAt: occurredAt,
-      };
-      const result = await answer(
-        keyScope,
-        key,
-        { outcome: "confirmed", booking: confirmed, payment: succeeded },
-        now,
-      );
-      return { result, refund: false };
-    });
-  }
-
-  /**
-   * After REFUND_PENDING has committed. The customer's answer is already
-   * stored, so a failure here is logged, not thrown: the payment stays
-   * REFUND_PENDING for reconciliation (49C).
-   */
-  async function refundCharge(payment: Payment, providerReference: string): Promise<void> {
-    try {
-      const refund = await paymentGateway.refund({
-        paymentId: payment.id,
-        providerReference,
-        amount: payment.amount,
-      });
-
-      if (refund.outcome === "failed") {
-        logger.warn("payment_refund_failed", {
-          paymentId: payment.id,
-          bookingId: payment.bookingId,
-          reason: refund.reason,
-        });
-        return;
-      }
-
-      await transactionRunner.run(async () => {
-        const now = getCurrentTime();
-        await paymentRepository.markRefunded(payment.id, now);
-        await auditRecorder.record({
-          id: generateAuditId(),
-          action: "PAYMENT_REFUNDED",
-          actor: PAYMENT_REFUND_ACTOR,
-          target: { type: "payment", id: payment.id },
-          occurredAt: now.toISOString(),
-          metadata: {
-            bookingId: payment.bookingId,
-            amountVnd: payment.amount.amount,
-            providerReference,
-          },
-        });
-      });
-    } catch (error) {
-      logger.warn("payment_refund_failed", {
-        paymentId: payment.id,
-        bookingId: payment.bookingId,
-        reason: error instanceof Error ? error.message : String(error),
-      });
-    }
+    return { outcome: "started", payment };
   }
 
   return async (bookingId, scope, actor, request) => {
@@ -420,7 +235,6 @@ export function createPayForBooking(
       accountId: actor.accountId,
       operation: PAY_BOOKING_OPERATION,
     };
-    const key = request.idempotencyKey;
 
     const phase1 = await transactionRunner.run(() =>
       startPayment(bookingId, scope, actor, keyScope, request),
@@ -429,29 +243,26 @@ export function createPayForBooking(
       return phase1;
     }
 
-    const { booking, payment } = phase1;
+    const { payment } = phase1;
     const charge = await paymentGateway.charge({
       paymentId: payment.id,
       amount: payment.amount,
       paymentMethodToken: request.paymentMethodToken,
     });
 
+    const payer: AuditActor = { type: "account", id: actor.accountId };
     if (charge.outcome === "declined") {
-      return recordDecline(actor, keyScope, key, payment, charge.reason);
+      return answered(await settle.declined(payment, charge.reason, payer));
+    }
+    if (charge.outcome === "unknown") {
+      logger.warn("payment_outcome_unknown", {
+        paymentId: payment.id,
+        bookingId: payment.bookingId,
+        reason: charge.reason,
+      });
+      return { outcome: "processing", payment };
     }
 
-    const { result, refund } = await recordCharge(
-      booking,
-      scope,
-      actor,
-      keyScope,
-      key,
-      payment,
-      charge.providerReference,
-    );
-    if (refund) {
-      await refundCharge(payment, charge.providerReference);
-    }
-    return result;
+    return answered(await settle.charged(payment, charge.providerReference, payer));
   };
 }

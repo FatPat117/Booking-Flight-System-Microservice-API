@@ -155,17 +155,20 @@ Pha 1 (tx)   claim key ─┬─ đã COMPLETED, cùng fingerprint → phát l�
              amount ≠ total                                  → 422 PAYMENT_AMOUNT_MISMATCH (release key)
              INSERT payment PROCESSING ─ đã có PROCESSING    → 409 PAYMENT_IN_PROGRESS (release key)
              gắn payment vào key
-Pha 2        gateway.charge (không transaction)  ─ throw → payment ở lại PROCESSING, key IN_PROGRESS (49C)
-Pha 3 (tx)   declined  → FAILED, audit PAYMENT_FAILED, lưu 402
+Pha 2        gateway.charge (không transaction)  ─ unknown (timeout, Day 49C) → 202 PROCESSING, KHÔNG lưu, key IN_PROGRESS
+                                                 ─ throw → payment ở lại PROCESSING, key IN_PROGRESS
+Pha 3 (tx)   SettlePayment (dùng chung với job đối soát, Day 49C):
+             declined  → FAILED, audit PAYMENT_FAILED, lưu 402
              charged   → confirmHold thắng → SUCCEEDED, audit BOOKING_CONFIRMED, outbox booking-confirmed, lưu 201
-                         confirmHold thua  → REFUND_PENDING, lưu 409 → COMMIT → refund → REFUNDED (system/payment-refund)
+                         confirmHold thua  → REFUND_PENDING (đến hạn ngay), lưu 409 → job đối soát hoàn tiền
 ```
 
 | Outcome | HTTP | Lưu vào key? |
 |---|---|---|
 | confirmed | `201` `{ payment, booking }` | có |
+| processing — gateway không rõ (Day 49C) | `202` `{ payment }` (`PROCESSING`) | **không** — key giữ `IN_PROGRESS`, gửi lại sau khi đối soát nhận câu trả lời cuối |
 | declined | `402 PAYMENT_DECLINED` | có |
-| not-payable / thua race (đã hoàn tiền) | `409 BOOKING_NOT_PAYABLE` | có |
+| not-payable / thua race (job hoàn tiền sau) | `409 BOOKING_NOT_PAYABLE` | có |
 | not-found / booking người khác | `404 BOOKING_NOT_FOUND` | có |
 | key-reused / key-in-progress | `422` / `409` | không |
 | amount-mismatch / payment-in-progress | `422` / `409` | không (key được release) |
@@ -174,5 +177,31 @@ Pha 3 (tx)   declined  → FAILED, audit PAYMENT_FAILED, lưu 402
 - Simulator: `tok_success` trừ tiền, `tok_decline` (và token lạ) bị từ chối. `PAYMENT_SIMULATOR_DELAY_MS`
   làm chậm mỗi charge **và** refund — dùng để xem race bằng tay.
 - Trả được sau khi chuyến đóng bán (BR-PAY-06): không pha nào đọc trạng thái chuyến.
-- Không có `Location`, không có `GET` payment (chưa có user story).
+- Không có `Location`, không có `GET` payment (chưa có user story). Từ Day 49C, khách nhận `202` thì
+  **gửi lại cùng key** để lấy kết quả cuối — đó chính là cách "đọc" payment.
+- Token lỗi của simulator (Day 49C): `tok_timeout_before_charge`, `tok_lost_response`,
+  `tok_refund_fails_twice`, `tok_refund_fails_permanently`; timeout `PAYMENT_GATEWAY_TIMEOUT_MS`.
+
+## ReconcilePayments — job, không có route (Day 49C)
+
+**Code:** `api/src/payments/reconcile-payments.ts`, `settle-payment.ts`, job
+`api/src/jobs/payment-reconciliation-job.ts`.
+
+| Payment đến hạn | Gateway trả | Kết quả |
+|---|---|---|
+| `PROCESSING` | succeeded (charge lại cùng id) | `SettlePayment`: còn hạn → `CONFIRMED` + key `201`; hết hạn → `REFUND_PENDING` + key `409` |
+| `PROCESSING` | declined | `FAILED`, key `402` |
+| `PROCESSING` | unknown | giữ `PROCESSING`, thử lại sau 1, 2, 4 … (tối đa 10) phút, warn từ lần 3 |
+| `REFUND_PENDING` | refunded | `REFUNDED`, audit `PAYMENT_REFUNDED` |
+| `REFUND_PENDING` | failed retryable / unknown, < 5 lần | thử lại sau 1, 2, 4, 8 phút |
+| `REFUND_PENDING` | failed không retryable, hoặc lần 5 | `REFUND_FAILED`, audit `PAYMENT_REFUND_FAILED`, log error `payment_refund_needs_attention` |
+
+Actor: `system/payment-reconciliation`. Payment ném lỗi (vd. request vừa settle trước) → log
+`payment_reconciliation_failed`, bỏ qua, lease đưa nó quay lại sau.
+
+## CleanupIdempotencyKeys — job, không có route (Day 49C)
+
+Xoá key `COMPLETED` có `created_at` cũ hơn 24 h, lô 500, tối đa 20 lô/lượt; **không bao giờ** xoá key
+`IN_PROGRESS`. Gửi lại request sau khi key bị xoá → request mới → booking `CONFIRMED` trả
+`409 BOOKING_NOT_PAYABLE`, không trừ tiền (BR-PAY-10).
 

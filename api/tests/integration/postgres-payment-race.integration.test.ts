@@ -85,6 +85,7 @@ function payForBookingWith(gateway: PaymentGateway, clock: { now: Date }) {
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => undefined,
     getCurrentTime: () => clock.now,
+    reconcileAfterMs: 40_000,
   });
 }
 
@@ -275,7 +276,7 @@ test("Test A — 10 requests with one key at once: one charge, one 201, the rest
 
 const DIFFERENT_KEYS = 5;
 
-test("Test B — 5 keys for one booking at once: at most one SUCCEEDED, every charge either succeeded or refunded, every request a clear answer", async (t) => {
+test("Test B — 5 keys for one booking at once: at most one SUCCEEDED, every charge either succeeded or left for refund, every request a clear answer", async (t) => {
   const tally = new Map<string, number>();
 
   for (let round = 0; round < ROUNDS / 2; round += 1) {
@@ -300,7 +301,8 @@ test("Test B — 5 keys for one booking at once: at most one SUCCEEDED, every ch
     const payments = await paymentsFor(bookingId);
     const succeeded = payments.filter((status) => status === "SUCCEEDED").length;
     assert.equal(succeeded, 1);
-    assert.equal(gateway.charges.length, succeeded + gateway.refunds.length);
+    const refundPending = payments.filter((status) => status === "REFUND_PENDING").length;
+    assert.equal(gateway.charges.length, succeeded + refundPending);
     assert.equal(payments.length, gateway.charges.length);
     assert.equal(await statusOf(bookingId), "CONFIRMED");
     await assertSeatsMatchBookings(flightId);
@@ -311,7 +313,7 @@ test("Test B — 5 keys for one booking at once: at most one SUCCEEDED, every ch
 
 // ---- C / D: the booking ends while the gateway is charging ----
 
-test("Test C — the hold lapses and the job expires it while the gateway charges: the job is not blocked, the charge is refunded", async () => {
+test("Test C — the hold lapses and the job expires it while the gateway charges: the job is not blocked, the charge is left for refund", async () => {
   const { flightId, bookingId } = await heldBooking();
   const clock = { now: PAY_AT };
   const charging = gate();
@@ -342,14 +344,15 @@ test("Test C — the hold lapses and the job expires it while the gateway charge
 
   assert.equal(statusOfResult(result), "409");
   assert.equal(await statusOf(bookingId), "EXPIRED");
-  assert.deepEqual(await paymentsFor(bookingId), ["REFUNDED"]);
-  assert.equal(gateway.refunds.length, 1);
+  // Day 49C: the request leaves the refund to reconciliation (Decision 15).
+  assert.deepEqual(await paymentsFor(bookingId), ["REFUND_PENDING"]);
+  assert.equal(gateway.refunds.length, 0);
   assert.equal(await auditCount("BOOKING_CONFIRMED"), 0);
   assert.equal(await outboxCount("booking-confirmed"), 0);
   await assertSeatsMatchBookings(flightId);
 });
 
-test("Test D — the owner cancels while the gateway charges: the cancel is not blocked, the charge is refunded", async (t) => {
+test("Test D — the owner cancels while the gateway charges: the cancel is not blocked, the charge is left for refund", async (t) => {
   const { flightId, bookingId } = await heldBooking();
   const charging = gate();
   const release = gate();
@@ -378,7 +381,7 @@ test("Test D — the owner cancels while the gateway charges: the cancel is not 
 
   assert.equal(statusOfResult(result), "409");
   assert.equal(await statusOf(bookingId), "CANCELLED");
-  assert.deepEqual(await paymentsFor(bookingId), ["REFUNDED"]);
+  assert.deepEqual(await paymentsFor(bookingId), ["REFUND_PENDING"]);
   await assertSeatsMatchBookings(flightId);
   t.diagnostic(`cancel during the charge took ${cancelMs} ms`);
 });
@@ -418,7 +421,7 @@ test("Test C (phase 3 at the deadline) — confirm 1 ms before it, expiry at it,
       assert.equal(statusOfResult(result), "409");
       assert.equal(expired.expired, 1);
       assert.equal(await statusOf(bookingId), "EXPIRED");
-      assert.deepEqual(await paymentsFor(bookingId), ["REFUNDED"]);
+      assert.deepEqual(await paymentsFor(bookingId), ["REFUND_PENDING"]);
       tally.expired += 1;
     }
     await assertSeatsMatchBookings(flightId);
@@ -427,7 +430,7 @@ test("Test C (phase 3 at the deadline) — confirm 1 ms before it, expiry at it,
     (await auditCount("BOOKING_CONFIRMED")) + (await auditCount("BOOKING_EXPIRED")),
     ROUNDS,
   );
-  t.diagnostic(`${ROUNDS} rounds: ${tally.confirmed} confirmed, ${tally.expired} expired and refunded`);
+  t.diagnostic(`${ROUNDS} rounds: ${tally.confirmed} confirmed, ${tally.expired} expired and left for refund`);
 });
 
 // ---- E: control — the gateway called inside the transaction ----

@@ -25,7 +25,7 @@ Split the tests by **what they can actually prove**.
 | Tier | Runs on | Proves |
 |---|---|---|
 | Unit + HTTP (`tests/*.test.ts`, `npm test`) | Hand-written in-memory fakes (`tests/fakes/in-memory.ts`) | Business logic: validation, outcomes (`duplicate`, `sold-out`, …), call order, audit/outbox contents, HTTP status and error envelope, auth |
-| Integration (`tests/integration/*.test.ts`, `npm run test:integration`) | Real Postgres (`booking_db`, the `booking` role) | Database semantics: transactions and rollback, FK/unique constraints, OCC under real concurrent connections, migrations, health check |
+| Integration (`tests/integration/*.test.ts`, `npm run test:integration`) | Real Postgres (`booking_test` since Day 49C, `booking_db` before; the `booking` role) | Database semantics: transactions and rollback, FK/unique constraints, OCC under real concurrent connections, migrations, health check |
 
 **Contract tests** keep the fakes honest. A port's promised behavior is written once (`tests/contracts/<port>.contract.ts`) and run against both the fake (unit tier) and the Postgres adapter (integration tier). If the fake drifts from the real adapter, the same assertion passes on one side and fails on the other. `BookingRepository` has one today.
 
@@ -44,5 +44,5 @@ Fakes deliberately do **not** simulate database semantics. In particular, the in
 
 - **Fakes can drift.** Contract tests cover only `BookingRepository` so far. The `FlightRepository` fake (duplicate detection by instant, ordering) is the most likely next drift and the first candidate for a second contract.
 - **Two tiers to run.** A change to SQL or transaction code is only covered once someone runs `npm run test:integration` against a live Postgres. CI doesn't enforce that yet.
-- **The integration tier is destructive on shared dev data.** It `TRUNCATE`s tables in `booking_db`, the same database the docker-compose stack uses. A separate test database is a possible later fix.
+- **The integration tier is destructive.** It `TRUNCATE`s every table it uses. Until Day 49C that was `booking_db`, the database the docker-compose stack uses: it wiped dev data, and the running app's expiry job swept test bookings. Since Day 49C it runs on `booking_test`, and a preloaded guard refuses any database whose name does not end in `_test`.
 - **Fakes are code too.** They need the same review as production code, especially the "return copies, never internal references" rule.

@@ -34,12 +34,14 @@ Postgres thật** chứng minh nó.
 | Gọi hệ thống ngoài giữa một lần ghi | Ba pha, gọi **ngoài** transaction; thua race thì ghi `REFUND_PENDING` rồi hoàn tiền | Thanh toán vs hết hạn / huỷ | [10](./10-thanh-toan-ba-pha-va-idempotency-key.md) |
 | Cùng một request gửi lặp lại | Idempotency-Key: claim `ON CONFLICT DO NOTHING`, fingerprint, lưu response cùng transaction | `POST …/payments` | [10](./10-thanh-toan-ba-pha-va-idempotency-key.md) |
 | "Tối đa một dòng ở trạng thái X" mỗi cha | Partial unique index + `ON CONFLICT (…) WHERE …` | Một `PROCESSING`, một `SUCCEEDED` mỗi booking | [10](./10-thanh-toan-ba-pha-va-idempotency-key.md) |
+| Job nhiều instance phải gọi ra ngoài **ngoài** transaction | Claim `SKIP LOCKED` + **lease** trong cột thời gian, commit rồi mới gọi; chuyển trạng thái có điều kiện | Đối soát thanh toán (Day 49C) | [11](./11-doi-soat-thanh-toan-va-lease.md) |
+| Request sống và job cùng một bản ghi | Ngưỡng tuổi + chuyển trạng thái có điều kiện, bên thua rollback | Request chậm vs job đối soát | [11](./11-doi-soat-thanh-toan-va-lease.md) |
 
 Cách test tất cả những thứ trên: [06-cach-test-race-condition.md](./06-cach-test-race-condition.md).
 
-Sáu file race test trong `api/tests/integration/`: `postgres-booking-race` (một ghế mỗi booking, Day 47),
+Bảy file race test trong `api/tests/integration/`: `postgres-booking-race` (một ghế mỗi booking, Day 47),
 `postgres-booking-hold-race` (nhiều ghế, Day 48A), `postgres-booking-expiry-race` (hết hạn giữ ghế, Day 48B),
-`postgres-fare-snapshot` (chụp giá, Day 49A), `postgres-payment-race` (thanh toán, Day 49B), `flight-schedule-race.postgres` (lịch máy bay, Day 46).
+`postgres-fare-snapshot` (chụp giá, Day 49A), `postgres-payment-race` (thanh toán, Day 49B), `postgres-payment-reconciliation` (đối soát + tiêm lỗi, Day 49C), `flight-schedule-race.postgres` (lịch máy bay, Day 46).
 
 ## Các con số đã đo (thuộc lòng để kể khi phỏng vấn)
 
@@ -59,3 +61,4 @@ Sáu file race test trong `api/tests/integration/`: `postgres-booking-race` (m�
 | Day 49B A: 10 request cùng Idempotency-Key | 1 lần charge, 1×`201`, 9×`409 IDEMPOTENCY_KEY_IN_PROGRESS` |
 | Day 49B E: gateway trong transaction (charge 1 s) / ba pha | huỷ chờ 908–922 ms, job bỏ qua booking / huỷ 2–11 ms |
 | Day 49B C đúng hạn: pha 3 vs job, 20 vòng | 17–19 confirm thắng, phần còn lại expire + hoàn tiền; mỗi booking một kết cục |
+| Day 49C: hai job đối soát, 30 payment; có / không lease | 0 / **30** lời gọi gateway trùng; vẫn 1 lần trừ tiền mỗi payment |

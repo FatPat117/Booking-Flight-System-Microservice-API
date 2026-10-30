@@ -202,6 +202,9 @@ Rules:
 - Two tiers (ADR-005): unit/HTTP tests run on the shared fakes in `tests/fakes/` and test
   business logic; `tests/integration/` runs on real Postgres and tests database semantics
   (transactions, constraints, OCC races). Never test a race on a fake — it cannot fail.
+- Integration tests run on `booking_test`, never `booking_db` (Day 49C): `test:integration` sets
+  `BOOKING_POSTGRES_DB`, and `tests/integration/require-test-database.ts` refuses any database not
+  ending in `_test`. Never weaken that guard; the dev stack may keep running during the tests.
 - A port with both a fake and a Postgres adapter gets a contract test in `tests/contracts/`.
 - Unit test files are flat — one `<subject>.test.ts` per unit, named after the `src/` file it
   exercises, not nested to mirror `src/<feature>/` folders.

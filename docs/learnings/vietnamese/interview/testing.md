@@ -80,3 +80,21 @@ lệnh đã đọc mọi giá từ một snapshot. Mutation cho thấy điều �
 B1/B2: dựng một transaction đổi giá chưa commit làm "cổng" và kiểm hold còn pending sau 50 ms; kịch
 bản ngược thì dừng CreateBooking ở bước ghi audit để transaction hold còn mở. Mỗi test có bản đối
 chứng không `FOR SHARE` chạy ra kết quả khác.
+
+### 12. Chứng minh hệ thống thanh toán "luôn về trạng thái đúng" thế nào? (Day 49C)
+
+**Trả lời:** Tiêm lỗi tại **từng ranh giới** process có thể dừng: sau pha 1 trước khi gọi gateway,
+trong lúc charge (provider chưa nhận), provider đã trừ nhưng mất câu trả lời, sau khi commit
+`REFUND_PENDING`, refund lỗi tạm thời / vĩnh viễn. Mỗi test cho job đối soát chạy rồi gọi **một hàm
+bất biến toàn cục**: so ledger của fake gateway (provider *thật sự* làm gì) với database — tiền bị
+trừ ⇔ `SUCCEEDED` + `CONFIRMED`, hoặc đã hoàn, hoặc `REFUND_FAILED`; mỗi id trừ/hoàn tối đa một lần;
+ghế khớp booking; key khớp trạng thái cuối. Fake phải nhớ kết quả theo `paymentId` như provider
+thật, nếu không test sẽ thấy "trừ hai lần" giả. Chạy trên `booking_test`, 10 lần liên tiếp.
+
+### 13. Làm sao để integration test không bao giờ phá dữ liệu dev? (Day 49C)
+
+**Trả lời:** Database riêng `booking_test` và một **hàng rào** chạy trước mọi test: script
+`test:integration` nạp (`--import`) một file đọc tên database bằng đúng hàm config mà test dùng, và
+thoát nếu tên không kết thúc bằng `_test`. Chứng minh bằng cách cố tình trỏ vào `booking_db`: process
+dừng trước khi thân test nào chạy. Rồi chạy cả suite khi app dev đang chạy: số dòng dev không đổi.
+

@@ -3033,6 +3033,314 @@
       ]
     },
     {
+      "name": "Day 49C — Payment failures",
+      "description": "Needs the dev seed (VN-B210, economy only), alice's accessToken (admin) and bob's userAccessToken, and the app's reconciliation job running (docker compose app or npm run dev).\nRun top to bottom on a database without VN496 on 2026-12-11. Each run draws a new Idempotency-Key prefix (day49cKey).\ntok_lost_response makes the simulated provider take the money and lose its answer: the request waits for the gateway timeout (PAYMENT_GATEWAY_TIMEOUT_MS, default 10 s) and answers 202 PROCESSING, never FAILED (BR-PAY-08). The key stays in progress until the reconciliation job charges the same payment id again (30 s after the timeout, job every 30 s); then the same key gets the final 201, replayed. Request 7 waits 75 s before sending.",
+      "item": [
+        {
+          "name": "POST /api/flights (VN496 on VN-B210, economy only → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN496\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-B210\",\n  \"departureAt\": \"2026-12-11T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-11T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000 }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// One Idempotency-Key prefix per run, so the folder can run again on the same database.",
+                  "pm.collectionVariables.set('day49cKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day49cFlightId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (→ 200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day49cFlightId}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OPEN', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:flightId/bookings as bob (2 passengers → 201 HELD, total 3 000 000)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day49cFlightId}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [{ \"name\": \"Bob Tran\" }, { \"name\": \"An Le\" }]\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 HELD, total 3000000 VND', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(pm.response.json().status).to.eql('HELD');",
+                  "  pm.expect(pm.response.json().total).to.eql({ amount: 3000000, currency: 'VND' });",
+                  "});",
+                  "pm.collectionVariables.set('day49cBookingId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments with tok_lost_response (→ 202 PROCESSING after the gateway timeout, not FAILED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49cKey}}-1"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49cBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_lost_response\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('202: accepted, outcome unknown, payment PROCESSING (BR-PAY-08)', () => {",
+                  "  pm.response.to.have.status(202);",
+                  "  const { payment } = pm.response.json();",
+                  "  pm.expect(payment.status).to.eql('PROCESSING');",
+                  "  pm.expect(payment.providerReference).to.eql(null);",
+                  "  // Field by field: never the payment-method token or reconciliation bookkeeping.",
+                  "  pm.expect(Object.keys(payment)).to.eql(['id', 'bookingId', 'status', 'amount', 'providerReference', 'createdAt']);",
+                  "  pm.expect(pm.response.headers.has('Idempotent-Replayed')).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments again, same key, before reconciliation (→ 409 IDEMPOTENCY_KEY_IN_PROGRESS, no second charge)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49cKey}}-1"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49cBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_lost_response\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 IDEMPOTENCY_KEY_IN_PROGRESS', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_KEY_IN_PROGRESS');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/bookings/:id (still HELD while the payment is PROCESSING)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49cBookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 HELD', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql('HELD');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments, same key, after reconciliation (waits 75 s → the final 201, replayed)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day49cKey}}-1"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49cBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_lost_response\",\n  \"amount\": { \"amount\": 3000000, \"currency\": \"VND\" }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Gateway timeout (default 10 s) + 30 s margin + up to one 30 s job interval.",
+                  "setTimeout(() => {}, 75000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 replayed: the job charged the same payment id again and confirmed the booking', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.eql('true');",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.payment.status).to.eql('SUCCEEDED');",
+                  "  pm.expect(body.payment.providerReference).to.be.a('string');",
+                  "  pm.expect(body.booking.status).to.eql('CONFIRMED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/bookings/:id (CONFIRMED)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day49cBookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 CONFIRMED', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql('CONFIRMED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Day 29 — Correlation investigate",
       "description": "Fixed requestId for log grep across api + flight-notifier.",
       "item": [

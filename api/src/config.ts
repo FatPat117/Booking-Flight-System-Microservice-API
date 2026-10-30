@@ -1,4 +1,5 @@
 import type { PostgresConfig } from "./postgres/config.js";
+import { DEFAULT_BOOKING_DATABASE_NAME } from "./postgres/config.js";
 
 export type AppConfig = Readonly<{
   port: number;
@@ -22,6 +23,12 @@ export type AppConfig = Readonly<{
    * change any rule. Capped at 60 s, the BR-PAY-07 margin.
    */
   paymentSimulatorDelayMs: number;
+  /**
+   * Day 49C — how long the api waits for the gateway before the call is
+   * aborted and its outcome is `unknown`. Default 10 s, at most 20 s: with
+   * reconciliation's 30 s margin it stays under BR-PAY-07's 60 s (Decision 15).
+   */
+  paymentGatewayTimeoutMs: number;
 }>;
 
 type Environment = Record<string, string | undefined>;
@@ -31,8 +38,6 @@ const DEFAULT_PORT = 3000;
 const DEFAULT_RABBITMQ_URL = "amqp://guest:guest@localhost:5672";
 const DEFAULT_POSTGRES_HOST = "localhost";
 const DEFAULT_POSTGRES_PORT = 5432;
-/** Fixed, not env-driven — see postgres/config.ts's own BOOKING_DATABASE_NAME. */
-const BOOKING_DATABASE_NAME = "booking_db";
 
 /**
  * Convert untrusted environment strings into a typed AppConfig.
@@ -46,6 +51,9 @@ export function parseConfig(environment: Environment): AppConfig {
   const paymentSimulatorDelayMs = parsePaymentSimulatorDelayMs(
     environment.PAYMENT_SIMULATOR_DELAY_MS,
   );
+  const paymentGatewayTimeoutMs = parsePaymentGatewayTimeoutMs(
+    environment.PAYMENT_GATEWAY_TIMEOUT_MS,
+  );
 
   return {
     port,
@@ -53,6 +61,7 @@ export function parseConfig(environment: Environment): AppConfig {
     rabbitmqUrl,
     postgres,
     paymentSimulatorDelayMs,
+    paymentGatewayTimeoutMs,
   };
 }
 
@@ -79,6 +88,31 @@ function parsePaymentSimulatorDelayMs(raw: string | undefined): number {
   return delay;
 }
 
+const DEFAULT_PAYMENT_GATEWAY_TIMEOUT_MS = 10_000;
+const MAX_PAYMENT_GATEWAY_TIMEOUT_MS = 20_000;
+
+function parsePaymentGatewayTimeoutMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") {
+    return DEFAULT_PAYMENT_GATEWAY_TIMEOUT_MS;
+  }
+
+  const trimmed = raw.trim();
+  const timeout = Number(trimmed);
+
+  if (
+    !/^\d+$/.test(trimmed) ||
+    !Number.isSafeInteger(timeout) ||
+    timeout < 1 ||
+    timeout > MAX_PAYMENT_GATEWAY_TIMEOUT_MS
+  ) {
+    throw new Error(
+      `Invalid PAYMENT_GATEWAY_TIMEOUT_MS: expected an integer between 1 and ${MAX_PAYMENT_GATEWAY_TIMEOUT_MS}`,
+    );
+  }
+
+  return timeout;
+}
+
 function parsePostgresConfig(environment: Environment): PostgresConfig {
   return {
     host: environment.POSTGRES_HOST?.trim() || DEFAULT_POSTGRES_HOST,
@@ -91,7 +125,8 @@ function parsePostgresConfig(environment: Environment): PostgresConfig {
       "BOOKING_POSTGRES_PASSWORD",
       environment.BOOKING_POSTGRES_PASSWORD,
     ),
-    database: BOOKING_DATABASE_NAME,
+    database:
+      environment.BOOKING_POSTGRES_DB?.trim() || DEFAULT_BOOKING_DATABASE_NAME,
   };
 }
 

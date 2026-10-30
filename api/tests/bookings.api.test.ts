@@ -133,6 +133,7 @@ function createContext(): {
       paymentGateway: gateway,
       logger: createMemoryLogger(),
       generatePaymentId: () => crypto.randomUUID(),
+      reconcileAfterMs: 40_000,
     }),
     getBooking: createGetBooking({ bookingRepository, getCurrentTime }),
     getBookingByReference: createGetBookingByReference({ bookingRepository, getCurrentTime }),
@@ -926,6 +927,35 @@ test("a declined card is 402 PAYMENT_DECLINED and the booking stays HELD; a new 
   const fetched = await request(app).get(`/api/bookings/${bookingId}`).set(as(USER_A));
   assert.equal(fetched.body.status, "HELD");
   assert.equal((await pay(app, USER_A, bookingId, { key: "key-2" })).status, 201);
+});
+
+test("an unknown gateway outcome is 202 with the PROCESSING payment and no token; it is not stored, so the same key is 409 IDEMPOTENCY_KEY_IN_PROGRESS (BR-PAY-08)", async () => {
+  const { app, gateway } = createContext();
+  const bookingId = await seedBooking(app, USER_A);
+  gateway.willCharge({ outcome: "lost-response" });
+
+  const accepted = await pay(app, USER_A, bookingId);
+
+  assert.equal(accepted.status, 202);
+  assert.equal(accepted.headers["idempotent-replayed"], undefined);
+  assert.deepEqual(Object.keys(accepted.body.payment), [
+    "id",
+    "bookingId",
+    "status",
+    "amount",
+    "providerReference",
+    "createdAt",
+  ]);
+  assert.equal(accepted.body.payment.bookingId, bookingId);
+  assert.equal(accepted.body.payment.status, "PROCESSING");
+  assert.equal(accepted.body.payment.providerReference, null);
+
+  const again = await pay(app, USER_A, bookingId);
+  assert.equal(again.status, 409);
+  assert.equal(again.body.error.code, "IDEMPOTENCY_KEY_IN_PROGRESS");
+  const fetched = await request(app).get(`/api/bookings/${bookingId}`).set(as(USER_A));
+  assert.equal(fetched.body.status, "HELD");
+  assert.equal(gateway.charges.length, 1);
 });
 
 test("a CONFIRMED booking, or a hold with 60 s or less left, is 409 BOOKING_NOT_PAYABLE without a charge", async () => {

@@ -12,8 +12,10 @@ import {
  * against the in-memory fake (unit tier) and Postgres (integration tier).
  * Not a *.test.ts file: it registers tests only when a runner file calls it.
  *
- * attachPayment's success path needs a real payment row (foreign key), so it
- * is covered with the payment flow; here only its refusal is.
+ * attachPayment's and completeForPayment's success paths need a real
+ * payment row (foreign key), so they are covered with the payment flow
+ * (pay-for-booking, reconcile-payments, the payment race tests); here only
+ * their refusal is.
  */
 const NOW = new Date("2026-11-01T00:00:00.000Z");
 const LATER = new Date("2026-11-01T00:00:05.000Z");
@@ -131,12 +133,34 @@ export function runIdempotencyRepositoryContract(
     assert.equal((await repository.claim(scope, "key-1", "fp-a", LATER)).outcome, "completed");
   });
 
-  test(name("complete and attachPayment throw for a key that is not in progress"), async () => {
+  test(name("deleteCompletedBefore deletes only COMPLETED keys created before the cutoff, oldest first up to the limit; an old key still in progress stays (BR-PAY-10)"), async () => {
+    const repository = await setup();
+    const scope = scopeOf(crypto.randomUUID());
+    const at = (hours: number) => new Date(NOW.getTime() + hours * 3_600_000);
+    for (const [key, hours] of [["oldest", 0], ["old", 1], ["fresh", 30]] as const) {
+      await repository.claim(scope, key, "fp", at(hours));
+      await repository.complete(scope, key, CREATED, at(hours));
+    }
+    await repository.claim(scope, "stuck", "fp", at(0));
+    const cutoff = at(24);
+
+    assert.equal(await repository.deleteCompletedBefore(cutoff, 1), 1);
+    assert.equal((await repository.claim(scope, "oldest", "fp", at(40))).outcome, "claimed");
+    assert.equal(await repository.deleteCompletedBefore(cutoff, 10), 1);
+    assert.equal((await repository.claim(scope, "old", "fp", at(40))).outcome, "claimed");
+
+    assert.equal((await repository.claim(scope, "fresh", "fp", at(40))).outcome, "completed");
+    assert.equal((await repository.claim(scope, "stuck", "fp", at(40))).outcome, "in-progress");
+    assert.equal(await repository.deleteCompletedBefore(cutoff, 10), 0);
+  });
+
+  test(name("complete, completeForPayment and attachPayment throw for a key that is not in progress"), async () => {
     const repository = await setup();
     const scope = scopeOf(crypto.randomUUID());
 
     await assert.rejects(repository.complete(scope, "never-claimed", CREATED, NOW));
     await assert.rejects(repository.attachPayment(scope, "never-claimed", crypto.randomUUID()));
+    await assert.rejects(repository.completeForPayment(crypto.randomUUID(), CREATED, LATER));
 
     await repository.claim(scope, "key-1", "fp-a", NOW);
     await repository.complete(scope, "key-1", CREATED, LATER);

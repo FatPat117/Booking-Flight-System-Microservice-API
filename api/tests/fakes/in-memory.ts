@@ -637,6 +637,7 @@ export function createInMemoryTransactionRunner(): TransactionRunner {
 
 type InMemoryIdempotencyRecord = {
   fingerprint: string;
+  createdAt: Date;
   paymentId?: string;
   response?: StoredResponse;
 };
@@ -667,11 +668,11 @@ export function createInMemoryIdempotencyRepository(): InMemoryIdempotencyReposi
   }
 
   return {
-    async claim(scope, key, fingerprint): Promise<ClaimResult> {
+    async claim(scope, key, fingerprint, now): Promise<ClaimResult> {
       const record = records.get(id(scope, key));
 
       if (record === undefined) {
-        records.set(id(scope, key), { fingerprint });
+        records.set(id(scope, key), { fingerprint, createdAt: now });
         return { outcome: "claimed" };
       }
 
@@ -692,10 +693,31 @@ export function createInMemoryIdempotencyRepository(): InMemoryIdempotencyReposi
       claimed(scope, key).response = structuredClone(response);
     },
 
+    async completeForPayment(paymentId, response) {
+      const record = [...records.values()].find(
+        (candidate) => candidate.paymentId === paymentId && candidate.response === undefined,
+      );
+      if (record === undefined) {
+        throw new Error(`The idempotency key of payment ${paymentId} is not in progress`);
+      }
+      record.response = structuredClone(response);
+    },
+
     async release(scope, key) {
       if (records.get(id(scope, key))?.response === undefined) {
         records.delete(id(scope, key));
       }
+    },
+
+    async deleteCompletedBefore(cutoff, limit) {
+      const expired = [...records.entries()]
+        .filter(([, record]) => record.response !== undefined && record.createdAt < cutoff)
+        .sort(([, left], [, right]) => left.createdAt.getTime() - right.createdAt.getTime())
+        .slice(0, limit);
+      for (const [recordId] of expired) {
+        records.delete(recordId);
+      }
+      return expired.length;
     },
 
     paymentIdOf(scope, key) {
@@ -707,7 +729,9 @@ export function createInMemoryIdempotencyRepository(): InMemoryIdempotencyReposi
 /**
  * Mirrors the Postgres adapter, the two partial unique indexes included: a
  * second PROCESSING payment for a booking is payment-in-progress, a second
- * SUCCEEDED one throws (BR-PAY-05, a 23505 on Postgres).
+ * SUCCEEDED one throws (BR-PAY-05, a 23505 on Postgres). Transitions clear
+ * the token, reset attempts and set next_attempt_at like the adapter
+ * (Day 49C).
  */
 export function createInMemoryPaymentRepository(): PaymentRepository {
   const payments = new Map<string, Payment>();
@@ -735,6 +759,9 @@ export function createInMemoryPaymentRepository(): PaymentRepository {
       ...payment,
       ...set,
       status: to,
+      paymentMethodToken: null,
+      attempts: 0,
+      nextAttemptAt: to === "REFUND_PENDING" ? now.toISOString() : null,
       updatedAt: now.toISOString(),
     });
   }
@@ -757,6 +784,7 @@ export function createInMemoryPaymentRepository(): PaymentRepository {
         status: "PROCESSING",
         providerReference: null,
         failureReason: null,
+        attempts: 0,
         updatedAt: payment.createdAt,
       });
       return { outcome: "started" };
@@ -778,6 +806,41 @@ export function createInMemoryPaymentRepository(): PaymentRepository {
       transition(paymentId, "REFUND_PENDING", "REFUNDED", now);
     },
 
+    async markRefundFailed(paymentId, reason, now) {
+      transition(paymentId, "REFUND_PENDING", "REFUND_FAILED", now, { failureReason: reason });
+    },
+
+    async claimDue(now, leaseMs, limit) {
+      const due = [...payments.values()]
+        .filter(
+          (payment) =>
+            (payment.status === "PROCESSING" || payment.status === "REFUND_PENDING") &&
+            payment.nextAttemptAt !== null &&
+            payment.nextAttemptAt <= now.toISOString(),
+        )
+        .sort((left, right) =>
+          `${left.nextAttemptAt}${left.id}`.localeCompare(`${right.nextAttemptAt}${right.id}`),
+        )
+        .slice(0, limit);
+      const leasedUntil = new Date(now.getTime() + leaseMs).toISOString();
+
+      return due
+        .map((payment) => {
+          const claimed = { ...payment, nextAttemptAt: leasedUntil, attempts: payment.attempts + 1 };
+          payments.set(payment.id, claimed);
+          return structuredClone(claimed);
+        })
+        .sort((left, right) => left.id.localeCompare(right.id));
+    },
+
+    async reschedule(paymentId, status, nextAttemptAt) {
+      const payment = payments.get(paymentId);
+      if (payment?.status !== status) {
+        throw new Error(`Payment ${paymentId} is not ${status}; cannot reschedule it`);
+      }
+      payments.set(paymentId, { ...payment, nextAttemptAt: nextAttemptAt.toISOString() });
+    },
+
     async findById(paymentId) {
       const payment = payments.get(paymentId);
       return payment === undefined ? undefined : structuredClone(payment);
@@ -785,53 +848,106 @@ export function createInMemoryPaymentRepository(): PaymentRepository {
   };
 }
 
+/**
+ * A charge the fake should answer: any result the port can return, or
+ * `lost-response` — the provider takes the money and the answer never
+ * arrives, so the caller sees `unknown` (Day 49C's most dangerous case).
+ */
+export type FakeChargeScript = ChargeResult | Readonly<{ outcome: "lost-response" }>;
+
 export type FakePaymentGateway = PaymentGateway &
   Readonly<{
     /** Every charge call, in order — tests count them (Day 49B race tests). */
     readonly charges: readonly ChargeRequest[];
     readonly refunds: readonly RefundRequest[];
+    /**
+     * What the provider really did, not what the caller heard: payment ids
+     * whose money was taken, and those given back. Each id appears at most
+     * once in each list (Day 49C money invariants).
+     */
+    readonly ledger: Readonly<{ charged: readonly string[]; refunded: readonly string[] }>;
     /** Queue the next charge results; when empty, a charge succeeds. */
-    willCharge(...results: ChargeResult[]): void;
+    willCharge(...results: FakeChargeScript[]): void;
     /** Queue the next refund results; when empty, a refund succeeds. */
     willRefund(...results: RefundResult[]): void;
   }>;
 
 /**
- * A scripted gateway for unit and integration tests. Unlike the simulator it
- * does not repeat a result per paymentId: a test that charges twice must see
- * two calls. `onCharge` runs inside the call, before the result is returned —
+ * A scripted gateway for unit and integration tests. It keeps the provider's
+ * idempotency the port promises (Day 49C): once a payment id has a definite
+ * result, charging it again answers that result without taking a script, and
+ * a refunded id answers `refunded` again. An `unknown` script leaves nothing
+ * behind, so the next charge of that id takes the next script. Every call is
+ * still recorded, so a test that charges twice sees two calls.
+ *
+ * `onCharge` / `onRefund` run inside the call, before the result is returned —
  * a test moves its clock past the hold deadline there, or awaits a gate to
- * hold the payment between phase 1 and phase 3.
+ * hold the payment between phases.
  */
 export function createFakePaymentGateway(
   options: {
     onCharge?: (request: ChargeRequest) => void | Promise<void>;
+    onRefund?: (request: RefundRequest) => void | Promise<void>;
   } = {},
 ): FakePaymentGateway {
   const charges: ChargeRequest[] = [];
   const refunds: RefundRequest[] = [];
-  const chargeResults: ChargeResult[] = [];
+  const chargeScripts: FakeChargeScript[] = [];
   const refundResults: RefundResult[] = [];
+  const definiteCharges = new Map<string, ChargeResult>();
+  const charged: string[] = [];
+  const refunded: string[] = [];
 
   return {
     async charge(request) {
       charges.push(structuredClone(request));
       await options.onCharge?.(request);
-      return (
-        chargeResults.shift() ?? {
-          outcome: "succeeded",
-          providerReference: `fake_ch_${request.paymentId}`,
-        }
-      );
+
+      const previous = definiteCharges.get(request.paymentId);
+      if (previous !== undefined) {
+        return previous;
+      }
+
+      const script = chargeScripts.shift() ?? {
+        outcome: "succeeded",
+        providerReference: `fake_ch_${request.paymentId}`,
+      };
+
+      if (script.outcome === "unknown") {
+        return script;
+      }
+
+      const result: ChargeResult =
+        script.outcome === "lost-response"
+          ? { outcome: "succeeded", providerReference: `fake_ch_${request.paymentId}` }
+          : script;
+      definiteCharges.set(request.paymentId, result);
+      if (result.outcome === "succeeded") {
+        charged.push(request.paymentId);
+      }
+
+      return script.outcome === "lost-response"
+        ? { outcome: "unknown", reason: "timeout" }
+        : result;
     },
 
     async refund(request) {
       refunds.push(structuredClone(request));
-      return refundResults.shift() ?? { outcome: "refunded" };
+      await options.onRefund?.(request);
+
+      if (refunded.includes(request.paymentId)) {
+        return { outcome: "refunded" };
+      }
+
+      const result = refundResults.shift() ?? { outcome: "refunded" };
+      if (result.outcome === "refunded") {
+        refunded.push(request.paymentId);
+      }
+      return result;
     },
 
     willCharge(...results) {
-      chargeResults.push(...results);
+      chargeScripts.push(...results);
     },
 
     willRefund(...results) {
@@ -844,6 +960,10 @@ export function createFakePaymentGateway(
 
     get refunds() {
       return structuredClone(refunds);
+    },
+
+    get ledger() {
+      return { charged: [...charged], refunded: [...refunded] };
     },
   };
 }

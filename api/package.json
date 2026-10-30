@@ -16,7 +16,7 @@
     "typecheck:test": "tsc -p tsconfig.test.json",
     "postgres:migration:run": "node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx ./src/postgres/run-migrations.ts",
     "seed:reference": "node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx ./src/postgres/seed-reference-data.ts",
-    "test:integration": "node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --test --test-concurrency=1 tests/integration/*.test.ts"
+    "test:integration": "BOOKING_POSTGRES_DB=booking_test node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --import ./tests/integration/require-test-database.ts --test --test-concurrency=1 tests/integration/*.test.ts"
   },
   "dependencies": {
     "@booking-flight-system/contracts": "*",

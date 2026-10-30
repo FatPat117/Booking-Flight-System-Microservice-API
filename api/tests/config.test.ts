@@ -28,6 +28,7 @@ test("uses defaults for optional configuration", () => {
         database: "booking_db",
       },
       paymentSimulatorDelayMs: 0,
+      paymentGatewayTimeoutMs: 10_000,
     },
   );
 });
@@ -41,7 +42,9 @@ test("parses valid configuration overrides", () => {
       POSTGRES_PORT: "6543",
       BOOKING_POSTGRES_USER: " booking ",
       BOOKING_POSTGRES_PASSWORD: " s3cret ",
+      BOOKING_POSTGRES_DB: " booking_test ",
       PAYMENT_SIMULATOR_DELAY_MS: " 2000 ",
+      PAYMENT_GATEWAY_TIMEOUT_MS: " 2500 ",
     }),
     {
       port: 4100,
@@ -52,9 +55,10 @@ test("parses valid configuration overrides", () => {
         port: 6543,
         username: "booking",
         password: "s3cret",
-        database: "booking_db",
+        database: "booking_test",
       },
       paymentSimulatorDelayMs: 2000,
+      paymentGatewayTimeoutMs: 2500,
     },
   );
 });
@@ -73,6 +77,32 @@ test("rejects invalid PAYMENT_SIMULATOR_DELAY_MS values", async (t) => {
       );
     });
   }
+});
+
+test("rejects invalid PAYMENT_GATEWAY_TIMEOUT_MS values", async (t) => {
+  for (const value of ["0", "-1", "1.5", "abc", "20001"]) {
+    await t.test(`rejects PAYMENT_GATEWAY_TIMEOUT_MS=${JSON.stringify(value)}`, () => {
+      assert.throws(
+        () =>
+          parseConfig({
+            JWT_SECRET: TEST_JWT_SECRET,
+            ...validPostgresEnv,
+            PAYMENT_GATEWAY_TIMEOUT_MS: value,
+          }),
+        /Invalid PAYMENT_GATEWAY_TIMEOUT_MS/,
+      );
+    });
+  }
+});
+
+test("accepts PAYMENT_GATEWAY_TIMEOUT_MS at its 20 s ceiling", () => {
+  const config = parseConfig({
+    JWT_SECRET: TEST_JWT_SECRET,
+    ...validPostgresEnv,
+    PAYMENT_GATEWAY_TIMEOUT_MS: "20000",
+  });
+
+  assert.equal(config.paymentGatewayTimeoutMs, 20_000);
 });
 
 test("rejects missing JWT_SECRET", () => {
@@ -142,6 +172,7 @@ test("parses RABBITMQ_URL override", () => {
         database: "booking_db",
       },
       paymentSimulatorDelayMs: 0,
+      paymentGatewayTimeoutMs: 10_000,
     },
   );
 });

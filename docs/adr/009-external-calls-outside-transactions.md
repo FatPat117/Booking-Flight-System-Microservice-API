@@ -33,5 +33,5 @@ A call to a system outside the database is never made inside a database transact
 
 - **More states and more code paths.** `PROCESSING` and `REFUND_PENDING` exist only because of the gap between phases, and each path (declined, confirmed, lost the race, refund failed) needs its own test.
 - **A customer can be charged and refunded.** If the hold expires or is cancelled while the gateway charges, the money goes out and comes back. A 60-second margin at phase 1 (BR-PAY-07) makes this rare; it cannot make it impossible.
-- **Some outcomes are not final until 49C.** A crash after phase 1, a gateway error with an unknown result, or a failed refund leaves a payment `PROCESSING` or `REFUND_PENDING` with nothing to move it on until reconciliation exists.
+- **Some outcomes are not final until reconciliation runs.** A crash after phase 1, a gateway error with an unknown result, or a failed refund leaves a payment `PROCESSING` or `REFUND_PENDING`. On Day 49B nothing moved it on; since Day 49C a reconciliation job does ([ADR-010](./010-payment-reconciliation.md)).
 - **Idempotency becomes mandatory.** Once a request can be "in progress" for seconds, a client retry is normal behaviour, so the endpoint requires an Idempotency-Key and stores the final response in the same transaction as the outcome (domain-model Decision 14).

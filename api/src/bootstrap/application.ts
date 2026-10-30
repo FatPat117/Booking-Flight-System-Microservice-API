@@ -57,18 +57,23 @@ import { createPostgresFlightRepository } from "../flights/postgres/postgres-fli
 import type { HealthChecks } from "../health/health-checks.js";
 import { createPostgresHealthChecks } from "../health/postgres/postgres-health-checks.js";
 import { createBookingHoldExpiryJob } from "../jobs/booking-hold-expiry-job.js";
+import { createPaymentReconciliationJob } from "../jobs/payment-reconciliation-job.js";
+import { createIdempotencyKeyCleanupJob } from "../jobs/idempotency-key-cleanup-job.js";
 import { createFlightsSummaryJob } from "../jobs/flights-summary-job.js";
 import { createInMemoryJobScheduler } from "../jobs/in-memory-job-scheduler.js";
 import { connectPublisherWithRetry } from "../messaging/connect-with-retry.js";
 import type { MessagePublisher } from "../messaging/message-publisher.js";
 import { createOutboxRelayJob } from "../outbox/outbox-relay-job.js";
 import { createPostgresOutboxRepository } from "../outbox/postgres/postgres-outbox-repository.js";
+import { createCleanupIdempotencyKeys } from "../idempotency/cleanup-idempotency-keys.js";
 import { createPostgresIdempotencyRepository } from "../idempotency/postgres/postgres-idempotency-repository.js";
 import {
   createPayForBooking,
+  PAYMENT_RECONCILIATION_MARGIN_MS,
   type PayForBooking,
 } from "../payments/pay-for-booking.js";
 import { createPostgresPaymentRepository } from "../payments/postgres/postgres-payment-repository.js";
+import { createReconcilePayments } from "../payments/reconcile-payments.js";
 import { createSimulatedPaymentGateway } from "../payments/simulated-payment-gateway.js";
 import {
   createConsoleLogger,
@@ -87,6 +92,18 @@ const DEFAULT_OUTBOX_RELAY_INTERVAL_MS = 5_000;
 const DEFAULT_HOLD_EXPIRY_INTERVAL_MS = 60_000;
 const HOLD_EXPIRY_BATCH_SIZE = 50;
 const HOLD_EXPIRY_MAX_BATCHES = 20;
+/**
+ * Decision 15: a due payment waits at most ~30 s for the job. A batch's
+ * gateway calls run concurrently, so one run takes about one gateway timeout
+ * per batch; 20 × 5 = 100 payments per run.
+ */
+const DEFAULT_PAYMENT_RECONCILIATION_INTERVAL_MS = 30_000;
+const PAYMENT_RECONCILIATION_BATCH_SIZE = 20;
+const PAYMENT_RECONCILIATION_MAX_BATCHES = 5;
+/** BR-PAY-10: hourly is enough for a 24 h retention; 500 × 20 = 10 000 keys per run. */
+const DEFAULT_IDEMPOTENCY_KEY_CLEANUP_INTERVAL_MS = 60 * 60_000;
+const IDEMPOTENCY_KEY_CLEANUP_BATCH_SIZE = 500;
+const IDEMPOTENCY_KEY_CLEANUP_MAX_BATCHES = 20;
 
 /**
  * Fully wired application graph.
@@ -126,6 +143,10 @@ export type CreateApplicationOptions = {
   outboxRelayIntervalMs?: number;
   /** Override for tests; production default is 60s */
   holdExpiryIntervalMs?: number;
+  /** Override for tests; production default is 30s */
+  paymentReconciliationIntervalMs?: number;
+  /** Override for tests; production default is 1h */
+  idempotencyKeyCleanupIntervalMs?: number;
   /**
    * Tests inject a noop publisher so the suite does not need RabbitMQ.
    * Production omits this and connects via config.rabbitmqUrl.
@@ -147,6 +168,12 @@ export async function createApplication(
     options.outboxRelayIntervalMs ?? DEFAULT_OUTBOX_RELAY_INTERVAL_MS;
   const holdExpiryIntervalMs =
     options.holdExpiryIntervalMs ?? DEFAULT_HOLD_EXPIRY_INTERVAL_MS;
+  const paymentReconciliationIntervalMs =
+    options.paymentReconciliationIntervalMs ?? DEFAULT_PAYMENT_RECONCILIATION_INTERVAL_MS;
+  const idempotencyKeyCleanupIntervalMs =
+    options.idempotencyKeyCleanupIntervalMs ?? DEFAULT_IDEMPOTENCY_KEY_CLEANUP_INTERVAL_MS;
+  /** How long after phase 1 a PROCESSING payment is reconciliation's; also the job's lease. */
+  const reconcileAfterMs = config.paymentGatewayTimeoutMs + PAYMENT_RECONCILIATION_MARGIN_MS;
 
   const dataSource = createBookingDataSource(config.postgres);
   await dataSource.initialize();
@@ -166,6 +193,7 @@ export async function createApplication(
   const idempotencyRepository = createPostgresIdempotencyRepository(dataSource);
   const paymentGateway = createSimulatedPaymentGateway({
     delayMs: config.paymentSimulatorDelayMs,
+    timeoutMs: config.paymentGatewayTimeoutMs,
   });
   const transactionRunner = createPostgresTransactionRunner(dataSource);
   const healthChecks = createPostgresHealthChecks(dataSource);
@@ -238,6 +266,33 @@ export async function createApplication(
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
     getCurrentTime: () => new Date(),
+    reconcileAfterMs,
+  });
+
+  const reconcilePayments = createReconcilePayments({
+    bookingRepository,
+    paymentRepository,
+    idempotencyRepository,
+    paymentGateway,
+    auditRecorder,
+    outboxRepository,
+    transactionRunner,
+    logger,
+    generateAuditId: () => crypto.randomUUID(),
+    generateOutboxId: () => crypto.randomUUID(),
+    getRequestId: () => undefined,
+    getCurrentTime: () => new Date(),
+    leaseMs: reconcileAfterMs,
+    batchSize: PAYMENT_RECONCILIATION_BATCH_SIZE,
+    maxBatches: PAYMENT_RECONCILIATION_MAX_BATCHES,
+  });
+
+  const cleanupIdempotencyKeys = createCleanupIdempotencyKeys({
+    idempotencyRepository,
+    transactionRunner,
+    getCurrentTime: () => new Date(),
+    batchSize: IDEMPOTENCY_KEY_CLEANUP_BATCH_SIZE,
+    maxBatches: IDEMPOTENCY_KEY_CLEANUP_MAX_BATCHES,
   });
 
   const expireHolds = createExpireHolds({
@@ -317,6 +372,20 @@ export async function createApplication(
       expireHolds,
       logger,
       intervalMs: holdExpiryIntervalMs,
+    }),
+  );
+  jobScheduler.register(
+    createPaymentReconciliationJob({
+      reconcilePayments,
+      logger,
+      intervalMs: paymentReconciliationIntervalMs,
+    }),
+  );
+  jobScheduler.register(
+    createIdempotencyKeyCleanupJob({
+      cleanupIdempotencyKeys,
+      logger,
+      intervalMs: idempotencyKeyCleanupIntervalMs,
     }),
   );
   jobScheduler.start();

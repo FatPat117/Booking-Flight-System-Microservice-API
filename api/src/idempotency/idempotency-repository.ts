@@ -72,9 +72,28 @@ export type IdempotencyRepository = Readonly<{
   ): Promise<void>;
 
   /**
+   * complete(), found by the payment the key started instead of by its
+   * scope and key: phase 3 runs in the request and in reconciliation, and
+   * the job knows only the payment (Day 49C, Decision 15). Throws if that
+   * payment's key is not in progress.
+   */
+  completeForPayment(
+    paymentId: string,
+    response: StoredResponse,
+    now: Date,
+  ): Promise<void>;
+
+  /**
    * Give the key up so the client can retry with it: for outcomes that are
    * not stored (amount mismatch, another payment in progress). A completed
    * key is left untouched.
    */
   release(scope: IdempotencyScope, key: string): Promise<void>;
+
+  /**
+   * Delete up to `limit` COMPLETED keys created before `cutoff`, oldest
+   * first; returns how many (Day 49C, BR-PAY-10). Never an IN_PROGRESS key:
+   * each belongs to a PROCESSING payment that reconciliation completes.
+   */
+  deleteCompletedBefore(cutoff: Date, limit: number): Promise<number>;
 }>;

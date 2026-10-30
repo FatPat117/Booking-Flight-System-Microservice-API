@@ -21,8 +21,24 @@ export type PaymentDecision =
 const NOT_PAYABLE_MESSAGES: Record<NotPayableReason, string> = {
   "not-held": "Booking is not held or its hold has expired",
   "under-margin": "Booking hold expires in 60 seconds or less; it can no longer be paid",
-  refunded: "Booking was cancelled or expired while the payment was processed; the payment was refunded",
+  refunded: "Booking was cancelled or expired while the payment was processed; the payment is being refunded",
 };
+
+/**
+ * The payment as the API shows it, in a 201 and in a 202 (Day 49C). Field by
+ * field, so the payment-method token and reconciliation bookkeeping never
+ * reach a response.
+ */
+export function toPaymentView(payment: Payment) {
+  return {
+    id: payment.id,
+    bookingId: payment.bookingId,
+    status: payment.status,
+    amount: payment.amount,
+    providerReference: payment.providerReference,
+    createdAt: payment.createdAt,
+  };
+}
 
 function error(status: number, code: string, message: string): StoredResponse {
   const body: ApiErrorResponse = { error: { code, message } };
@@ -41,17 +57,7 @@ export function toStoredResponse(decision: PaymentDecision): StoredResponse {
       const { payment, booking } = decision;
       return {
         status: 201,
-        body: {
-          payment: {
-            id: payment.id,
-            bookingId: payment.bookingId,
-            status: payment.status,
-            amount: payment.amount,
-            providerReference: payment.providerReference,
-            createdAt: payment.createdAt,
-          },
-          booking,
-        },
+        body: { payment: toPaymentView(payment), booking },
       };
     }
     case "declined":

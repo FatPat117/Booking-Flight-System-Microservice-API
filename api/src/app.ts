@@ -31,6 +31,7 @@ import {
 } from "./observability/request-context.js";
 import { createRequestObservabilityMiddleware } from "./observability/request-observability.js";
 import type { PayForBooking } from "./payments/pay-for-booking.js";
+import { toPaymentView } from "./payments/payment-response.js";
 import {
   isValidIdempotencyKey,
   validatePaymentInput,
@@ -497,6 +498,12 @@ export function createApp(dependencies: AppDependencies) {
           res.set("Idempotent-Replayed", "true");
         }
         return res.status(result.response.status).json(result.response.body);
+      }
+
+      if (result.outcome === "processing") {
+        // BR-PAY-08: accepted, outcome not known yet. Not stored — a retry
+        // with the same key gets the final answer once reconciliation has it.
+        return res.status(202).json({ payment: toPaymentView(result.payment) });
       }
 
       if (result.outcome === "idempotency-key-reused") {

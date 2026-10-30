@@ -23,6 +23,7 @@ const testConfigBase = {
   rabbitmqUrl: "amqp://guest:guest@localhost:5672",
   postgres: parsePostgresConfig(process.env),
   paymentSimulatorDelayMs: 0,
+  paymentGatewayTimeoutMs: 10_000,
 } as const;
 
 test("createApplication wires use cases, migrates the real database, and closes cleanly", async () => {
