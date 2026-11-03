@@ -7,6 +7,7 @@ import request from "supertest";
 import type { AircraftRepository } from "../src/aircraft/aircraft-repository.js";
 import { createApp } from "../src/app.js";
 import { createCancelBooking } from "../src/bookings/cancel-booking.js";
+import { createChangeSeat } from "../src/bookings/change-seat.js";
 import { createCreateBooking } from "../src/bookings/create-booking.js";
 import { createGetBooking } from "../src/bookings/get-booking.js";
 import { createGetBookingByReference } from "../src/bookings/get-booking-by-reference.js";
@@ -107,6 +108,7 @@ function createContext(): {
     getCurrentTime,
   };
 
+  const paymentRepository = createInMemoryPaymentRepository();
   const app = createApp({
     getFlight: createGetFlight({ flightRepository, getCurrentTime }),
     getFlightSeatMap: createGetFlightSeatMap({ flightRepository }),
@@ -124,11 +126,12 @@ function createContext(): {
       generateId: () => crypto.randomUUID(),
       generateReference: nextBookingReference,
     }),
-    cancelBooking: createCancelBooking({ ...common, bookingRepository }),
+    cancelBooking: createCancelBooking({ ...common, bookingRepository, paymentRepository }),
+    changeSeat: createChangeSeat({ ...common, bookingRepository }),
     payForBooking: createPayForBooking({
       ...common,
       bookingRepository,
-      paymentRepository: createInMemoryPaymentRepository(),
+      paymentRepository,
       idempotencyRepository: createInMemoryIdempotencyRepository(),
       paymentGateway: gateway,
       logger: createMemoryLogger(),
@@ -612,7 +615,7 @@ test("another account cannot cancel the booking: 404, and the owner still sees i
 test("cancelling another account's already-cancelled booking is still 404, never 409", async () => {
   const { app } = createContext();
   const bookingOfA = await seedBooking(app, USER_A);
-  assert.equal((await request(app).delete(`/api/bookings/${bookingOfA}`).set(as(USER_A))).status, 204);
+  assert.equal((await request(app).delete(`/api/bookings/${bookingOfA}`).set(as(USER_A))).status, 200);
 
   const attempt = await request(app).delete(`/api/bookings/${bookingOfA}`).set(as(USER_B));
 
@@ -677,7 +680,7 @@ test("a malformed booking id is 404 on GET and DELETE, not 500", async () => {
 // Cancelling and audit
 // ---------------------------------------------------------------------------
 
-test("DELETE a HELD booking returns 204 then 409 on the owner's second cancel, and releases every seat once", async () => {
+test("DELETE a HELD booking returns 200 with the cancelled booking and no refund, then 409 on the owner's second cancel, and releases every seat once", async () => {
   const { app } = createContext();
   const flightId = await seedFlight(app, 3);
   const created = await book(app, USER_A, flightId, [{ name: "Alice" }, { name: "Bob" }]);
@@ -687,7 +690,10 @@ test("DELETE a HELD booking returns 204 then 409 on the owner's second cancel, a
   const first = await request(app).delete(`/api/bookings/${bookingId}`).set(as(USER_A));
   const second = await request(app).delete(`/api/bookings/${bookingId}`).set(as(USER_A));
 
-  assert.equal(first.status, 204);
+  assert.equal(first.status, 200);
+  assert.equal(first.body.booking.id, bookingId);
+  assert.equal(first.body.booking.status, "CANCELLED");
+  assert.equal(first.body.refund, null);
   assert.equal(second.status, 409);
   assert.equal(second.body.error.code, "BOOKING_ALREADY_CANCELLED");
 
@@ -772,7 +778,7 @@ test("DELETE a booking the job already expired is the same 409 BOOKING_EXPIRED",
   assert.equal((await seatStatuses(app, flightId))["1A"], "AVAILABLE");
 });
 
-test("another account's lapsed hold is 404 on DELETE; the owner 1 ms before the deadline still cancels with 204", async () => {
+test("another account's lapsed hold is 404 on DELETE; the owner 1 ms before the deadline still cancels with 200", async () => {
   const { app, clock } = createContext();
   const flightId = await seedFlight(app, 2);
   const lapsing = await book(app, USER_A, flightId);
@@ -783,7 +789,7 @@ test("another account's lapsed hold is 404 on DELETE; the owner 1 ms before the 
   clock.now = HOLD_DEADLINE;
   const other = await request(app).delete(`/api/bookings/${lapsing.body.id}`).set(as(USER_B));
 
-  assert.equal(owner.status, 204);
+  assert.equal(owner.status, 200);
   assert.equal(other.status, 404);
   assert.equal(other.body.error.code, "BOOKING_NOT_FOUND");
 });
@@ -809,6 +815,147 @@ function pay(
     .set(as(accessToken));
   return (key === null ? call : call.set("Idempotency-Key", key)).send(body as object);
 }
+
+// ---------------------------------------------------------------------------
+// Changing a seat (Day 50, BR-BOOK-07, Decision 16)
+// ---------------------------------------------------------------------------
+
+function changeSeatOf(app: Express, accessToken: string, bookingId: string, position: string, body: unknown) {
+  return request(app)
+    .put(`/api/bookings/${bookingId}/passengers/${position}/seat`)
+    .set(as(accessToken))
+    .send(body as object);
+}
+
+/**
+ * A paid booking of one passenger on 1A, on a 12-seat flight (rows 1–2).
+ * Economy only: the fake's seats ignore a registered layout, so a fare-class
+ * mismatch is covered by the repository contract (both tiers) and e2e.
+ */
+async function seedConfirmedBooking(app: Express) {
+  const flightId = await seedFlight(app, 12);
+  const bookingId = (await book(app, USER_A, flightId, [{ name: "Alice", seat: "1A" }])).body.id as string;
+  assert.equal((await pay(app, USER_A, bookingId)).status, 201);
+  return { flightId, bookingId };
+}
+
+test("PUT a passenger's seat answers 200 with the booking on the new seat, the seat map follows and the price stays", async () => {
+  const { app, audit } = createContext();
+  const { flightId, bookingId } = await seedConfirmedBooking(app);
+  const before = await request(app).get(`/api/bookings/${bookingId}`).set(as(USER_A));
+
+  const changed = await changeSeatOf(app, USER_A, bookingId, "1", { seat: "2C" });
+
+  assert.equal(changed.status, 200);
+  assert.equal(changed.body.status, "CONFIRMED");
+  assert.deepEqual(changed.body.passengers, [{ ...before.body.passengers[0], seat: "2C" }]);
+  assert.deepEqual(changed.body.total, before.body.total);
+  const seats = await seatStatuses(app, flightId);
+  assert.equal(seats["1A"], "AVAILABLE");
+  assert.equal(seats["2C"], "BOOKED");
+  assert.deepEqual(
+    audit.records.filter(({ action }) => action === "BOOKING_SEAT_CHANGED").map(({ metadata }) => metadata),
+    [{ position: 1, from: "1A", to: "2C" }],
+  );
+});
+
+test("the same PUT again answers the same 200 and records nothing new: setting a seat is naturally idempotent", async () => {
+  const { app, audit } = createContext();
+  const { bookingId } = await seedConfirmedBooking(app);
+  const first = await changeSeatOf(app, USER_A, bookingId, "1", { seat: "2C" });
+  const records = audit.records.length;
+
+  const repeat = await changeSeatOf(app, USER_A, bookingId, "1", { seat: "2C" });
+
+  assert.equal(repeat.status, 200);
+  assert.deepEqual(repeat.body, first.body);
+  assert.equal(audit.records.length, records);
+});
+
+test("PUT a seat maps each refusal: 409 SEAT_UNAVAILABLE, 422 UNKNOWN_SEAT, 409 BOOKING_NOT_CHANGEABLE", async () => {
+  const { app } = createContext();
+  const { flightId, bookingId } = await seedConfirmedBooking(app);
+  assert.equal((await book(app, USER_B, flightId, [{ name: "Bob", seat: "2B" }])).status, 201);
+  const held = (await book(app, USER_A, flightId, [{ name: "Carol", seat: "2D" }])).body.id as string;
+
+  const taken = await changeSeatOf(app, USER_A, bookingId, "1", { seat: "2B" });
+  const unknown = await changeSeatOf(app, USER_A, bookingId, "1", { seat: "40A" });
+  const notConfirmed = await changeSeatOf(app, USER_A, held, "1", { seat: "2E" });
+
+  assert.deepEqual([taken.status, taken.body.error.code], [409, "SEAT_UNAVAILABLE"]);
+  assert.deepEqual([unknown.status, unknown.body.error.details], [
+    422,
+    [{ field: "seat", code: "UNKNOWN_SEAT", message: "40A" }],
+  ]);
+  assert.deepEqual([notConfirmed.status, notConfirmed.body.error.code], [409, "BOOKING_NOT_CHANGEABLE"]);
+  assert.equal((await seatStatuses(app, flightId))["1A"], "BOOKED");
+});
+
+test("PUT a seat: another account's booking and a passenger position that does not exist are 404; a bad body is 422", async () => {
+  const { app } = createContext();
+  const { bookingId } = await seedConfirmedBooking(app);
+
+  const other = await changeSeatOf(app, USER_B, bookingId, "1", { seat: "2C" });
+  const missingPassenger = await changeSeatOf(app, USER_A, bookingId, "2", { seat: "2C" });
+  const badPosition = await changeSeatOf(app, USER_A, bookingId, "0", { seat: "2C" });
+  const badBody = await changeSeatOf(app, USER_A, bookingId, "1", { seat: "front" });
+
+  assert.deepEqual([other.status, other.body.error.code], [404, "BOOKING_NOT_FOUND"]);
+  assert.deepEqual([missingPassenger.status, missingPassenger.body.error.code], [404, "PASSENGER_NOT_FOUND"]);
+  assert.deepEqual([badPosition.status, badPosition.body.error.code], [404, "PASSENGER_NOT_FOUND"]);
+  assert.deepEqual([badBody.status, badBody.body.error.details[0].code], [422, "INVALID_SEAT"]);
+});
+
+// seedFlight departs 2026-12-10T01:00Z: BR-BOOK-06's window closes 24 h before.
+const CANCELLATION_WINDOW_CLOSES = new Date("2026-12-09T01:00:00.000Z");
+
+test("DELETE a paid CONFIRMED booking answers 200 with the cancelled booking and the refund REFUND_PENDING, the seat free (Day 50)", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app, 2);
+  const bookingId = (await book(app, USER_A, flightId)).body.id as string;
+  const paid = await pay(app, USER_A, bookingId);
+  assert.equal(paid.status, 201);
+
+  const cancelled = await request(app).delete(`/api/bookings/${bookingId}`).set(as(USER_A));
+
+  assert.equal(cancelled.status, 200);
+  assert.equal(cancelled.body.booking.status, "CANCELLED");
+  assert.deepEqual(cancelled.body.refund, {
+    paymentId: paid.body.payment.id,
+    amount: { amount: 1_500_000, currency: "VND" },
+    status: "REFUND_PENDING",
+  });
+  assert.deepEqual(await seatStatuses(app, flightId), { "1A": "AVAILABLE", "1B": "AVAILABLE" });
+});
+
+test("DELETE a CONFIRMED booking at exactly departure − 24 h answers 409 CANCELLATION_WINDOW_CLOSED with the deadline; 1 ms earlier it cancels", async () => {
+  const { app, clock } = createContext();
+  const flightId = await seedFlight(app, 2);
+  const late = (await book(app, USER_A, flightId)).body.id as string;
+  const early = (await book(app, USER_A, flightId)).body.id as string;
+  assert.equal((await pay(app, USER_A, late, { key: "late" })).status, 201);
+  assert.equal((await pay(app, USER_A, early, { key: "early" })).status, 201);
+
+  clock.now = CANCELLATION_WINDOW_CLOSES;
+  const refused = await request(app).delete(`/api/bookings/${late}`).set(as(USER_A));
+  clock.now = new Date(CANCELLATION_WINDOW_CLOSES.getTime() - 1);
+  const accepted = await request(app).delete(`/api/bookings/${early}`).set(as(USER_A));
+
+  assert.equal(refused.status, 409);
+  assert.deepEqual(refused.body.error, {
+    code: "CANCELLATION_WINDOW_CLOSED",
+    message: "A confirmed booking cannot be cancelled within 24 hours of departure",
+    details: [
+      {
+        field: "cancellableUntil",
+        code: "CANCELLATION_WINDOW_CLOSED",
+        message: "2026-12-09T01:00:00.000Z",
+      },
+    ],
+  });
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(await seatStatuses(app, flightId), { "1A": "BOOKED", "1B": "AVAILABLE" });
+});
 
 test("POST payment answers 201 with the payment and the CONFIRMED booking, whose seat is now BOOKED", async () => {
   const { app } = createContext();

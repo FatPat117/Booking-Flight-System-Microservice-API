@@ -170,3 +170,40 @@ export function validateCreateBookingInput(
     },
   };
 }
+
+/** `PUT /api/bookings/:id/passengers/:position/seat` (Decision 16). */
+export function validateChangeSeatInput(
+  input: unknown,
+): ValidationResult<{ seat: SeatPosition }> {
+  if (!isPlainObject(input)) {
+    return invalid([
+      {
+        field: "body",
+        code: "INVALID_BODY",
+        message: "Request body must be a JSON object",
+      },
+    ]);
+  }
+
+  const seat =
+    typeof input.seat === "string" ? parseSeatPosition(input.seat) : undefined;
+  if (seat === undefined) {
+    return invalid([
+      {
+        field: "seat",
+        code: input.seat === undefined ? "REQUIRED" : "INVALID_SEAT",
+        message: "seat must be a seat code such as 12A",
+      },
+    ]);
+  }
+
+  return { success: true, value: { seat } };
+}
+
+/**
+ * A path position is a passenger's place in the booking, "1".."9"
+ * (BR-BOOK-01). Anything else names no passenger: undefined, answered 404.
+ */
+export function parsePassengerPosition(raw: string): number | undefined {
+  return /^[1-9]$/.test(raw) ? Number(raw) : undefined;
+}

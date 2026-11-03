@@ -15,6 +15,7 @@ import { createCreateBooking } from "../../src/bookings/create-booking.js";
 import { createPostgresBookingRepository } from "../../src/bookings/postgres/postgres-booking-repository.js";
 import { createPostgresFlightRepository } from "../../src/flights/postgres/postgres-flight-repository.js";
 import { createPostgresOutboxRepository } from "../../src/outbox/postgres/postgres-outbox-repository.js";
+import { createPostgresPaymentRepository } from "../../src/payments/postgres/postgres-payment-repository.js";
 import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { resolveEntityManager } from "../../src/postgres/transaction-context.js";
@@ -62,6 +63,7 @@ function createCreateBookingUseCase(
 function createCancelBookingUseCase() {
   return createCancelBooking({
     bookingRepository: createPostgresBookingRepository(dataSource),
+    paymentRepository: createPostgresPaymentRepository(dataSource),
     auditRecorder: createPostgresAuditRecorder(dataSource),
     outboxRepository: createPostgresOutboxRepository(dataSource),
     transactionRunner: createPostgresTransactionRunner(dataSource),

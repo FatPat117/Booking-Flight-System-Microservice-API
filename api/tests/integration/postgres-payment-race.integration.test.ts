@@ -30,6 +30,7 @@ import { createFakePaymentGateway } from "../fakes/in-memory.js";
 import { nextBookingReference } from "../fixtures/bookings.js";
 import { makeFlight } from "../fixtures/flights.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
+import { assertGlobalInvariants } from "./invariants.js";
 
 /**
  * Payment under real concurrency (Day 49B, Decision 14, ADR-009): separate
@@ -92,6 +93,7 @@ function payForBookingWith(gateway: PaymentGateway, clock: { now: Date }) {
 function cancelBookingAt(now: Date) {
   return createCancelBooking({
     bookingRepository: createPostgresBookingRepository(dataSource),
+    paymentRepository: createPostgresPaymentRepository(dataSource),
     auditRecorder: createPostgresAuditRecorder(dataSource),
     outboxRepository: createPostgresOutboxRepository(dataSource),
     transactionRunner: createPostgresTransactionRunner(dataSource),
@@ -207,6 +209,7 @@ async function assertSeatsMatchBookings(flightId: string) {
   assert.ok(state);
   assert.equal(state.mismatched, 0, "a seat's status disagrees with its booking's");
   assert.equal(state.takenSeats, state.livePassengers, "taken seats ≠ passengers of live bookings");
+  await assertGlobalInvariants(dataSource);
 }
 
 function statusOfResult(result: PayForBookingResult): string {

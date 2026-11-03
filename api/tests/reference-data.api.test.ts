@@ -88,6 +88,7 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
     ...createUnusedFlightSeatMap(),
     createBooking: async () => ({ outcome: "flight-not-found" }),
     cancelBooking: async () => ({ outcome: "not-found" }),
+    changeSeat: async () => ({ outcome: "not-found" }),
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     registerAirport: createRegisterAirport({ ...common, airportRepository }),

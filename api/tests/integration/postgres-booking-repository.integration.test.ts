@@ -148,7 +148,12 @@ test("cancel: cancelled with flightId, its seat row back to AVAILABLE with no bo
   });
 
   const first = await bookingRepository.cancel(booking.id, OWNER, CANCEL_AT);
-  assert.deepEqual(first, { outcome: "cancelled", flightId: flight.id });
+  assert.deepEqual(first, {
+    outcome: "cancelled",
+    flightId: flight.id,
+    reference: booking.reference,
+    seats: ["1A"],
+  });
   assert.deepEqual(await seatRows(flight.id), [
     { seat: "1A", status: "AVAILABLE", booking_id: null },
   ]);

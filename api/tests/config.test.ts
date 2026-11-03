@@ -29,6 +29,7 @@ test("uses defaults for optional configuration", () => {
       },
       paymentSimulatorDelayMs: 0,
       paymentGatewayTimeoutMs: 10_000,
+      paymentReconciliationMarginMs: 30_000,
     },
   );
 });
@@ -45,6 +46,7 @@ test("parses valid configuration overrides", () => {
       BOOKING_POSTGRES_DB: " booking_test ",
       PAYMENT_SIMULATOR_DELAY_MS: " 2000 ",
       PAYMENT_GATEWAY_TIMEOUT_MS: " 2500 ",
+      PAYMENT_RECONCILIATION_MARGIN_MS: " 15000 ",
     }),
     {
       port: 4100,
@@ -59,6 +61,7 @@ test("parses valid configuration overrides", () => {
       },
       paymentSimulatorDelayMs: 2000,
       paymentGatewayTimeoutMs: 2500,
+      paymentReconciliationMarginMs: 15_000,
     },
   );
 });
@@ -103,6 +106,47 @@ test("accepts PAYMENT_GATEWAY_TIMEOUT_MS at its 20 s ceiling", () => {
   });
 
   assert.equal(config.paymentGatewayTimeoutMs, 20_000);
+});
+
+test("rejects invalid PAYMENT_RECONCILIATION_MARGIN_MS values", async (t) => {
+  for (const value of ["-1", "1.5", "abc"]) {
+    await t.test(`rejects PAYMENT_RECONCILIATION_MARGIN_MS=${JSON.stringify(value)}`, () => {
+      assert.throws(
+        () =>
+          parseConfig({
+            JWT_SECRET: TEST_JWT_SECRET,
+            ...validPostgresEnv,
+            PAYMENT_RECONCILIATION_MARGIN_MS: value,
+          }),
+        /Invalid PAYMENT_RECONCILIATION_MARGIN_MS/,
+      );
+    });
+  }
+});
+
+function parseTimings(timeoutMs: number, marginMs: number) {
+  return parseConfig({
+    JWT_SECRET: TEST_JWT_SECRET,
+    ...validPostgresEnv,
+    PAYMENT_GATEWAY_TIMEOUT_MS: String(timeoutMs),
+    PAYMENT_RECONCILIATION_MARGIN_MS: String(marginMs),
+  });
+}
+
+test("a reconciliation margin of exactly the 5 s settle budget is accepted, 1 ms less is refused", () => {
+  assert.equal(parseTimings(10_000, 5_000).paymentReconciliationMarginMs, 5_000);
+  assert.throws(
+    () => parseTimings(10_000, 4_999),
+    /PAYMENT_RECONCILIATION_MARGIN_MS \(4999\) must be at least the settle budget \(5000 ms\)/,
+  );
+});
+
+test("timeout + margin must stay below the 60 s BR-PAY-07 margin: 59 999 ms is accepted, 60 000 refused", () => {
+  assert.equal(parseTimings(20_000, 39_999).paymentReconciliationMarginMs, 39_999);
+  assert.throws(
+    () => parseTimings(20_000, 40_000),
+    /PAYMENT_GATEWAY_TIMEOUT_MS \(20000\) \+ PAYMENT_RECONCILIATION_MARGIN_MS \(40000\) must be below the BR-PAY-07 start margin \(60000 ms\)/,
+  );
 });
 
 test("rejects missing JWT_SECRET", () => {
@@ -173,6 +217,7 @@ test("parses RABBITMQ_URL override", () => {
       },
       paymentSimulatorDelayMs: 0,
       paymentGatewayTimeoutMs: 10_000,
+      paymentReconciliationMarginMs: 30_000,
     },
   );
 });

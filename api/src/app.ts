@@ -7,7 +7,12 @@ import type { RegisterAirport } from "./airports/register-airport.js";
 import { toActor, toBookingAccessScope } from "./auth/booking-access.js";
 import { requireRole } from "./auth/require-role.js";
 import { createVerifyJwtMiddleware } from "./auth/verify-jwt.js";
+import {
+  parsePassengerPosition,
+  validateChangeSeatInput,
+} from "./bookings/booking-validation.js";
 import type { CancelBooking } from "./bookings/cancel-booking.js";
+import type { ChangeSeat } from "./bookings/change-seat.js";
 import type { CreateBooking } from "./bookings/create-booking.js";
 import type { GetBooking } from "./bookings/get-booking.js";
 import type { GetBookingByReference } from "./bookings/get-booking-by-reference.js";
@@ -44,6 +49,7 @@ export type AppDependencies = {
   openFlight: OpenFlight;
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
+  changeSeat: ChangeSeat;
   payForBooking: PayForBooking;
   getBooking: GetBooking;
   getBookingByReference: GetBookingByReference;
@@ -77,6 +83,11 @@ const BOOKING_NOT_FOUND = {
   message: "Booking was not found",
 } as const;
 
+const PASSENGER_NOT_FOUND = {
+  code: "PASSENGER_NOT_FOUND",
+  message: "The booking has no passenger at this position",
+} as const;
+
 export function createApp(dependencies: AppDependencies) {
   const {
     getFlight,
@@ -85,6 +96,7 @@ export function createApp(dependencies: AppDependencies) {
     openFlight,
     createBooking,
     cancelBooking,
+    changeSeat,
     payForBooking,
     getBooking,
     getBookingByReference,
@@ -392,7 +404,8 @@ export function createApp(dependencies: AppDependencies) {
   );
 
   // 409 for already-cancelled: resource state conflicts with a second cancel.
-  // Chosen over idempotent 204 so clients can tell "first cancel" from "repeat".
+  // Chosen over an idempotent success so clients can tell "first cancel" from
+  // "repeat".
   // Admins cancel only through flight cancellation (permission matrix), hence
   // role `user`.
   app.delete(
@@ -427,7 +440,105 @@ export function createApp(dependencies: AppDependencies) {
         });
       }
 
-      return res.status(204).send();
+      // BR-BOOK-06: the deadline is in the details, so the customer sees
+      // which instant they missed. Nothing was written.
+      if (result.outcome === "cancellation-window-closed") {
+        return sendApiError(res, 409, {
+          code: "CANCELLATION_WINDOW_CLOSED",
+          message: "A confirmed booking cannot be cancelled within 24 hours of departure",
+          details: [
+            {
+              field: "cancellableUntil",
+              code: "CANCELLATION_WINDOW_CLOSED",
+              message: result.cancellableUntil,
+            },
+          ],
+        });
+      }
+
+      // Day 50 (Decision 16): 200 with the booking instead of 204, so a paid
+      // booking's answer can say a refund was started. REFUND_PENDING is the
+      // truth at this instant; the reconciliation job makes the refund.
+      return res.status(200).json({
+        booking: result.booking,
+        refund:
+          result.refund === null
+            ? null
+            : {
+                paymentId: result.refund.paymentId,
+                amount: result.refund.amount,
+                status: "REFUND_PENDING",
+              },
+      });
+    },
+  );
+
+  // US-BOOK-06 (BR-BOOK-07, Decision 16): "set this passenger's seat to X".
+  // PUT, because a repeat is harmless: the same seat again is 200 with
+  // nothing written, so no Idempotency-Key. Admins do not change seats (no
+  // story), hence role `user`.
+  app.put(
+    "/api/bookings/:id/passengers/:position/seat",
+    requireJwt,
+    requireRole("user"),
+    async (req: Request<{ id: string; position: string }>, res) => {
+      const position = parsePassengerPosition(req.params.position);
+      if (position === undefined) {
+        return sendApiError(res, 404, PASSENGER_NOT_FOUND);
+      }
+      const validation = validateChangeSeatInput(req.body);
+      if (!validation.success) {
+        return sendApiError(res, 422, {
+          code: "VALIDATION_FAILED",
+          message: "Request validation failed",
+          details: validation.issues,
+        });
+      }
+
+      const user = currentUser();
+      const result = await changeSeat(
+        req.params.id,
+        position,
+        validation.value.seat,
+        toBookingAccessScope(user),
+        toActor(user),
+      );
+
+      switch (result.outcome) {
+        case "changed":
+        case "unchanged":
+          return res.status(200).json(result.booking);
+        case "not-found":
+          return sendApiError(res, 404, BOOKING_NOT_FOUND);
+        case "passenger-not-found":
+          return sendApiError(res, 404, PASSENGER_NOT_FOUND);
+        case "not-changeable":
+          return sendApiError(res, 409, {
+            code: "BOOKING_NOT_CHANGEABLE",
+            message: "Only a confirmed booking can change seats",
+          });
+        case "sales-closed":
+          return sendApiError(res, 409, {
+            code: "SALES_CLOSED",
+            message: "This flight is not open for sale",
+          });
+        case "unknown-seat":
+          return sendApiError(res, 422, {
+            code: "VALIDATION_FAILED",
+            message: "The requested seat does not exist on this flight",
+            details: [{ field: "seat", code: "UNKNOWN_SEAT", message: req.body.seat }],
+          });
+        case "fare-class-mismatch":
+          return sendApiError(res, 409, {
+            code: "FARE_CLASS_MISMATCH",
+            message: `A seat change keeps the fare class: ${result.seatFareClass}, not ${result.targetFareClass}`,
+          });
+        case "seat-unavailable":
+          return sendApiError(res, 409, {
+            code: "SEAT_UNAVAILABLE",
+            message: "The requested seat is already held or booked",
+          });
+      }
     },
   );
 

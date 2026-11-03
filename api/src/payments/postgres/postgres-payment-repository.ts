@@ -132,6 +132,22 @@ export function createPostgresPaymentRepository(
       await transition(paymentId, "PROCESSING", "REFUND_PENDING", now, { providerReference });
     },
 
+    async markRefundPendingForCancelledBooking(bookingId, now) {
+      // UQ_payments_booking_succeeded: at most one row matches.
+      // An UPDATE's query() result is [rows, affected count].
+      const [rows] = (await resolveEntityManager(dataSource).query(
+        `UPDATE "payments"
+         SET "status" = 'REFUND_PENDING', "updated_at" = $2,
+             "next_attempt_at" = $2, "attempts" = 0
+         WHERE "booking_id" = $1 AND "status" = 'SUCCEEDED'
+         RETURNING ${PAYMENT_COLUMNS}`,
+        [bookingId, now],
+      )) as [PaymentRow[], number];
+
+      const [updated] = rows;
+      return updated === undefined ? undefined : mapPayment(updated);
+    },
+
     async markRefunded(paymentId, now) {
       await transition(paymentId, "REFUND_PENDING", "REFUNDED", now);
     },

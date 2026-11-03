@@ -148,3 +148,22 @@ instance đang giữ chết. Cuối cùng vẫn có chuyển trạng thái có �
 **Bằng chứng:** control không lease, instance 2 chạy sau khi instance 1 commit claim → **30 lời gọi
 trùng** trên 30 payment (vẫn mỗi payment một lần trừ tiền nhờ idempotency của provider); có lease → 0.
 
+### 18. Hai khách đổi ghế chéo nhau cùng lúc — làm sao không deadlock? (Day 50)
+
+**Trả lời:** Mọi thao tác khoá ghế theo **cùng một thứ tự toàn cục** (hàng, chữ), bất kể ghế nào là
+"của mình". Đổi ghế khoá cả ghế cũ lẫn ghế đích trong một câu `ORDER BY row, letter FOR UPDATE`.
+`12A → 14C` và `14C → 12A` cùng muốn 12A trước: một bên chờ, bên kia xong (thấy 14C đã có người →
+`409`), rồi bên chờ chạy tiếp và cũng `409`. Cả hai kết thúc sạch, không ai bị Postgres giết.
+**Bằng chứng:** race test A có gate: 0 deadlock / 10 vòng; control A' khoá "ghế của mình trước":
+**5/5 deadlock** (`40P01`).
+
+### 19. Một câu `UPDATE` chờ khoá xong thì nó thấy dữ liệu mới hay cũ? (Day 50)
+
+**Trả lời:** Ở READ COMMITTED, **dòng nó chờ** được đọc lại bản mới (re-check `WHERE`), nhưng các
+dòng **khác** trong cùng câu lệnh vẫn đọc theo snapshot lúc câu bắt đầu. Câu huỷ một-câu tìm ghế
+theo `booking_id`: chờ một lần đổi ghế xong, nó huỷ booking nhưng nhả ghế **cũ** theo snapshot, bỏ
+sót ghế mới. Sửa: khoá booking bằng câu riêng **trước**, câu huỷ chạy sau có snapshot mới. Khoá đó
+dùng đúng điều kiện huỷ, để job hết hạn `SKIP LOCKED` không bị đẩy ra bởi một lần huỷ sẽ thất bại.
+**Bằng chứng:** race test C forced vs control C' (câu cũ để lại ghế `BOOKED` cho booking đã huỷ);
+mutation bỏ câu khoá trước → C forced fail.
+

@@ -47,3 +47,34 @@ test("identity cannot CONNECT to booking_db", async () => {
     /permission denied for database/,
   );
 });
+
+test("integration tests run on a *_test database, never identity_db", async () => {
+  const config = parseIdentityConfig(process.env);
+  const dataSource = createIdentityDataSource(config.postgres);
+  await dataSource.initialize();
+
+  try {
+    const [row] = await dataSource.query("SELECT current_database() AS name");
+
+    assert.match(row.name, /_test$/);
+  } finally {
+    await dataSource.destroy();
+  }
+});
+
+test("identity cannot CONNECT to booking_test", async () => {
+  const config = parseIdentityConfig(process.env);
+  const crossDataSource = new DataSource({
+    type: "postgres",
+    host: config.postgres.host,
+    port: config.postgres.port,
+    username: config.postgres.username,
+    password: config.postgres.password,
+    database: "booking_test",
+  });
+
+  await assert.rejects(
+    () => crossDataSource.initialize(),
+    /permission denied for database/,
+  );
+});

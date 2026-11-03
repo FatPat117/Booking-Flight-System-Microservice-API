@@ -36,6 +36,8 @@ Postgres thật** chứng minh nó.
 | "Tối đa một dòng ở trạng thái X" mỗi cha | Partial unique index + `ON CONFLICT (…) WHERE …` | Một `PROCESSING`, một `SUCCEEDED` mỗi booking | [10](./10-thanh-toan-ba-pha-va-idempotency-key.md) |
 | Job nhiều instance phải gọi ra ngoài **ngoài** transaction | Claim `SKIP LOCKED` + **lease** trong cột thời gian, commit rồi mới gọi; chuyển trạng thái có điều kiện | Đối soát thanh toán (Day 49C) | [11](./11-doi-soat-thanh-toan-va-lease.md) |
 | Request sống và job cùng một bản ghi | Ngưỡng tuổi + chuyển trạng thái có điều kiện, bên thua rollback | Request chậm vs job đối soát | [11](./11-doi-soat-thanh-toan-va-lease.md) |
+| Hai thao tác cùng khoá hai ghế, mỗi bên "của mình" một ghế | Khoá **cả hai** theo thứ tự toàn cục (row, letter) | Hoán đổi ghế chéo (Day 50) | [12](./12-doi-ghe-va-huy-booking-da-tra-tien.md) |
+| Câu lệnh chờ khoá rồi đọc dòng **khác** theo snapshot cũ | Khoá dòng cha bằng câu riêng **trước**, có điều kiện | Huỷ vs đổi ghế (Day 50) | [12](./12-doi-ghe-va-huy-booking-da-tra-tien.md) |
 
 Cách test tất cả những thứ trên: [06-cach-test-race-condition.md](./06-cach-test-race-condition.md).
 

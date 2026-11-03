@@ -62,9 +62,30 @@ lock the candidates → compute a verdict over them → UPDATE … WHERE verdict
   never inserted; `FK_flight_seats_booking_id` (`DEFERRABLE INITIALLY DEFERRED`) rejects the COMMIT.
   Useful, but it turns a `409` into a `500` — the statement must refuse on its own.
 
+## Day 50: a swap, and the snapshot of one statement
+
+- **A seat change locks both seats in the global order.** The passenger's seat and the target are
+  locked together, `ORDER BY row, letter FOR UPDATE`, whichever is "mine". Locking the own seat
+  first lets `12A → 14C` and `14C → 12A` each hold one and wait for the other: the control
+  deadlocked 5 rounds out of 5, the real change 0 in 10 (both answer `409 SEAT_UNAVAILABLE`).
+- **A statement that waited for a lock still reads other rows from its own snapshot.** In READ
+  COMMITTED the row an `UPDATE` waited for is re-checked, but every other row the statement reads
+  comes from the snapshot taken when it started. The one-statement cancel released the booking's
+  seats found by `booking_id` in that snapshot; waiting for a seat change, it released the old seat
+  (already free) and left the new one `BOOKED` for a cancelled booking. The fix locks the booking
+  in a statement of its own first, so the cancel statement starts after the change committed.
+- **A lock taken "to be safe" changes who else gets the row.** The first version of that lock was
+  unconditional; the expiry job's `SKIP LOCKED` sweep then skipped a lapsed hold that a cancel
+  (about to answer `expired`) had locked. The lock now uses the cancel's own condition.
+- **One function for the global invariants** (`api/tests/integration/invariants.ts`) ends every
+  race test: seats ⇔ bookings, passengers ⇔ seats, fare classes, payments ⇔ bookings, and the
+  provider's net money against the paid bookings — each check shown failing on data broken on
+  purpose.
+
 ## Related
 
 ADR-004 addenda (Day 47 `SKIP LOCKED`, Day 48A lock order); domain-model Decision 11;
 `.cursor/progress/DAY-48A.md`; race tests in
-`api/tests/integration/postgres-booking-hold-race.integration.test.ts`;
+`api/tests/integration/postgres-booking-hold-race.integration.test.ts`,
+`api/tests/integration/postgres-seat-change-race.integration.test.ts` (Day 50, Decision 16);
 [exclusion-constraints.md](./exclusion-constraints.md) (the other `40P01` in this codebase).

@@ -51,6 +51,9 @@ Object creation happens only in the Composition Root. Routes and use cases recei
 | `RABBITMQ_URL` | No | `amqp://guest:guest@localhost:5672` | AMQP URL (`rabbitmq` host inside compose) |
 | `PAYMENT_SIMULATOR_DELAY_MS` | No | `0` | How long the simulated gateway takes per charge and per refund (`0–60000`); only for watching a payment race by hand |
 | `PAYMENT_GATEWAY_TIMEOUT_MS` | No | `10000` | How long the api waits for the gateway before the outcome is unknown (`1–20000`); reconciliation takes the payment over 30 s later (Day 49C) |
+| `PAYMENT_RECONCILIATION_MARGIN_MS` | No | `30000` | How long after the gateway timeout reconciliation may take a `PROCESSING` payment (Day 50). Startup refuses a margin below 5000 (the settle budget) or a timeout + margin of 60000 or more (BR-PAY-07) |
+
+The payment timings are checked together at startup, like `JWT_SECRET`: a combination that breaks Decision 15's inequalities stops the app with a message naming the inequality and the values.
 
 `JWT_SECRET` is required at startup. The application fails fast if it is missing, blank, or shorter than 32 characters.
 
@@ -91,6 +94,7 @@ Identity (`services/identity`, port `3001`) issues JWTs: `POST /api/identity/reg
 | `GET /api/bookings` | any valid JWT — a user sees their own bookings, an admin sees all |
 | `GET /api/bookings/:id`, `GET /api/bookings/by-reference/:reference` | any valid JWT — owner or admin |
 | `DELETE /api/bookings/:id` | JWT with `role=user`, owner only |
+| `PUT /api/bookings/:id/passengers/:position/seat` | JWT with `role=user`, owner only (Day 50) |
 | `POST /api/bookings/:id/payments` | JWT with `role=user`, owner only (an admin gets `403`) |
 
 Promote an account to admin once with `npm run promote-to-admin -- <email>` in the identity workspace, then log in again to get a token carrying the new role.
@@ -106,7 +110,7 @@ Content-Type: application/json
 { "passengers": [ { "name": "Nguyen Van A", "seat": "12A" }, { "name": "Tran Thi B", "seat": "12B" } ] }
 ```
 
-Responses: `201` created with `Location: /api/bookings/:id` (a `HELD` booking, see [Multi-passenger holds](#multi-passenger-holds-and-booking-references-day-48a)), `409 NOT_ENOUGH_SEATS`, `409 SEATS_UNAVAILABLE`, `409 SALES_CLOSED` (the flight is not `OPEN`: not opened yet, cancelled, or within 1 hour of departure — Day 46), `404` flight not found, `422` validation error. `DELETE /api/bookings/:id` returns `204`, then `409` on the owner's second cancel, `404` for an unknown id or another account's booking. `GET /api/bookings` uses the same `page`/`pageSize` rules as flights, newest first.
+Responses: `201` created with `Location: /api/bookings/:id` (a `HELD` booking, see [Multi-passenger holds](#multi-passenger-holds-and-booking-references-day-48a)), `409 NOT_ENOUGH_SEATS`, `409 SEATS_UNAVAILABLE`, `409 SALES_CLOSED` (the flight is not `OPEN`: not opened yet, cancelled, or within 1 hour of departure — Day 46), `404` flight not found, `422` validation error. `DELETE /api/bookings/:id` returns `200` with `{ booking, refund }` (`204` until Day 50, see [Cancellation and seat change](#cancellation-and-seat-change-day-50)), then `409` on the owner's second cancel, `404` for an unknown id or another account's booking. `GET /api/bookings` uses the same `page`/`pageSize` rules as flights, newest first.
 
 Missing/invalid/expired JWT on protected routes returns `401 Unauthorized` with `WWW-Authenticate: Bearer`. A valid JWT with the wrong role returns `403 Forbidden`.
 
@@ -286,6 +290,28 @@ Idempotency-Key: 6f1c2a7e-pay-2
 - **Failure tokens** (simulator): `tok_timeout_before_charge` (the first charge never reaches the provider), `tok_lost_response` (charged, answer lost), `tok_refund_fails_twice`, `tok_refund_fails_permanently`. The provider's memory lives in the api process, so a restart forgets its charges.
 - **Measured** (e2e, timeout 4 s, simulator delay 2 s): `tok_lost_response` → `202` in 4.0 s, same key `409` in 7 ms, `CONFIRMED` and the replayed `201` after the job; a booking cancelled during the charge → `409` in 2.0 s (16 s on Day 49B, which waited for the refund) and `REFUNDED` by the job.
 
+## Cancellation and seat change (Day 50)
+
+```http
+DELETE /api/bookings/:id                        (CONFIRMED, departure more than 24 h away)
+→ 200 { "booking": { …, "status": "CANCELLED" },
+        "refund": { "paymentId": "…", "amount": { "amount": 1500000, "currency": "VND" }, "status": "REFUND_PENDING" } }
+DELETE /api/bookings/:id                        (CONFIRMED, departure 24 h away or less)
+→ 409 CANCELLATION_WINDOW_CLOSED   details[0]: { field: "cancellableUntil", message: "<departure − 24 h>" }
+
+PUT /api/bookings/:id/passengers/1/seat   { "seat": "10C" }
+→ 200 the booking, passenger 1 on 10C, same price
+PUT … the same seat again                → 200, nothing written, no audit
+```
+
+- **The 24 h rule (BR-BOOK-06, Decision 16).** A `CONFIRMED` booking is cancellable while `departure_at − 24 h > now`; at exactly 24 h it is already closed. The cancel statement reads the departure itself, with the flight row share-locked, so a departure change cannot slip between the check and the write. A `HELD` booking is limited only by its hold (BR-BOOK-10).
+- **Cancelling a paid booking refunds it in full, through reconciliation.** In the same transaction as the cancel, the `SUCCEEDED` payment becomes `REFUND_PENDING`, due at once; the `payment-reconciliation-job` refunds it on its next run, with its retries and `REFUND_FAILED` (Day 49C). The cancel request never calls the gateway. `refund` is `null` for an unpaid booking. There is no `GET` for a payment yet: `booking-cancelled` says a refund was started, not that it finished.
+- **`booking-cancelled` has a contract and a consumer** (`packages/contracts`, flight-notifier `booking_cancelled_consumed`): reference, flight, released seats, `refund` (`paymentId`, amount) or `null`; no names. Messages relayed before Day 50 lack `reference` and go to `booking-cancelled.dlq` (14 on the dev stack).
+- **Seat change (US-BOOK-06, BR-BOOK-07).** One passenger per request, `CONFIRMED` bookings only, the same fare class, while the flight is on sale (`OPEN` and more than 1 h before departure). The price snapshot and the total do not move. Answers: `409 SEAT_UNAVAILABLE` (held or booked by anyone, this booking included), `409 FARE_CLASS_MISMATCH`, `409 BOOKING_NOT_CHANGEABLE` (not `CONFIRMED`), `409 SALES_CLOSED`, `422` `UNKNOWN_SEAT` or `INVALID_SEAT`, `404 BOOKING_NOT_FOUND` / `PASSENGER_NOT_FOUND` (position not 1–9 or not in the booking). Audited as `BOOKING_SEAT_CHANGED`; no event.
+- **Why `PUT` and no Idempotency-Key.** "Set passenger 1's seat to 10C" is naturally idempotent: the repeat finds the passenger already there and changes nothing. A payment needs a key because "create a payment" twice is two payments.
+- **Locks.** The flight `FOR SHARE` and the booking `FOR UPDATE` first, then **both seats together in `(row, letter)` order**, whichever is the passenger's own. Locking the own seat first lets `12A → 14C` and `14C → 12A` deadlock; measured, that control deadlocks 5 rounds out of 5, the real change 0 in 10 (both answer `409 SEAT_UNAVAILABLE`). Cancel now takes the booking's lock in a statement of its own before releasing seats: a one-statement cancel that waited for a seat change released the seats from its older snapshot and left the new seat `BOOKED` for a cancelled booking (race test C, Decision 16).
+- **Measured** (e2e on the compose stack): a paid cancel answered in 11 ms with `REFUND_PENDING`; the job refunded it 4 s later; the notifier logged the refund's payment id.
+
 ## Audit trail
 
 Every successful write records an audit entry in the `audit_logs` table, in the same Postgres transaction as the write itself. If the audit insert fails, the whole write rolls back.
@@ -295,11 +321,12 @@ Every successful write records an audit entry in the `audit_logs` table, in the 
 | `FLIGHT_CREATED` | `POST /api/flights` | `account` / admin's JWT `sub` (metadata includes `aircraftRegistration`, `fares` as `ECONOMY:1500000,BUSINESS:4200000`) |
 | `FLIGHT_OPENED` | `POST /api/flights/:id/open` | `account` / admin's JWT `sub` (metadata: `previousStatus`) |
 | `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` (metadata: `reference`, `passengerCount`, `seats`, `totalVnd`, `holdExpiresAt` — no passenger names) |
-| `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` |
+| `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` (metadata: `flightId`, `correlationId`, `refundPaymentId` when paid — Day 50) |
+| `BOOKING_SEAT_CHANGED` | `PUT /api/bookings/:id/passengers/:position/seat` | `account` / owner's JWT `sub` (metadata: `position`, `from`, `to`); not recorded when the seat was already set |
 | `BOOKING_EXPIRED` | `booking-hold-expiry-job` | `system` / `booking-hold-expiry` (metadata: `reference`, `seats`, `holdExpiresAt`) |
 | `BOOKING_CONFIRMED` | `POST /api/bookings/:id/payments` (charged and confirmed), or `payment-reconciliation-job` | `account` / payer's JWT `sub`, or `system` / `payment-reconciliation` (metadata: `reference`, `paymentId`, `amountVnd`) |
 | `PAYMENT_FAILED` | same, gateway declined | same actors; target `payment` (metadata: `bookingId`, `reason`) |
-| `PAYMENT_REFUND_PENDING` | same, charged but the booking expired or was cancelled | same actors; target `payment` |
+| `PAYMENT_REFUND_PENDING` | same, charged but the booking expired or was cancelled; or `DELETE /api/bookings/:id` of a paid booking (Day 50) | same actors, or the owner who cancelled; target `payment` (metadata `reason: "booking-cancelled"` for a cancel) |
 | `PAYMENT_REFUNDED` | `payment-reconciliation-job` | `system` / `payment-reconciliation` (Day 49B rows: `payment-refund`); target `payment` |
 | `PAYMENT_REFUND_FAILED` | `payment-reconciliation-job`, refund given up (BR-PAY-09) | `system` / `payment-reconciliation`; target `payment` (metadata: `reason`, `attempts`) |
 | `AIRPORT_REGISTERED` | `POST /api/airports` | `account` / admin's JWT `sub` |
@@ -431,7 +458,7 @@ After startup, the publisher reconnects lazily: an unexpected connection/channel
 
 ### flight-notifier service
 
-`services/flight-notifier/` has its own `package.json`, build, Dockerfile and process. It subscribes to `flight-created`, `booking-held`, `booking-expired` and `booking-created` (no longer produced since Day 48A; kept for messages already queued), validates each event against `packages/contracts`, logs `flight_created_consumed` (with `fares` since Day 49A) / `booking_held_consumed` (reference, passenger count and `total`, no names) / `booking_expired_consumed` (reference and seat count) / `booking_created_consumed` with the `correlationId` (for `booking-expired`, the event's own id: no request is behind it), and acks/nacks manually. `booking-cancelled` is published but has no consumer yet.
+`services/flight-notifier/` has its own `package.json`, build, Dockerfile and process. It subscribes to `flight-created`, `booking-held`, `booking-expired`, `booking-confirmed`, `booking-cancelled` (Day 50) and `booking-created` (no longer produced since Day 48A; kept for messages already queued), validates each event against `packages/contracts`, logs `flight_created_consumed` (with `fares` since Day 49A) / `booking_held_consumed` (reference, passenger count and `total`, no names) / `booking_expired_consumed` (reference and seat count) / `booking_created_consumed` with the `correlationId` (for `booking-expired`, the event's own id: no request is behind it), and acks/nacks manually. `booking-cancelled` got its contract and consumer on Day 50 (`booking_cancelled_consumed`: reference, seat count, the refund's payment id).
 
 `flight-created` evolves additively (Day 46): the payload gained `originAirportId`, `destinationAirportId`, `aircraftId` and `status`, while `origin`/`destination` (IATA codes) and `availableSeats` stay. The new fields are optional in the parser, because old-shape messages may still sit in the outbox, queue or DLQ, and rejected only when present but empty. The producer maps the payload field by field, so a field added to `Flight` is never published by accident. Making them required, or dropping the old fields, is a later contract step. Day 49A added `fares` the same way and marked `priceInCents`/`currency` deprecated (still sent: the ECONOMY fare in whole VND, and `"VND"`).
 
@@ -588,6 +615,16 @@ docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USE
   -c "REVOKE CONNECT ON DATABASE booking_test FROM PUBLIC;"'
 ```
 
+Identity's integration tests follow the same rule since Day 50: `IDENTITY_POSTGRES_DB=identity_test`,
+the guard `services/identity/tests/integration/require-test-database.ts`, and
+`docker/postgres-init/03-create-identity-test-db.sh` for a fresh volume. Once by hand otherwise:
+
+```bash
+docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres \
+  -c "CREATE DATABASE identity_test OWNER \"$IDENTITY_POSTGRES_USER\";" \
+  -c "REVOKE CONNECT ON DATABASE identity_test FROM PUBLIC;"'
+```
+
 ## Postman
 
 Import `postman/Booking-microservices.postman_collection.json` and `postman/Booking-microservices.local.postman_environment.json`. See `postman/README.md`.
@@ -601,12 +638,14 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - `REFUND_FAILED` has no endpoint: a person settles it with the provider and psql, and the only alert is an error log line and an audit row until phase G
 - The simulated provider remembers charges in the api process: after a restart, reconciliation of a payment whose first charge went through charges it again (a real provider keeps its idempotency keys)
 - A request still charging when reconciliation has already settled its payment (it outlived timeout + 30 s) answers `500`; its phase 3 rolls back and the same key then gets the job's answer (Day 49C race test)
+- At most `batchSize` (20) gateway calls run at once per api instance: one batch's calls are concurrent, batches follow each other (Day 50). N instances make up to 20·N; a real provider's rate limit would need a shared limiter
 - A payment whose first request never reached the provider is charged when reconciliation runs, up to about a minute after the customer pressed "pay"; if the hold lapsed meanwhile, it is refunded
 - After a hold lapses, its seats stay `HELD` on the seat map until the expiry job's next run — up to ~60 s plus the run itself. The seat cannot be sold twice in that gap and the booking already reads `EXPIRED`; accepted (Decision 12)
 - A failing expiry batch rolls back whole and is retried on the next run: one booking that keeps failing holds back the others of its batch (head-of-line, like the outbox relay). The hold duration (15 min) is a constant, not configuration
 - No endpoint changes a fare (only psql); one that is added must keep BR-FLT-09 and go through `UPDATE flight_fares`, so the hold's share lock still orders it against holds. Passengers of bookings made before Day 49A carry the fare at migration time, not the one at their hold (it was never recorded)
 - `flight-created` still sends the deprecated `priceInCents`/`currency`; dropping them is a later contract step once no consumer reads them
-- A seat cannot be changed after booking (phase D step 7)
+- A seat change moves one passenger per request; two passengers of one booking cannot swap with each other (the target must be `AVAILABLE`), and nothing crosses fare classes (that would need a payment for the difference or a partial refund)
+- A customer cannot ask whether a refund finished: no `GET` for a payment, no `payment-refunded` event (Day 50)
 - Two system-picked multi-seat holds racing for the last seats could in theory both find fewer seats than needed (each skips rows the other just locked) and both answer `409 NOT_ENOUGH_SEATS`; not observed in 200 measured rounds (Day 48A race test A)
 - The flight list counts seats for every row the `OFFSET` skips, so deep pages get slower (measured Day 47: 1.4 ms on page 1, 52 ms on page 100 of 2000 flights); flights have no index on `(departure_at, id)`
 - Seat layouts cannot be edited (BR-REF-05); there are no read routes for a single airport or aircraft
@@ -616,7 +655,6 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - In-process jobs only — duplicate execution if multiple instances run (the hold expiry job is safe with several thanks to `SKIP LOCKED`; the outbox relay is not); job intervals hardcoded in the Composition Root; no job timeout
 - Outbox relay polls every 5s; duplicate delivery possible if `markPublished` fails after a successful publish
 - `eventId` is on every event, but consumers have no dedupe store yet
-- `booking-cancelled` is published but has no consumer and no shared contract type, so its queue only grows. Next step: add `BookingCancelledEvent` to `packages/contracts`, validate it in a `bookingCancelledConsumer` in `flight-notifier` (same shape as `bookingCreatedConsumer`, with its own DLQ), then drain the queue
 - Dead-letter queues are inspected manually — no auto-retry or alerting; no outbox monitoring
 - `/ready` checks Postgres only (`SELECT 1`), not RabbitMQ
 - Transactions are local to `booking_db`; no nested transactions (they throw `NestedTransactionError`); no cross-service transactions

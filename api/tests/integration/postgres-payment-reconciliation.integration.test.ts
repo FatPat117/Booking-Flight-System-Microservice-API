@@ -34,6 +34,7 @@ import { createFakePaymentGateway, type FakePaymentGateway } from "../fakes/in-m
 import { nextBookingReference } from "../fixtures/bookings.js";
 import { makeFlight } from "../fixtures/flights.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
+import { assertGlobalInvariants } from "./invariants.js";
 
 /**
  * Day 49C — payment failures, on Postgres (Decision 15, ADR-010).
@@ -204,17 +205,15 @@ const FINAL_RESPONSE: Record<string, number> = {
  * - money was taken for a payment exactly when it is SUCCEEDED with its
  *   booking CONFIRMED, or REFUNDED, or REFUND_FAILED (reported for a person);
  *   given back exactly when REFUNDED. No payment is left in flight.
- * - the provider charged and refunded each payment id at most once, and
- *   never one the database does not know.
- * - a booking is CONFIRMED exactly when it has a SUCCEEDED payment; seats
- *   are BOOKED exactly for CONFIRMED bookings, HELD for HELD ones.
+ * - a booking is CONFIRMED exactly when it has a SUCCEEDED payment.
+ * - everything assertGlobalInvariants checks (invariants.ts).
  * - every key that started a payment (and was not cleaned up) is COMPLETED
- *   with the response its payment's final state means.
+ *   with the response its payment's final state means — except a payment
+ *   refunded because its owner cancelled the paid booking (Day 50): its key
+ *   keeps the 201 it answered when the payment succeeded.
  */
 async function assertMoneyInvariants(gateway: FakePaymentGateway) {
   const { charged, refunded } = gateway.ledger;
-  assert.equal(new Set(charged).size, charged.length, "a payment id was charged twice");
-  assert.equal(new Set(refunded).size, refunded.length, "a payment id was refunded twice");
 
   const payments = (await dataSource.query(
     `SELECT p."id", p."status", b."status" AS "bookingStatus",
@@ -254,12 +253,15 @@ async function assertMoneyInvariants(gateway: FakePaymentGateway) {
 
     if (payment.keyStatus !== null) {
       assert.equal(payment.keyStatus, "COMPLETED", where);
-      assert.equal(payment.responseStatus, FINAL_RESPONSE[payment.status], where);
+      const paidThenCancelled =
+        payment.responseStatus === 201 &&
+        payment.bookingStatus === "CANCELLED" &&
+        (payment.status === "REFUNDED" || payment.status === "REFUND_FAILED");
+      if (!paidThenCancelled) {
+        assert.equal(payment.responseStatus, FINAL_RESPONSE[payment.status], where);
+      }
     }
   }
-
-  const known = new Set(payments.map(({ id }) => id));
-  assert.ok(charged.every((id) => known.has(id)), "the provider charged an unknown payment");
 
   assert.equal(
     await count(
@@ -270,17 +272,9 @@ async function assertMoneyInvariants(gateway: FakePaymentGateway) {
     0,
     "CONFIRMED disagrees with having a SUCCEEDED payment",
   );
-  assert.equal(
-    await count(
-      `SELECT count(*)::int AS "count" FROM "flight_seats" s
-       LEFT JOIN "bookings" b ON b."id" = s."booking_id"
-       WHERE NOT ((s."status" = 'AVAILABLE' AND s."booking_id" IS NULL)
-               OR (s."status" = 'HELD' AND b."status" = 'HELD')
-               OR (s."status" = 'BOOKED' AND b."status" = 'CONFIRMED'))`,
-    ),
-    0,
-    "a seat's status disagrees with its booking's",
-  );
+  // Seats, passengers, fare classes, each id charged and refunded once, and
+  // the money kept against the paid bookings: the shared checks (Day 50).
+  await assertGlobalInvariants(dataSource, gateway.ledger);
 }
 
 before(async () => {
@@ -453,6 +447,74 @@ test("Scenario 6 — a refund that cannot succeed is REFUND_FAILED, never retrie
     await count(`SELECT count(*)::int AS "count" FROM "audit_logs" WHERE "action" = 'PAYMENT_REFUND_FAILED'`),
     1,
   );
+  await assertMoneyInvariants(gateway);
+});
+
+// ---- Cancelling a paid booking (Day 50, Decision 16) ----
+
+/** Before the fixture flight's 24 h window closes (it departs in 2027). */
+const CANCEL_AT = new Date(PAY_AT.getTime() + 5 * MINUTE_MS);
+
+test("Cancel a paid booking — the cancel calls no gateway and leaves REFUND_PENDING; the job refunds it exactly once", async () => {
+  const clock = { now: PAY_AT };
+  const gateway = createFakePaymentGateway();
+  const app = runtime(gateway, clock, memoryLogger().logger);
+  const bookingId = await heldBooking();
+  assert.equal(statusOfResult(await app.pay(bookingId)), "201");
+
+  clock.now = CANCEL_AT;
+  const cancelled = await app.cancel(bookingId);
+
+  assert.equal(cancelled.outcome, "cancelled");
+  assert.equal(await bookingStatus(bookingId), "CANCELLED");
+  assert.equal((await paymentOf(bookingId)).status, "REFUND_PENDING");
+  assert.deepEqual(gateway.refunds, []);
+
+  assert.equal((await app.reconcile()).refunded, 1);
+  assert.equal((await app.reconcile()).refunded, 0);
+  assert.equal((await paymentOf(bookingId)).status, "REFUNDED");
+  assert.equal(gateway.ledger.refunded.length, 1);
+  assert.equal(
+    await count(`SELECT count(*)::int AS "count" FROM "flight_seats" WHERE "booking_id" IS NOT NULL`),
+    0,
+  );
+  await assertMoneyInvariants(gateway);
+});
+
+test("Fault injection — the process stops right after the cancel commits, and the first refund attempt dies too: a new process's job still refunds it, once", async () => {
+  const clock = { now: PAY_AT };
+  let refundCrashes = true;
+  const gateway = createFakePaymentGateway({
+    onRefund: () => {
+      if (refundCrashes) {
+        refundCrashes = false;
+        throw new Error("process stopped during refund");
+      }
+    },
+  });
+  const bookingId = await heldBooking();
+  const first = runtime(gateway, clock, memoryLogger().logger);
+  await first.pay(bookingId);
+  clock.now = CANCEL_AT;
+  await first.cancel(bookingId);
+  // The api that cancelled is gone; nothing in memory carries the refund.
+
+  const { logger, entries } = memoryLogger();
+  const restarted = runtime(gateway, clock, logger);
+  assert.equal((await restarted.reconcile()).failed, 1);
+  assert.equal((await paymentOf(bookingId)).status, "REFUND_PENDING");
+  assert.deepEqual(
+    entries.filter(({ level }) => level === "error").map(({ message }) => message),
+    ["payment_reconciliation_failed"],
+  );
+
+  // The claim's lease keeps it from the next run until it runs out.
+  assert.equal((await restarted.reconcile()).refunded, 0);
+  clock.now = new Date(CANCEL_AT.getTime() + RECONCILE_AFTER_MS);
+  assert.equal((await restarted.reconcile()).refunded, 1);
+
+  assert.equal((await paymentOf(bookingId)).status, "REFUNDED");
+  assert.equal(gateway.ledger.refunded.length, 1);
   await assertMoneyInvariants(gateway);
 });
 

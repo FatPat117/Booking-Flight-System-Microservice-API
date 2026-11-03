@@ -63,7 +63,7 @@ type ReconcilePaymentsDependencies = {
   generateOutboxId: () => string;
   getRequestId: () => string | undefined;
   getCurrentTime: () => Date;
-  /** Gateway timeout + PAYMENT_RECONCILIATION_MARGIN_MS: the lease. */
+  /** Gateway timeout + reconciliation margin (AppConfig): the lease. */
   leaseMs: number;
   batchSize: number;
   maxBatches: number;

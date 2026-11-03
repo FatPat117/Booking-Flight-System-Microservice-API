@@ -7,6 +7,7 @@ import { createCancelBooking } from "../../src/bookings/cancel-booking.js";
 import { createPostgresBookingRepository } from "../../src/bookings/postgres/postgres-booking-repository.js";
 import { createPostgresFlightRepository } from "../../src/flights/postgres/postgres-flight-repository.js";
 import { createPostgresOutboxRepository } from "../../src/outbox/postgres/postgres-outbox-repository.js";
+import { createPostgresPaymentRepository } from "../../src/payments/postgres/postgres-payment-repository.js";
 import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { createPostgresTransactionRunner } from "../../src/transactions/postgres-transaction-runner.js";
@@ -33,6 +34,7 @@ function makeFlight(overrides: Partial<Flight> = {}): Flight {
 function createUseCase() {
   return createCancelBooking({
     bookingRepository: createPostgresBookingRepository(dataSource),
+    paymentRepository: createPostgresPaymentRepository(dataSource),
     auditRecorder: createPostgresAuditRecorder(dataSource),
     outboxRepository: createPostgresOutboxRepository(dataSource),
     transactionRunner: createPostgresTransactionRunner(dataSource),
@@ -81,11 +83,10 @@ test("cancelled then already-cancelled: seat count increases by exactly 1, no ex
   const cancelBooking = createUseCase();
 
   const first = await cancelBooking(booking.id, OWNER_SCOPE, OWNER_ACTOR);
-  assert.deepEqual(first, {
-    outcome: "cancelled",
-    bookingId: booking.id,
-    flightId: flight.id,
-  });
+  assert.equal(first.outcome, "cancelled");
+  assert.equal(first.outcome === "cancelled" && first.booking.id, booking.id);
+  assert.equal(first.outcome === "cancelled" && first.booking.status, "CANCELLED");
+  assert.equal(first.outcome === "cancelled" && first.refund, null);
 
   const afterFirst = await flightRepository.findById(flight.id);
   assert.equal(afterFirst?.availableSeats, 1);

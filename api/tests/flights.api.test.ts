@@ -186,6 +186,7 @@ function createAppWithRepository(
     openFlight,
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
+    changeSeat: async () => ({ outcome: "not-found" as const }),
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),

@@ -8,7 +8,7 @@ import { createTypeOrmUserRepository } from "../../src/users/typeorm-user-reposi
 import { DuplicateEmailError } from "../../src/users/user-repository.js";
 
 /**
- * Runs against the real identity_db Postgres container. Day 42: identity's
+ * Runs against identity_test (Day 50; identity_db before), on the real Postgres container. Day 42: identity's
  * first test touching a real database — previously only faked via an
  * in-memory UserRepository (login.test.ts, register.test.ts).
  */

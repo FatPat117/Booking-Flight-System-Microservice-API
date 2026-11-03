@@ -125,14 +125,49 @@ export type ExpiredHold = Readonly<{
 }>;
 
 /**
+ * - cancelled: with what the booking-cancelled event needs; `seats` are the
+ *   codes it released, (row, letter) order.
  * - expired: the booking is EXPIRED, or still HELD with a lapsed hold
  *   (BR-BOOK-10). Nothing was written: the expiry job ends it (Decision 12).
+ * - cancellation-window-closed: CONFIRMED and departure is 24 h away or less
+ *   (BR-BOOK-06); `cancellableUntil` is departure − 24 h. Nothing was written.
  */
 export type CancelBookingRepositoryResult =
-  | { outcome: "cancelled"; flightId: string }
+  | {
+      outcome: "cancelled";
+      flightId: string;
+      reference: string;
+      seats: readonly string[];
+    }
   | { outcome: "already-cancelled" }
   | { outcome: "expired" }
+  | { outcome: "cancellation-window-closed"; cancellableUntil: string }
   | { outcome: "not-found" };
+
+/**
+ * A seat change (US-BOOK-06, BR-BOOK-07, Decision 16). Nothing is written
+ * unless the outcome is `changed`.
+ * - unchanged: the passenger already sits there ("set the seat to X" is
+ *   naturally idempotent).
+ * - not-found: no such booking in the scope (BR-AUTH-02);
+ *   passenger-not-found: the booking has no passenger at that position.
+ * - not-changeable: the booking is not CONFIRMED.
+ * - sales-closed: the flight is not on sale (effective OPEN, BR-FLT-06).
+ * - unknown-seat: no such seat on this flight.
+ * - fare-class-mismatch: the target is in another fare class.
+ * - seat-unavailable: the target is held or booked by anyone, this booking
+ *   included.
+ */
+export type ChangeSeatResult =
+  | { outcome: "changed"; from: string; to: string }
+  | { outcome: "unchanged" }
+  | { outcome: "not-found" }
+  | { outcome: "passenger-not-found" }
+  | { outcome: "not-changeable" }
+  | { outcome: "sales-closed" }
+  | { outcome: "unknown-seat" }
+  | { outcome: "fare-class-mismatch"; seatFareClass: FareClass; targetFareClass: FareClass }
+  | { outcome: "seat-unavailable" };
 
 /**
  * - not-payable: not HELD, or HELD with a lapsed hold (BR-BOOK-10), or not
@@ -204,21 +239,45 @@ export type BookingRepository = Readonly<{
     request: BookingPageRequest,
   ): Promise<BookingPage>;
   /**
-   * CONFIRMED, or HELD with a hold still valid at `now` (`holdExpiresAt >
-   * now`, BR-BOOK-10) → CANCELLED, only inside the scope (OCC), and release
-   * every seat of the booking (AVAILABLE, no booking) in the same statement —
-   * so only the call that wins the transition releases them. The deadline is
-   * checked in the statement itself, never by trusting that the expiry job
-   * has run.
+   * CONFIRMED with departure more than 24 h away at `now` (BR-BOOK-06), or
+   * HELD with a hold still valid at `now` (`holdExpiresAt > now`,
+   * BR-BOOK-10) → CANCELLED, only inside the scope (OCC), and release every
+   * seat of the booking (AVAILABLE, no booking) in the same statement — so
+   * only the call that wins the transition releases them. Both deadlines are
+   * checked in the statement itself, never by a read before it or by
+   * trusting that the expiry job has run; departure is read under a share
+   * lock on the flight, so it cannot change between the check and the write.
    *
    * CANCELLED answers already-cancelled; EXPIRED or a lapsed HELD answers
-   * expired. Seats are locked in (row, letter) order, like expireDueHolds.
+   * expired; a CONFIRMED one inside 24 h, cancellation-window-closed. Seats
+   * are locked in (row, letter) order, like expireDueHolds. The payment is
+   * not this port's: CancelBooking moves it in the same transaction.
    */
   cancel(
     bookingId: string,
     scope: BookingAccessScope,
     now: Date,
   ): Promise<CancelBookingRepositoryResult>;
+  /**
+   * Move the passenger at `position` (1-based) to `seat`, inside the scope:
+   * their current seat becomes AVAILABLE with no booking, the target BOOKED
+   * for this booking, and their display copy follows — all or nothing. The
+   * price snapshot is not touched: same fare class only (BR-BOOK-07).
+   *
+   * Locks, in the global order (domain-model lock-order table): the flight
+   * `FOR SHARE` and the booking `FOR UPDATE` (so it serialises with cancel),
+   * then both seats together in (row, letter) order — never "own seat
+   * first", or a swap A→B racing B→A would deadlock. The target's status and
+   * fare class are read under that lock. Atomic on its own, like create():
+   * inside a TransactionRunner it joins that transaction.
+   */
+  changeSeat(
+    bookingId: string,
+    position: number,
+    seat: SeatPosition,
+    scope: BookingAccessScope,
+    now: Date,
+  ): Promise<ChangeSeatResult>;
   /**
    * The expiry job's batch (Decision 12): up to `limit` HELD bookings whose
    * hold has lapsed at `now` — `holdExpiresAt <= now` (BR-BOOK-10), oldest

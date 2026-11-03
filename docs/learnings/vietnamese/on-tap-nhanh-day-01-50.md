@@ -1,8 +1,8 @@
-# Ôn tập nhanh: Day 1 → Day 49C
+# Ôn tập nhanh: Day 1 → Day 50
 
 > Sổ tay tiếng Việt để đọc lại nhanh. Mỗi mục gồm: **vấn đề → cách xử lý → vì sao**, kèm đường dẫn tới code thật.
 > Các note tiếng Anh khác trong `docs/learnings/` đi sâu từng chủ đề; file này là bản đồ tổng.
-> Cập nhật đến: **Day 49C** (2026-10-30). Số test hiện tại: api unit 494, integration 199 (trên `booking_test`), notifier 16, identity 12.
+> Cập nhật đến: **Day 50** (2026-11-03). Số test hiện tại: api unit 532, integration 234 (trên `booking_test`), notifier 19, identity 12 + integration 7 (trên `identity_test`).
 
 ---
 
@@ -100,6 +100,7 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 | 49A | Giá vé: `Money`, giá theo hạng, chụp giá lúc giữ ghế | Tiền là số nguyên đồng (không ×100); `bigint` về JS là **chuỗi**; câu giữ ghế đọc giá `FOR SHARE`; CTE không ai đọc thì **không chạy** (không khoá) |
 | 49B | Thanh toán giả lập + Idempotency-Key, `HELD → CONFIRMED` | Gọi gateway **ngoài** transaction (3 pha); thua race thì **ghi `REFUND_PENDING` rồi mới hoàn tiền**; key claim bằng `ON CONFLICT DO NOTHING`; `jsonb` **đổi thứ tự key** → lưu response bằng `json` |
 | 49C | Lỗi thanh toán: kết quả không rõ, đối soát, dọn key; DB test riêng | Ba kết quả: thành công / từ chối / **không rõ** — không rõ thì **không bao giờ** `FAILED`, trả `202`; job đối soát **charge lại cùng `paymentId`**; `next_attempt_at` = ngưỡng tuổi + lease + backoff; một pha 3 dùng chung; refund chỉ ở job, 5 lần rồi `REFUND_FAILED`; test chạy trên `booking_test` có hàng rào |
+| 50 | Huỷ trong 24 h + hoàn tiền; đổi ghế | Mốc `departure_at − 24h > now` trong câu huỷ (đúng 24 h là đóng); huỷ đã trả tiền → `SUCCEEDED → REFUND_PENDING` **cùng transaction**, job đối soát hoàn; đổi ghế `PUT` "đặt thành X" (idempotent tự nhiên), khoá **hai ghế theo (row, letter)**; race test lộ lỗi **snapshot của câu lệnh** trong câu huỷ cũ; hàm bất biến toàn cục được chứng minh bắt dữ liệu hỏng |
 
 ---
 
@@ -280,6 +281,9 @@ Lỗi thanh toán và đối soát (Day 49C, Decision 15, ADR-010):
 20. `catch` chung quanh lời gọi gateway biến mọi lỗi thành `FAILED` → khách trả lại → trừ hai lần. Kết quả không rõ phải là một **giá trị riêng** (Day 49C).
 21. Job gọi gateway tuần tự trong một lô 20 payment có thể chạy 20 × timeout, **vượt lease** của payment cuối → instance khác lấy lại. Gọi song song trong lô (Day 49C).
 22. Trong zsh, `set -- $chuoi` **không** tách từ như bash → script e2e gửi key có dấu cách (Day 49C).
+23. READ COMMITTED: một câu lệnh đọc **snapshot lúc nó bắt đầu**. Câu `UPDATE … ` chờ khoá xong vẫn tìm các dòng **khác** (ghế) theo snapshot cũ → huỷ chờ một lần đổi ghế đã nhả ghế cũ, bỏ sót ghế mới. Khoá dòng cha bằng **câu riêng trước** (Day 50).
+24. Khoá trước "cho chắc" mà không có điều kiện → job `SKIP LOCKED` bỏ qua dòng đó, hành vi cũ đổi (race test C của Day 48B bắt được, Day 50).
+25. Fake flight store của test HTTP tạo ghế toàn ECONOMY, bỏ qua layout máy bay vừa đăng ký → không test được khác hạng ở tầng HTTP; dùng contract + e2e (Day 50).
 
 ---
 
@@ -305,11 +309,16 @@ Lỗi thanh toán và đối soát (Day 49C, Decision 15, ADR-010):
 18. Ngưỡng tuổi, lease và chuyển trạng thái có điều kiện: mỗi cái chặn được gì, thiếu cái nào thì sao?
 19. Vì sao timeout tối đa 20 s mà không phải 30 s?
 20. Xoá Idempotency-Key sau 24 h có mở ra khả năng trừ tiền hai lần không? Cái gì chặn?
+21. Đúng 24 h trước giờ bay còn huỷ được không? Vì sao mốc phải nằm trong câu huỷ chứ không ở một câu đọc trước?
+22. Vì sao huỷ booking đã trả tiền không gọi refund ngay trong request?
+23. Vì sao đổi ghế khoá hai ghế theo (row, letter) chứ không "ghế của mình trước"? A' đo được gì?
+24. Vì sao đổi ghế không cần Idempotency-Key mà thanh toán thì cần?
+25. Snapshot của một câu lệnh gây lỗi gì ở câu huỷ cũ khi có đổi ghế? Sửa thế nào mà không làm hỏng job hết hạn?
 
 ---
 
 ## 5. Tiếp theo
 
-**Day 50** (phase D bước 7): chính sách huỷ booking `CONFIRMED` (không huỷ trong vòng 24 h trước giờ bay, BR-BOOK-06) và đổi ghế cùng hạng khi chuyến còn `OPEN` (BR-BOOK-07).
+**Day 51** (phase D bước 8): tìm kiếm chuyến bay (tuyến, khoảng ngày, số hành khách, sắp xếp, phân trang) — số liệu OFFSET sâu đo ở Day 47 trở thành một quyết định thật.
 
-Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [payments-and-idempotency-keys.md](../payments-and-idempotency-keys.md) (có mục Day 49C), [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008/009/010, `.cursor/progress/DAY-*.md`.
+Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [payments-and-idempotency-keys.md](../payments-and-idempotency-keys.md) (có mục Day 49C), [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008/009/010, domain-model Decision 16, `.cursor/progress/DAY-*.md`.

@@ -28,7 +28,8 @@ validate input (ngoài transaction)  →  transactionRunner.run(
 | `GET /api/bookings` | user/admin | ListBookings | 200 | 422 | [bookings](./bookings.md) |
 | `GET /api/bookings/:id` | user/admin | GetBooking | 200 | 404 | [bookings](./bookings.md) |
 | `GET /api/bookings/by-reference/:ref` | user/admin | GetBookingByReference | 200 | 404 | [bookings](./bookings.md) |
-| `DELETE /api/bookings/:id` | user (chủ) | CancelBooking | 204 | 404, 409 `BOOKING_ALREADY_CANCELLED` / `BOOKING_EXPIRED` | [bookings](./bookings.md) |
+| `DELETE /api/bookings/:id` | user (chủ) | CancelBooking | 200 `{ booking, refund }` | 404, 409 `BOOKING_ALREADY_CANCELLED` / `BOOKING_EXPIRED` / `CANCELLATION_WINDOW_CLOSED` | [bookings](./bookings.md) |
+| `PUT /api/bookings/:id/passengers/:position/seat` | user (chủ) | ChangeSeat | 200 | 404, 409 `SEAT_UNAVAILABLE` / `FARE_CLASS_MISMATCH` / `BOOKING_NOT_CHANGEABLE` / `SALES_CLOSED`, 422 | [bookings](./bookings.md) |
 | `POST /api/bookings/:id/payments` | user (chủ) | PayForBooking | 201 (phát lại: + `Idempotent-Replayed`) | 402 `PAYMENT_DECLINED`; 409 `BOOKING_NOT_PAYABLE` / `IDEMPOTENCY_KEY_IN_PROGRESS` / `PAYMENT_IN_PROGRESS`; 422 `IDEMPOTENCY_KEY_REQUIRED` / `IDEMPOTENCY_KEY_REUSED` / `PAYMENT_AMOUNT_MISMATCH`; 404; 403 admin | [bookings](./bookings.md) |
 | (job 60 s, không route) | system | ExpireHolds | — | lô lỗi → rollback, log `job_failed` | [bookings](./bookings.md), [background](./background-jobs-va-consumer.md) |
 | `POST /api/airports` | admin | RegisterAirport | 201 | 422, 409 `AIRPORT_ALREADY_EXISTS` | [reference-data](./reference-data.md) |

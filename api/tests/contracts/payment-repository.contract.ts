@@ -248,6 +248,47 @@ export function runPaymentRepositoryContract(
     await assert.rejects(repository.markSucceeded(second.id, "ch_2", LATER));
   });
 
+  test(name("cancelling a paid booking moves its SUCCEEDED payment to REFUND_PENDING, due now from attempt 0, keeping the provider reference (Day 50)"), async () => {
+    const { repository, seedBooking } = await setup();
+    const bookingId = await seedBooking();
+    const declined = newPayment(bookingId);
+    await repository.start(declined);
+    await repository.markFailed(declined.id, "card_declined", NOW);
+    const paid = newPayment(bookingId);
+    await repository.start(paid);
+    await repository.markSucceeded(paid.id, "ch_1", NOW);
+
+    const moved = await repository.markRefundPendingForCancelledBooking(bookingId, LATER);
+
+    const expected = {
+      ...paid,
+      ...finished,
+      status: "REFUND_PENDING",
+      providerReference: "ch_1",
+      failureReason: null,
+      nextAttemptAt: LATER.toISOString(),
+      updatedAt: LATER.toISOString(),
+    };
+    assert.deepEqual(moved, expected);
+    assert.deepEqual(await repository.findById(paid.id), expected);
+    // Only the SUCCEEDED one: a declined attempt has nothing to refund.
+    assert.equal((await repository.findById(declined.id))?.status, "FAILED");
+  });
+
+  test(name("a booking with no SUCCEEDED payment has nothing to refund: undefined, nothing changes"), async () => {
+    const { repository, seedBooking } = await setup();
+    const unpaid = await seedBooking();
+    const processing = newPayment(await seedBooking());
+    await repository.start(processing);
+
+    assert.equal(await repository.markRefundPendingForCancelledBooking(unpaid, LATER), undefined);
+    assert.equal(
+      await repository.markRefundPendingForCancelledBooking(processing.bookingId, LATER),
+      undefined,
+    );
+    assert.equal((await repository.findById(processing.id))?.status, "PROCESSING");
+  });
+
   test(name("findById of an unknown payment is undefined"), async () => {
     const { repository } = await setup();
 

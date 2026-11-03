@@ -72,22 +72,46 @@ mang giá **lúc chạy migration**.
 **Code:** `api/src/bookings/cancel-booking.ts`, `cancel()` trong repository
 
 - id sai định dạng → 404.
-- `now` đọc **một lần** trước transaction (Day 48B), dùng cho cả quyết định lẫn thời gian audit.
-- Transaction: **một câu SQL** — `cancelled` (`UPDATE … WHERE id AND (status = 'CONFIRMED' OR (status = 'HELD' AND hold_expires_at > $now))` + scope chủ sở hữu), rồi `locked` (khoá ghế `ORDER BY flight_id, row, letter`) và `released` (nhả **mọi** ghế đã khoá). Chỉ người thắng mới nhả ghế.
-- 0 dòng → câu đọc phụ (**cũng có scope**) phân loại qua `classifyNotCancelled`: không có → `not-found`; `CANCELLED` → `already-cancelled`; `EXPIRED` hoặc `HELD` quá hạn → `expired`; còn huỷ được mà không khớp → **throw** (SQL và luật lệch nhau là bug).
-- Audit `BOOKING_CANCELLED`, outbox `booking-cancelled`.
+- `now` đọc **một lần** trước transaction, dùng cho cả quyết định lẫn thời gian audit.
+- Transaction, theo thứ tự khoá:
+  1. **Câu khoá trước** (Day 50): flight `FOR SHARE` + booking `FOR UPDATE`, chỉ khi booking huỷ được (cùng điều kiện câu huỷ).
+  2. **Câu huỷ**: `UPDATE … WHERE (CONFIRMED AND departure_at − 24h > now) OR (HELD AND hold_expires_at > now)` + scope, rồi nhả **mọi** ghế theo `ORDER BY flight_id, row, letter`, trả về các ghế đã nhả.
+  3. Payment `SUCCEEDED → REFUND_PENDING` (`next_attempt_at = now`) nếu có — job đối soát hoàn tiền.
+- 0 dòng → câu đọc phụ (**có scope**) qua `classifyNotCancelled`.
+- Audit `BOOKING_CANCELLED` (+ `refundPaymentId`), `PAYMENT_REFUND_PENDING` nếu đã trả; outbox `booking-cancelled` (contract + consumer từ Day 50, có `refund`).
 
 | Outcome | HTTP |
 |---|---|
-| `cancelled` | 204 |
-| `already-cancelled` | 409 `BOOKING_ALREADY_CANCELLED` (cố ý, để phân biệt lần đầu với lần lặp) |
-| `expired` (hold đã quá hạn, job quét hay chưa đều vậy; không ghi gì) | 409 `BOOKING_EXPIRED` |
-| `not-found` (gồm booking của người khác, kể cả đã quá hạn) | 404 `BOOKING_NOT_FOUND` |
+| `cancelled` | 200 `{ booking, refund: { paymentId, amount, status: "REFUND_PENDING" } \| null }` (204 trước Day 50) |
+| `already-cancelled` | 409 `BOOKING_ALREADY_CANCELLED` |
+| `expired` (hold đã quá hạn) | 409 `BOOKING_EXPIRED` |
+| `cancellation-window-closed` (`CONFIRMED`, còn ≤ 24 h) | 409 `CANCELLATION_WINDOW_CLOSED`, `details[0].message` = `cancellableUntil` |
+| `not-found` (gồm booking của người khác) | 404 `BOOKING_NOT_FOUND` |
 
-`HELD` huỷ được **tới khi hết hạn** (BR-BOOK-10: còn hiệu lực khi `hold_expires_at > now`); đúng
-thời điểm hạn là đã hết. Luật 24 giờ cho `CONFIRMED` (BR-BOOK-06) chưa làm (bước 7).
-Admin huỷ → 403 (admin chỉ huỷ qua huỷ chuyến bay, sau này).
-Sau huỷ, hành khách vẫn giữ bản sao mã ghế làm lịch sử.
+Biên: đúng `departure_at − 24h` là **đã đóng** (giống BR-BOOK-10). `HELD` chỉ bị giới hạn bởi hạn giữ.
+Admin huỷ → 403. Sau huỷ, hành khách vẫn giữ bản sao mã ghế làm lịch sử.
+
+## ChangeSeat — `PUT /api/bookings/:id/passengers/:position/seat` (role `user`, chủ sở hữu, Day 50)
+
+**Code:** `api/src/bookings/change-seat.ts`, `changeSeat()` trong repository. Body `{ "seat": "14C" }`.
+
+- `position` không phải "1"–"9" → 404 `PASSENGER_NOT_FOUND`; body sai → 422.
+- Transaction: flight `FOR SHARE` + booking `FOR UPDATE` → passenger → **hai ghế** `ORDER BY row, letter FOR UPDATE` → kiểm tra dưới khoá → ghi (ghế cũ `AVAILABLE`, ghế mới `BOOKED`, bản sao trên passenger).
+- Giá chụp và tổng tiền **không đổi**. Audit `BOOKING_SEAT_CHANGED` chỉ khi thật sự đổi. Không có event.
+
+| Outcome (theo thứ tự kiểm tra) | HTTP |
+|---|---|
+| `not-found` | 404 `BOOKING_NOT_FOUND` |
+| `passenger-not-found` | 404 `PASSENGER_NOT_FOUND` |
+| `not-changeable` (không phải `CONFIRMED`) | 409 `BOOKING_NOT_CHANGEABLE` |
+| `unchanged` (đã ngồi ghế đó) | 200, không ghi gì |
+| `sales-closed` | 409 `SALES_CLOSED` |
+| `unknown-seat` | 422 `UNKNOWN_SEAT` |
+| `fare-class-mismatch` | 409 `FARE_CLASS_MISMATCH` |
+| `seat-unavailable` | 409 `SEAT_UNAVAILABLE` |
+| `changed` | 200 booking |
+
+`PUT` "đặt thành X" → idempotent tự nhiên, không cần Idempotency-Key.
 
 ## GetBooking — `GET /api/bookings/:id`
 

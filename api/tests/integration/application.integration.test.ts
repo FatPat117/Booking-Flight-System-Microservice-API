@@ -24,6 +24,7 @@ const testConfigBase = {
   postgres: parsePostgresConfig(process.env),
   paymentSimulatorDelayMs: 0,
   paymentGatewayTimeoutMs: 10_000,
+  paymentReconciliationMarginMs: 30_000,
 } as const;
 
 test("createApplication wires use cases, migrates the real database, and closes cleanly", async () => {

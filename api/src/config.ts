@@ -1,5 +1,6 @@
 import type { PostgresConfig } from "./postgres/config.js";
 import { DEFAULT_BOOKING_DATABASE_NAME } from "./postgres/config.js";
+import { PAYMENT_START_MARGIN_MS } from "./payments/pay-for-booking.js";
 
 export type AppConfig = Readonly<{
   port: number;
@@ -29,6 +30,13 @@ export type AppConfig = Readonly<{
    * reconciliation's 30 s margin it stays under BR-PAY-07's 60 s (Decision 15).
    */
   paymentGatewayTimeoutMs: number;
+  /**
+   * Day 50 — how long after the gateway timeout reconciliation may take a
+   * PROCESSING payment, room for the live request's phase 3 to commit first.
+   * Also the lease beyond the timeout. Default 30 s; checked against the
+   * timeout at startup (checkPaymentTimings).
+   */
+  paymentReconciliationMarginMs: number;
 }>;
 
 type Environment = Record<string, string | undefined>;
@@ -54,6 +62,10 @@ export function parseConfig(environment: Environment): AppConfig {
   const paymentGatewayTimeoutMs = parsePaymentGatewayTimeoutMs(
     environment.PAYMENT_GATEWAY_TIMEOUT_MS,
   );
+  const paymentReconciliationMarginMs = parsePaymentReconciliationMarginMs(
+    environment.PAYMENT_RECONCILIATION_MARGIN_MS,
+  );
+  checkPaymentTimings(paymentGatewayTimeoutMs, paymentReconciliationMarginMs);
 
   return {
     port,
@@ -62,6 +74,7 @@ export function parseConfig(environment: Environment): AppConfig {
     postgres,
     paymentSimulatorDelayMs,
     paymentGatewayTimeoutMs,
+    paymentReconciliationMarginMs,
   };
 }
 
@@ -111,6 +124,62 @@ function parsePaymentGatewayTimeoutMs(raw: string | undefined): number {
   }
 
   return timeout;
+}
+
+const DEFAULT_PAYMENT_RECONCILIATION_MARGIN_MS = 30_000;
+
+function parsePaymentReconciliationMarginMs(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") {
+    return DEFAULT_PAYMENT_RECONCILIATION_MARGIN_MS;
+  }
+
+  const trimmed = raw.trim();
+  const margin = Number(trimmed);
+
+  if (!/^\d+$/.test(trimmed) || !Number.isSafeInteger(margin)) {
+    throw new Error(
+      "Invalid PAYMENT_RECONCILIATION_MARGIN_MS: expected a non-negative integer",
+    );
+  }
+
+  return margin;
+}
+
+/**
+ * The longest a live request needs between the gateway's answer and phase 3's
+ * commit: one short transaction. A generous bound, not a measurement (Day 49C
+ * e2e: phase 3 took milliseconds).
+ */
+export const PAYMENT_SETTLE_BUDGET_MS = 5_000;
+
+/**
+ * Decision 15 relies on two inequalities between the payment timings. Each is
+ * checked here, at startup, so a bad combination stops the app instead of
+ * double-charging or expiring a paid hold at runtime:
+ * - margin ≥ settle budget: the job takes a PROCESSING payment only after a
+ *   live request has had its whole timeout plus the time to commit phase 3,
+ *   and its lease outlasts one gateway call plus recording the result.
+ * - timeout + margin < BR-PAY-07's start margin: a payment whose request
+ *   died is reconciled while its hold is still valid, so the job can still
+ *   confirm it instead of refunding it.
+ */
+function checkPaymentTimings(timeoutMs: number, marginMs: number): void {
+  if (marginMs < PAYMENT_SETTLE_BUDGET_MS) {
+    throw new Error(
+      `Invalid payment timings: PAYMENT_RECONCILIATION_MARGIN_MS (${marginMs}) ` +
+        `must be at least the settle budget (${PAYMENT_SETTLE_BUDGET_MS} ms), ` +
+        "or reconciliation can take a payment a live request is still settling",
+    );
+  }
+
+  if (timeoutMs + marginMs >= PAYMENT_START_MARGIN_MS) {
+    throw new Error(
+      `Invalid payment timings: PAYMENT_GATEWAY_TIMEOUT_MS (${timeoutMs}) + ` +
+        `PAYMENT_RECONCILIATION_MARGIN_MS (${marginMs}) must be below the ` +
+        `BR-PAY-07 start margin (${PAYMENT_START_MARGIN_MS} ms), ` +
+        "or a paid hold can lapse before reconciliation reaches it",
+    );
+  }
 }
 
 function parsePostgresConfig(environment: Environment): PostgresConfig {

@@ -6,6 +6,7 @@ import type { AuditRecorder } from "../../src/audit/audit-recorder.js";
 import { createPostgresAuditRecorder } from "../../src/audit/postgres/postgres-audit-recorder.js";
 import type {
   BookingRepository,
+  CancelBookingRepositoryResult,
   ExpiredHold,
 } from "../../src/bookings/booking-repository.js";
 import { createCancelBooking } from "../../src/bookings/cancel-booking.js";
@@ -17,6 +18,7 @@ import { createExpireHolds } from "../../src/bookings/expire-holds.js";
 import { createPostgresBookingRepository } from "../../src/bookings/postgres/postgres-booking-repository.js";
 import { createPostgresFlightRepository } from "../../src/flights/postgres/postgres-flight-repository.js";
 import { createPostgresOutboxRepository } from "../../src/outbox/postgres/postgres-outbox-repository.js";
+import { createPostgresPaymentRepository } from "../../src/payments/postgres/postgres-payment-repository.js";
 import { parsePostgresConfig } from "../../src/postgres/config.js";
 import { createBookingDataSource } from "../../src/postgres/data-source.js";
 import { isDeadlockDetected } from "../../src/postgres/postgres-errors.js";
@@ -25,6 +27,7 @@ import { createPostgresTransactionRunner } from "../../src/transactions/postgres
 import { nextBookingReference } from "../fixtures/bookings.js";
 import { makeFlight } from "../fixtures/flights.js";
 import { insertFlightReferences, keepFirstSeats } from "./flight-references.js";
+import { assertGlobalInvariants } from "./invariants.js";
 
 /**
  * Hold expiry under real concurrency (Day 48B, Decision 12, BR-BOOK-10):
@@ -65,6 +68,7 @@ function createBookingAt(now: Date, bookingRepository?: BookingRepository) {
 function cancelBookingAt(now: Date, bookingRepository?: BookingRepository) {
   return createCancelBooking({
     bookingRepository: bookingRepository ?? createPostgresBookingRepository(dataSource),
+    paymentRepository: createPostgresPaymentRepository(dataSource),
     auditRecorder: createPostgresAuditRecorder(dataSource),
     outboxRepository: createPostgresOutboxRepository(dataSource),
     transactionRunner: createPostgresTransactionRunner(dataSource),
@@ -166,6 +170,7 @@ async function assertSeatsMatchBookings(flightId: string) {
   assert.ok(state);
   assert.equal(state.ownedByEnded, 0, "a seat still belongs to an ended booking");
   assert.equal(state.heldSeats, state.heldPassengers, "HELD seats ≠ passengers of HELD bookings");
+  await assertGlobalInvariants(dataSource);
   return state;
 }
 
@@ -558,10 +563,15 @@ test("Test E — the real cancel locks 12A before 12B: same interleaving, no dea
 
     assertNoDeadlock(settled);
     const [released, booked] = settled;
-    assert.deepEqual(released.status === "fulfilled" && released.value, {
-      outcome: "cancelled",
-      flightId,
-    });
+    const cancelled =
+      released.status === "fulfilled"
+        ? (released.value as CancelBookingRepositoryResult)
+        : undefined;
+    assert.equal(cancelled?.outcome, "cancelled");
+    assert.deepEqual(
+      cancelled?.outcome === "cancelled" && [cancelled.flightId, cancelled.seats],
+      [flightId, ["12A", "12B"]],
+    );
     // The hold went first through the gate and saw both seats still HELD.
     assert.equal(booked.status === "fulfilled" && booked.value.outcome, "seats-unavailable");
     assert.equal(await statusOf(holder), "CANCELLED");

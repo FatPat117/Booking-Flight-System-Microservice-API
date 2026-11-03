@@ -126,6 +126,7 @@ async function createRuntime(
 
   const cancelBooking = createCancelBooking({
     bookingRepository,
+    paymentRepository,
     auditRecorder,
     outboxRepository,
     transactionRunner,

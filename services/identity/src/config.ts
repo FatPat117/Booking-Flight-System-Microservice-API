@@ -18,10 +18,12 @@ type Environment = Record<string, string | undefined>;
 const DEFAULT_PORT = 3001;
 const DEFAULT_JWT_EXPIRES_IN = "1h";
 const MIN_JWT_SECRET_LENGTH = 32;
-/** Fixed, not env-driven — see docker/postgres-init/00-create-identity-db.sh.
- * POSTGRES_DB no longer means "identity_db": it now names the Postgres
- * container's own maintenance database, read only by the init scripts. */
-const IDENTITY_DATABASE_NAME = "identity_db";
+/**
+ * POSTGRES_DB does not name it: that is the Postgres container's own
+ * maintenance database, read only by the init scripts. IDENTITY_POSTGRES_DB
+ * exists for the integration tests (Day 50), which set identity_test.
+ */
+export const DEFAULT_IDENTITY_DATABASE_NAME = "identity_db";
 
 /**
  * Day 42: username/password are fail-fast (IDENTITY_POSTGRES_USER/PASSWORD,
@@ -48,7 +50,8 @@ export function parseIdentityConfig(environment: Environment): IdentityConfig {
         "IDENTITY_POSTGRES_PASSWORD",
         environment.IDENTITY_POSTGRES_PASSWORD,
       ),
-      database: IDENTITY_DATABASE_NAME,
+      database:
+        environment.IDENTITY_POSTGRES_DB?.trim() || DEFAULT_IDENTITY_DATABASE_NAME,
     },
     jwt: {
       secret: parseJwtSecret(environment.JWT_SECRET),

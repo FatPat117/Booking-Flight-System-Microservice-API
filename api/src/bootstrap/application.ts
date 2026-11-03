@@ -19,6 +19,10 @@ import {
   type CancelBooking,
 } from "../bookings/cancel-booking.js";
 import {
+  createChangeSeat,
+  type ChangeSeat,
+} from "../bookings/change-seat.js";
+import {
   createCreateBooking,
   type CreateBooking,
 } from "../bookings/create-booking.js";
@@ -69,7 +73,6 @@ import { createCleanupIdempotencyKeys } from "../idempotency/cleanup-idempotency
 import { createPostgresIdempotencyRepository } from "../idempotency/postgres/postgres-idempotency-repository.js";
 import {
   createPayForBooking,
-  PAYMENT_RECONCILIATION_MARGIN_MS,
   type PayForBooking,
 } from "../payments/pay-for-booking.js";
 import { createPostgresPaymentRepository } from "../payments/postgres/postgres-payment-repository.js";
@@ -120,6 +123,7 @@ export type Application = Readonly<{
   openFlight: OpenFlight;
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
+  changeSeat: ChangeSeat;
   payForBooking: PayForBooking;
   getBooking: GetBooking;
   getBookingByReference: GetBookingByReference;
@@ -173,7 +177,8 @@ export async function createApplication(
   const idempotencyKeyCleanupIntervalMs =
     options.idempotencyKeyCleanupIntervalMs ?? DEFAULT_IDEMPOTENCY_KEY_CLEANUP_INTERVAL_MS;
   /** How long after phase 1 a PROCESSING payment is reconciliation's; also the job's lease. */
-  const reconcileAfterMs = config.paymentGatewayTimeoutMs + PAYMENT_RECONCILIATION_MARGIN_MS;
+  const reconcileAfterMs =
+    config.paymentGatewayTimeoutMs + config.paymentReconciliationMarginMs;
 
   const dataSource = createBookingDataSource(config.postgres);
   await dataSource.initialize();
@@ -243,11 +248,21 @@ export async function createApplication(
 
   const cancelBooking = createCancelBooking({
     bookingRepository,
+    paymentRepository,
     auditRecorder,
     outboxRepository,
     transactionRunner,
     generateAuditId: () => crypto.randomUUID(),
     generateOutboxId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
+  });
+
+  const changeSeat = createChangeSeat({
+    bookingRepository,
+    auditRecorder,
+    transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
     getRequestId: () => getRequestContext()?.requestId,
     getCurrentTime: () => new Date(),
   });
@@ -399,6 +414,7 @@ export async function createApplication(
     openFlight,
     createBooking,
     cancelBooking,
+    changeSeat,
     payForBooking,
     getBooking,
     getBookingByReference,

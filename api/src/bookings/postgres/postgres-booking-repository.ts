@@ -27,6 +27,7 @@ import type {
   BookingRepository,
   BookingStatus,
   CancelBookingRepositoryResult,
+  ChangeSeatResult,
   CreateBookingRepositoryResult,
   ExpiredHold,
   HeldSeat,
@@ -438,6 +439,248 @@ function releaseSeatsOf(source: string): string {
   return updateSeatsOf(source, `"status" = 'AVAILABLE', "booking_id" = NULL`);
 }
 
+type LockedSeatRow = SeatPosition & {
+  status: string;
+  booking_id: string | null;
+  fare_class: string;
+};
+
+/**
+ * changeSeat's body, inside a transaction. Three reads, each a lock taken in
+ * the global order, then the writes:
+ * 1. The booking `FOR UPDATE` and its flight `FOR SHARE` (cancel takes the
+ *    same two). Out of scope reads as missing (BR-AUTH-02).
+ * 2. The passenger at `position`; its row is the booking's, already locked.
+ * 3. Both seats, current and target, `ORDER BY row, letter FOR UPDATE` —
+ *    the order holdChosenSeats and releaseSeatsOf lock seats in, whichever
+ *    of the two is "mine". The verdict reads their status and fare class
+ *    from these locked rows, never from an earlier read.
+ * Separate statements, not one: inside a single statement Postgres does not
+ * promise which CTE locks first, and here the order across tables matters.
+ */
+async function changeSeatInTransaction(
+  manager: EntityManager,
+  bookingId: string,
+  position: number,
+  target: SeatPosition,
+  scope: BookingAccessScope,
+  now: Date,
+): Promise<ChangeSeatResult> {
+  const [booking] = (await manager.query(
+    `SELECT booking."status", booking."flight_id", flight."status" AS "flight_status",
+            flight."departure_at"
+     FROM "bookings" booking
+     JOIN "flights" flight ON flight."id" = booking."flight_id"
+     WHERE booking."id" = $1
+       ${scope.kind === "owner" ? `AND booking."owner_account_id" = $2` : ""}
+     FOR UPDATE OF booking
+     FOR SHARE OF flight`,
+    scope.kind === "owner" ? [bookingId, scope.accountId] : [bookingId],
+  )) as Array<{
+    status: string;
+    flight_id: string;
+    flight_status: string;
+    departure_at: Date;
+  }>;
+
+  if (booking === undefined) {
+    return { outcome: "not-found" };
+  }
+
+  const passenger = await manager
+    .getRepository(BookingPassengerEntity)
+    .findOneBy({ bookingId, position });
+  if (passenger === null) {
+    return { outcome: "passenger-not-found" };
+  }
+  if (booking.status !== "CONFIRMED") {
+    return { outcome: "not-changeable" };
+  }
+  if (passenger.seatRow === null || passenger.seatLetter === null) {
+    // CHK_booking_passengers_seat: only a legacy CANCELLED booking lacks one.
+    throw new Error(`Passenger ${position} of CONFIRMED booking ${bookingId} has no seat`);
+  }
+
+  const current: SeatPosition = { row: passenger.seatRow, letter: passenger.seatLetter };
+  const from = formatSeatPosition(current);
+  const to = formatSeatPosition(target);
+  if (from === to) {
+    return { outcome: "unchanged" };
+  }
+  if (
+    !isBookable(
+      toStoredFlightStatus(booking.flight_status),
+      booking.departure_at.toISOString(),
+      now,
+    )
+  ) {
+    return { outcome: "sales-closed" };
+  }
+
+  const locked = (await manager.query(
+    `SELECT seat."row", seat."letter"::text AS "letter", seat."status",
+            seat."booking_id", seat."fare_class"
+     FROM "flight_seats" seat
+     WHERE seat."flight_id" = $1
+       AND (seat."row", seat."letter"::text) IN (($2::int, $3::text), ($4::int, $5::text))
+     -- The global lock order: what makes A→B and B→A queue, not deadlock.
+     ORDER BY seat."row", seat."letter"
+     FOR UPDATE`,
+    [booking.flight_id, current.row, current.letter, target.row, target.letter],
+  )) as LockedSeatRow[];
+
+  const bySeat = new Map(locked.map((row) => [formatSeatPosition(row), row]));
+  const own = bySeat.get(from);
+  const wanted = bySeat.get(to);
+  if (own === undefined || own.booking_id !== bookingId || own.status !== "BOOKED") {
+    // The display copy and the inventory disagree (Decision 11): a bug.
+    throw new Error(`Seat ${from} is not BOOKED for booking ${bookingId}`);
+  }
+  if (wanted === undefined) {
+    return { outcome: "unknown-seat" };
+  }
+  if (wanted.fare_class !== own.fare_class) {
+    return {
+      outcome: "fare-class-mismatch",
+      // CHK_flight_seats_fare_class guarantees the value set.
+      seatFareClass: own.fare_class as FareClass,
+      targetFareClass: wanted.fare_class as FareClass,
+    };
+  }
+  if (wanted.status !== "AVAILABLE") {
+    return { outcome: "seat-unavailable" };
+  }
+
+  // Free first, then take: CHK_flight_seats_booking holds row by row, and
+  // UQ_booking_passengers_seat sees the copy move to a seat no other
+  // passenger of this booking has (the target was AVAILABLE).
+  await manager.query(
+    `UPDATE "flight_seats" SET "status" = 'AVAILABLE', "booking_id" = NULL
+     WHERE "flight_id" = $1 AND "row" = $2 AND "letter" = $3`,
+    [booking.flight_id, current.row, current.letter],
+  );
+  await manager.query(
+    `UPDATE "flight_seats" SET "status" = 'BOOKED', "booking_id" = $4
+     WHERE "flight_id" = $1 AND "row" = $2 AND "letter" = $3`,
+    [booking.flight_id, target.row, target.letter, bookingId],
+  );
+  await manager.getRepository(BookingPassengerEntity).update(
+    { id: passenger.id },
+    { seatRow: target.row, seatLetter: target.letter },
+  );
+
+  return { outcome: "changed", from, to };
+}
+
+/**
+ * cancel()'s body, inside a transaction. Two statements, in the lock order
+ * of the domain-model table: the flight FOR SHARE and the booking FOR
+ * UPDATE first, then the cancel itself.
+ *
+ * The first statement exists for the seat change (Day 50, race test C). In
+ * READ COMMITTED a statement reads the snapshot taken when it started, and
+ * the cancel statement finds the booking's seats by booking_id in that
+ * snapshot. Started while a seat change held the booking, it would wait,
+ * then cancel the booking and release the seats the booking had *before*
+ * the change — the old seat, already free — leaving the new seat BOOKED
+ * for a cancelled booking. Taking the booking's lock in a statement of its
+ * own makes the cancel statement start after any change has committed, so
+ * it sees the seats as they are.
+ */
+async function cancelInTransaction(
+  manager: EntityManager,
+  bookingId: string,
+  scope: BookingAccessScope,
+  now: Date,
+): Promise<CancelBookingRepositoryResult> {
+  // Only a booking this call will cancel is locked: the same condition as
+  // the UPDATE below. A lapsed hold is left unlocked, so the expiry job's
+  // SKIP LOCKED sweep is not turned away by a cancel that will answer
+  // `expired` anyway (Day 48B race test C).
+  await manager.query(
+    `SELECT 1 FROM "bookings" booking
+     JOIN "flights" flight ON flight."id" = booking."flight_id"
+     WHERE booking."id" = $1
+       AND ((booking."status" = 'CONFIRMED'
+             AND flight."departure_at" - interval '24 hours' > $2)
+            OR (booking."status" = 'HELD' AND booking."hold_expires_at" > $2))
+       ${scope.kind === "owner" ? `AND booking."owner_account_id" = $3` : ""}
+     FOR UPDATE OF booking
+     FOR SHARE OF flight`,
+    scope.kind === "owner" ? [bookingId, now, scope.accountId] : [bookingId, now],
+  );
+
+  // One statement, two writes: the seats are released only for the row
+  // the first UPDATE actually cancelled, so a losing concurrent cancel
+  // or a concurrent expiry (the loser re-checks the WHERE after waiting
+  // and matches nothing) releases nothing either. `> $2` is the
+  // still-valid side of BR-BOOK-10 (expireDueHolds takes `<=`) and of
+  // BR-BOOK-06 (Day 50). `flight` share-locks the flight row before the
+  // booking, as the hold does, so a departure change waits for this
+  // cancel instead of slipping between its check and its write.
+  const ownerCondition =
+    scope.kind === "owner" ? `AND booking."owner_account_id" = $3` : "";
+  const rows = (await manager.query(
+    `WITH flight AS (
+       SELECT "id", "departure_at" FROM "flights"
+       WHERE "id" = (SELECT "flight_id" FROM "bookings" WHERE "id" = $1)
+       FOR SHARE
+     ), cancelled AS (
+       UPDATE "bookings" booking SET "status" = 'CANCELLED'
+       FROM flight
+       WHERE booking."id" = $1 AND booking."flight_id" = flight."id"
+         AND ((booking."status" = 'CONFIRMED'
+               AND flight."departure_at" - interval '24 hours' > $2)
+              OR (booking."status" = 'HELD' AND booking."hold_expires_at" > $2))
+         ${ownerCondition}
+       RETURNING booking."id", booking."flight_id", booking."reference"
+     ), ${releaseSeatsOf("cancelled")}
+     SELECT cancelled."flight_id", cancelled."reference",
+            coalesce(
+              array_agg(locked."row" || locked."letter" ORDER BY locked."row", locked."letter")
+                FILTER (WHERE locked."row" IS NOT NULL),
+              '{}'
+            ) AS "seats"
+     FROM cancelled
+     LEFT JOIN locked ON locked."booking_id" = cancelled."id"
+     GROUP BY cancelled."flight_id", cancelled."reference"`,
+    scope.kind === "owner"
+      ? [bookingId, now, scope.accountId]
+      : [bookingId, now],
+  )) as Array<{ flight_id: string; reference: string; seats: string[] }>;
+
+  const [cancelled] = rows;
+  if (cancelled !== undefined) {
+    return {
+      outcome: "cancelled",
+      flightId: cancelled.flight_id,
+      reference: cancelled.reference,
+      seats: cancelled.seats,
+    };
+  }
+
+  // Only picks the error outcome; scoped like every read (BR-AUTH-02).
+  const [booking] = (await manager.query(
+    `SELECT booking."status", booking."hold_expires_at", flight."departure_at"
+     FROM "bookings" booking
+     JOIN "flights" flight ON flight."id" = booking."flight_id"
+     WHERE booking."id" = $1
+       ${scope.kind === "owner" ? `AND booking."owner_account_id" = $2` : ""}`,
+    scope.kind === "owner" ? [bookingId, scope.accountId] : [bookingId],
+  )) as Array<{ status: string; hold_expires_at: Date | null; departure_at: Date }>;
+
+  if (booking === undefined) {
+    return { outcome: "not-found" };
+  }
+
+  return classifyNotCancelled(
+    booking.status as BookingStatus,
+    booking.hold_expires_at?.toISOString() ?? null,
+    booking.departure_at.toISOString(),
+    now,
+  );
+}
+
 export function createPostgresBookingRepository(
   dataSource: DataSource,
 ): BookingRepository {
@@ -466,6 +709,18 @@ export function createPostgresBookingRepository(
       }
 
       return dataSource.transaction((manager) => insertBooking(manager, booking));
+    },
+
+    async changeSeat(bookingId, position, seat, scope, now) {
+      if (isInTransaction()) {
+        return changeSeatInTransaction(
+          resolveEntityManager(dataSource), bookingId, position, seat, scope, now,
+        );
+      }
+
+      return dataSource.transaction((manager) =>
+        changeSeatInTransaction(manager, bookingId, position, seat, scope, now),
+      );
     },
 
     async findById(
@@ -519,54 +774,21 @@ export function createPostgresBookingRepository(
       return { items: await mapBookings(manager, entities), totalItems };
     },
 
+    /**
+     * Atomic on its own, like create(): the lock statement and the cancel
+     * statement must share one transaction.
+     */
     async cancel(
       bookingId: string,
       scope: BookingAccessScope,
       now: Date,
     ): Promise<CancelBookingRepositoryResult> {
-      const manager = resolveEntityManager(dataSource);
-
-      // One statement, two writes: the seats are released only for the row
-      // the first UPDATE actually cancelled, so a losing concurrent cancel
-      // or a concurrent expiry (the loser re-checks the WHERE after waiting
-      // and matches nothing) releases nothing either. `> $2` is the
-      // still-valid side of BR-BOOK-10; expireDueHolds takes `<=`.
-      const ownerCondition =
-        scope.kind === "owner" ? `AND "owner_account_id" = $3` : "";
-      const rows = (await manager.query(
-        `WITH cancelled AS (
-           UPDATE "bookings" SET "status" = 'CANCELLED'
-           WHERE "id" = $1
-             AND ("status" = 'CONFIRMED'
-                  OR ("status" = 'HELD' AND "hold_expires_at" > $2))
-             ${ownerCondition}
-           RETURNING "id", "flight_id"
-         ), ${releaseSeatsOf("cancelled")}
-         SELECT "flight_id" FROM cancelled`,
-        scope.kind === "owner"
-          ? [bookingId, now, scope.accountId]
-          : [bookingId, now],
-      )) as Array<{ flight_id: string }>;
-
-      const [cancelled] = rows;
-      if (cancelled !== undefined) {
-        return { outcome: "cancelled", flightId: cancelled.flight_id };
+      if (isInTransaction()) {
+        return cancelInTransaction(resolveEntityManager(dataSource), bookingId, scope, now);
       }
 
-      // Only picks the error outcome; scoped like every read (BR-AUTH-02).
-      const booking = await manager.getRepository(BookingEntity).findOneBy({
-        id: bookingId,
-        ...scopeFilter(scope),
-      });
-
-      if (booking === null) {
-        return { outcome: "not-found" };
-      }
-
-      return classifyNotCancelled(
-        booking.status as BookingStatus,
-        booking.holdExpiresAt?.toISOString() ?? null,
-        now,
+      return dataSource.transaction((manager) =>
+        cancelInTransaction(manager, bookingId, scope, now),
       );
     },
 

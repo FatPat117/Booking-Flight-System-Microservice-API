@@ -25,6 +25,7 @@ import type {
 } from "../../src/bookings/booking-repository.js";
 import {
   classifyNotCancelled,
+  isCancellationWindowOpen,
   isHoldLapsed,
 } from "../../src/bookings/booking-lifecycle.js";
 import type { GetBooking } from "../../src/bookings/get-booking.js";
@@ -381,25 +382,100 @@ export function createInMemoryBookingRepository(deps: {
       if (booking === undefined || !isInScope(booking, scope)) {
         return { outcome: "not-found" };
       }
-      // Same condition as the Postgres UPDATE: CONFIRMED, or HELD still
-      // valid at `now` (BR-BOOK-10).
+      const flight = flights.get(booking.flightId);
+      if (flight === undefined) {
+        throw new Error(`Booking ${bookingId} points at a missing flight`);
+      }
+      // Same condition as the Postgres UPDATE: CONFIRMED more than 24 h
+      // before departure (BR-BOOK-06), or HELD still valid at `now`
+      // (BR-BOOK-10).
       const cancellable =
-        booking.status === "CONFIRMED" ||
+        (booking.status === "CONFIRMED" &&
+          isCancellationWindowOpen(flight.departureAt, now)) ||
         (booking.status === "HELD" &&
           booking.holdExpiresAt !== null &&
           !isHoldLapsed(booking.holdExpiresAt, now));
       if (!cancellable) {
-        return classifyNotCancelled(booking.status, booking.holdExpiresAt, now);
+        return classifyNotCancelled(
+          booking.status,
+          booking.holdExpiresAt,
+          flight.departureAt,
+          now,
+        );
       }
 
       bookings.set(bookingId, { ...booking, status: "CANCELLED" });
+      const released: string[] = [];
       for (const seat of seats.get(booking.flightId) ?? []) {
         if (seat.bookingId === bookingId) {
           seat.status = "AVAILABLE";
           seat.bookingId = null;
+          released.push(formatSeatPosition(seat.position));
         }
       }
-      return { outcome: "cancelled", flightId: booking.flightId };
+      return {
+        outcome: "cancelled",
+        flightId: booking.flightId,
+        reference: booking.reference,
+        seats: released,
+      };
+    },
+
+    // Same order of checks as the Postgres adapter, so both answer the same
+    // outcome when several apply. Nothing to lock: single-threaded.
+    async changeSeat(bookingId, position, target, scope, now) {
+      const booking = bookings.get(bookingId);
+      if (booking === undefined || !isInScope(booking, scope)) {
+        return { outcome: "not-found" };
+      }
+      const passenger = booking.passengers[position - 1];
+      if (passenger === undefined) {
+        return { outcome: "passenger-not-found" };
+      }
+      if (booking.status !== "CONFIRMED") {
+        return { outcome: "not-changeable" };
+      }
+      if (passenger.seat === null) {
+        throw new Error(`Passenger ${position} of CONFIRMED booking ${bookingId} has no seat`);
+      }
+      const to = formatSeatPosition(target);
+      if (passenger.seat === to) {
+        return { outcome: "unchanged" };
+      }
+      const flight = flights.get(booking.flightId);
+      if (flight === undefined || !isBookable(flight.status, flight.departureAt, now)) {
+        return { outcome: "sales-closed" };
+      }
+
+      const flightSeats = seats.get(booking.flightId) ?? [];
+      const own = flightSeats.find((seat) => formatSeatPosition(seat.position) === passenger.seat);
+      const wanted = flightSeats.find((seat) => formatSeatPosition(seat.position) === to);
+      if (own === undefined || own.bookingId !== bookingId || own.status !== "BOOKED") {
+        throw new Error(`Seat ${passenger.seat} is not BOOKED for booking ${bookingId}`);
+      }
+      if (wanted === undefined) {
+        return { outcome: "unknown-seat" };
+      }
+      if (wanted.fareClass !== own.fareClass) {
+        return {
+          outcome: "fare-class-mismatch",
+          seatFareClass: own.fareClass,
+          targetFareClass: wanted.fareClass,
+        };
+      }
+      if (wanted.status !== "AVAILABLE") {
+        return { outcome: "seat-unavailable" };
+      }
+
+      own.status = "AVAILABLE";
+      own.bookingId = null;
+      wanted.status = "BOOKED";
+      wanted.bookingId = bookingId;
+      const passengers = booking.passengers.map((other, index) =>
+        index === position - 1 ? { ...other, seat: to } : other,
+      );
+      bookings.set(bookingId, { ...booking, passengers });
+      return { outcome: "changed", from: passenger.seat, to };
     },
 
     // Same rules as the Postgres sweep: HELD and holdExpiresAt <= now
@@ -808,6 +884,17 @@ export function createInMemoryPaymentRepository(): PaymentRepository {
 
     async markRefundFailed(paymentId, reason, now) {
       transition(paymentId, "REFUND_PENDING", "REFUND_FAILED", now, { failureReason: reason });
+    },
+
+    async markRefundPendingForCancelledBooking(bookingId, now) {
+      const paid = [...payments.values()].find(
+        (payment) => payment.bookingId === bookingId && payment.status === "SUCCEEDED",
+      );
+      if (paid === undefined) {
+        return undefined;
+      }
+      transition(paid.id, "SUCCEEDED", "REFUND_PENDING", now);
+      return structuredClone(payments.get(paid.id));
     },
 
     async claimDue(now, leaseMs, limit) {

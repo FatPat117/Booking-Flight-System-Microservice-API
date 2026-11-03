@@ -3,3 +3,4 @@ export * from "./booking-created-event.js";
 export * from "./booking-held-event.js";
 export * from "./booking-expired-event.js";
 export * from "./booking-confirmed-event.js";
+export * from "./booking-cancelled-event.js";

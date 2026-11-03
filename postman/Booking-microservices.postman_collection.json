@@ -520,7 +520,7 @@
               }
             ],
             "url": "{{baseUrl}}/api/bookings/{{bookingId}}",
-            "description": "Day 28 cancel.\n204 first cancel | 409 BOOKING_ALREADY_CANCELLED | 404 BOOKING_NOT_FOUND.\nDay 47: releases the booking's seat in the same statement (AVAILABLE again in the seat map, availableSeats + 1). Run twice to see 204 then 409."
+            "description": "Day 28 cancel.\n200 { booking, refund } first cancel (204 until Day 50) | 409 BOOKING_ALREADY_CANCELLED | 409 CANCELLATION_WINDOW_CLOSED (CONFIRMED within 24 h of departure, Day 50) | 404 BOOKING_NOT_FOUND.\nDay 47: releases the booking's seat in the same statement (AVAILABLE again in the seat map, availableSeats + 1). Run twice to see 200 then 409."
           },
           "response": []
         },
@@ -1549,7 +1549,7 @@
           ]
         },
         {
-          "name": "DELETE /api/bookings/:id (bob → 204, releases the seat)",
+          "name": "DELETE /api/bookings/:id (bob → 200, releases the seat)",
           "request": {
             "method": "DELETE",
             "header": [
@@ -1567,7 +1567,10 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('204', () => pm.response.to.have.status(204));"
+                  "pm.test('200, no refund (never paid)', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().refund).to.equal(null);",
+                  "});"
                 ]
               }
             }
@@ -1968,7 +1971,7 @@
           ]
         },
         {
-          "name": "DELETE the 3-passenger HELD booking (bob → 204)",
+          "name": "DELETE the 3-passenger HELD booking (bob → 200)",
           "request": {
             "method": "DELETE",
             "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
@@ -1981,7 +1984,7 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('204', () => pm.response.to.have.status(204));"]
+                "exec": ["pm.test('200 CANCELLED', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().booking.status).to.equal('CANCELLED'); });"]
               }
             }
           ]
@@ -3333,6 +3336,373 @@
                   "  pm.response.to.have.status(200);",
                   "  pm.expect(pm.response.json().status).to.eql('CONFIRMED');",
                   "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Day 50 — Cancellation and seat change",
+      "description": "Needs the dev seed (VN-A321: rows 1–2 BUSINESS), alice's accessToken (admin), bob's userAccessToken and carol's userBAccessToken.\nRun top to bottom on a database without VN501 on 2026-12-14. Each run draws a new Idempotency-Key prefix (day50Key).\nThe 24 h window (409 CANCELLATION_WINDOW_CLOSED) needs departure_at moved with psql; it is in the README e2e, not here.",
+      "item": [
+        {
+          "name": "POST /api/flights (VN501 on VN-A321, two classes → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN501\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-14T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-14T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('day50Key', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day50FlightId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (→ 200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day50FlightId}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:flightId/bookings as bob (10A → 201 HELD)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day50FlightId}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"passengers\": [{ \"name\": \"Bob Tran\", \"seat\": \"10A\" }] }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day50BookingId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments (tok_success → 201 CONFIRMED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day50Key}}-pay"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day50BookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"paymentMethodToken\": \"tok_success\", \"amount\": { \"amount\": 1500000, \"currency\": \"VND\" } }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 CONFIRMED', () => { pm.response.to.have.status(201); pm.expect(pm.response.json().booking.status).to.equal('CONFIRMED'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT passengers/1/seat 10A → 10C (same class → 200, price unchanged)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day50BookingId}}/passengers/1/seat",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"seat\": \"10C\" }"
+            },
+            "description": "US-BOOK-06, BR-BOOK-07 (Day 50): set this passenger's seat. CONFIRMED only, same fare class, while the flight is on sale. Audited as BOOKING_SEAT_CHANGED."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 on 10C at the same price', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const passenger = pm.response.json().passengers[0];",
+                  "  pm.expect(passenger.seat).to.equal('10C');",
+                  "  pm.expect(passenger.price.amount).to.equal(1500000);",
+                  "});",
+                  "pm.collectionVariables.set('day50ChangedBody', pm.response.text());"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT the same seat again (→ the same 200, nothing written)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day50BookingId}}/passengers/1/seat",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"seat\": \"10C\" }"
+            },
+            "description": "Naturally idempotent: setting the seat a passenger already has changes nothing and records no audit, so a retry needs no Idempotency-Key."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, identical body', () => { pm.response.to.have.status(200); pm.expect(pm.response.text()).to.equal(pm.collectionVariables.get('day50ChangedBody')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT seat 1A (BUSINESS → 409 FARE_CLASS_MISMATCH)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day50BookingId}}/passengers/1/seat",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"seat\": \"1A\" }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 FARE_CLASS_MISMATCH', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().error.code).to.equal('FARE_CLASS_MISMATCH'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT seat as carol (not her booking → 404)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userBAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day50BookingId}}/passengers/1/seat",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"seat\": \"10D\" }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 BOOKING_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error.code).to.equal('BOOKING_NOT_FOUND'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET seat map (10A AVAILABLE, 10C BOOKED)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day50FlightId}}/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('10A free, 10C booked', () => {",
+                  "  const seats = pm.response.json().rows.flatMap((row) => row.seats);",
+                  "  const status = (code) => seats.find((seat) => seat.code === code).status;",
+                  "  pm.expect(status('10A')).to.equal('AVAILABLE');",
+                  "  pm.expect(status('10C')).to.equal('BOOKED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE the paid booking (→ 200 CANCELLED, refund REFUND_PENDING)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day50BookingId}}",
+            "description": "BR-BOOK-06 (Day 50): more than 24 h before departure. The payment becomes REFUND_PENDING in the same transaction; the reconciliation job refunds it on its next run (no gateway call in this request). Within 24 h: 409 CANCELLATION_WINDOW_CLOSED with cancellableUntil — needs departure_at moved by psql, see README."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 with the refund started', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.booking.status).to.equal('CANCELLED');",
+                  "  pm.expect(body.refund.status).to.equal('REFUND_PENDING');",
+                  "  pm.expect(body.refund.amount.amount).to.equal(1500000);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE again (→ 409 BOOKING_ALREADY_CANCELLED)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day50BookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().error.code).to.equal('BOOKING_ALREADY_CANCELLED'); });"
                 ]
               }
             }

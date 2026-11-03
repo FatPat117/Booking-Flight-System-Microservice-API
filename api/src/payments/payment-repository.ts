@@ -89,6 +89,19 @@ export type PaymentRepository = Readonly<{
    * Due at once (`next_attempt_at = now`, attempts from 0): the job refunds.
    */
   markRefundPending(paymentId: string, providerReference: string, now: Date): Promise<void>;
+  /**
+   * SUCCEEDED → REFUND_PENDING for the booking's paid payment (Day 50,
+   * Decision 16): its owner cancelled it. Due at once, like
+   * markRefundPending; the job refunds. Returns the payment as it is now, or
+   * undefined when the booking has no SUCCEEDED payment (unpaid, or a legacy
+   * CONFIRMED booking from before payments). Called in the cancel's
+   * transaction, after the booking and its seats: booking → seats → payment,
+   * the lock order confirm uses.
+   */
+  markRefundPendingForCancelledBooking(
+    bookingId: string,
+    now: Date,
+  ): Promise<Payment | undefined>;
   /** REFUND_PENDING → REFUNDED. */
   markRefunded(paymentId: string, now: Date): Promise<void>;
   /** REFUND_PENDING → REFUND_FAILED: no more retries, a person settles it (BR-PAY-09). */

@@ -28,12 +28,6 @@ import { createSettlePayment } from "./settle-payment.js";
 export const PAYMENT_START_MARGIN_MS = 60_000;
 
 /**
- * How long after the gateway timeout reconciliation may take a PROCESSING
- * payment: room for the live request's phase 3 to commit first (Decision 15).
- */
-export const PAYMENT_RECONCILIATION_MARGIN_MS = 30_000;
-
-/**
  * The request as the route validated it. `fingerprint` covers method, path
  * and body (requestFingerprint), so the use case never sees HTTP.
  */
@@ -90,7 +84,7 @@ type PayForBookingDependencies = {
   generateOutboxId: () => string;
   getRequestId: () => string | undefined;
   getCurrentTime: () => Date;
-  /** Gateway timeout + PAYMENT_RECONCILIATION_MARGIN_MS (Decision 15). */
+  /** Gateway timeout + reconciliation margin (Decision 15, AppConfig). */
   reconcileAfterMs: number;
 };
 
