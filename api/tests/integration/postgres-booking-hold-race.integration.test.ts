@@ -68,6 +68,7 @@ async function createFlight(seats?: number): Promise<string> {
 
 function auto(count: number) {
   return {
+    fareClass: "ECONOMY",
     passengers: Array.from({ length: count }, (_, i) => ({ name: `Passenger ${i + 1}` })),
   };
 }

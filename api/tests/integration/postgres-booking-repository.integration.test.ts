@@ -65,7 +65,7 @@ after(async () => {
   await dataSource.destroy();
 });
 
-const ONE_SEAT = { kind: "auto", count: 1 } as const;
+const ONE_SEAT = { kind: "auto", count: 1, fareClass: "ECONOMY" } as const;
 
 test("holdSeats: the held seat row is HELD for that booking; the next call is not-enough-seats", async () => {
   const bookingRepository = createPostgresBookingRepository(dataSource);
@@ -123,7 +123,7 @@ test("holdSeats: not-enough-seats inside a committing transaction leaves no seat
   const flight = await seedFlight(2);
 
   const result = await createPostgresTransactionRunner(dataSource).run(() =>
-    bookingRepository.holdSeats(flight.id, crypto.randomUUID(), { kind: "auto", count: 3 }, NOW),
+    bookingRepository.holdSeats(flight.id, crypto.randomUUID(), { kind: "auto", count: 3, fareClass: "ECONOMY" }, NOW),
   );
 
   assert.deepEqual(result, { outcome: "not-enough-seats" });

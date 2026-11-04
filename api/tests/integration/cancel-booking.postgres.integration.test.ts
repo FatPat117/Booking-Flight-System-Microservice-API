@@ -75,7 +75,7 @@ test("cancelled then already-cancelled: seat count increases by exactly 1, no ex
     ],
   });
   await createPostgresTransactionRunner(dataSource).run(async () => {
-    await bookingRepository.holdSeats(flight.id, booking.id, { kind: "auto", count: 1 }, new Date("2026-07-20T00:00:00.000Z"));
+    await bookingRepository.holdSeats(flight.id, booking.id, { kind: "auto", count: 1, fareClass: "ECONOMY" }, new Date("2026-07-20T00:00:00.000Z"));
     await bookingRepository.create(booking);
   });
   assert.equal((await flightRepository.findById(flight.id))?.availableSeats, 0);

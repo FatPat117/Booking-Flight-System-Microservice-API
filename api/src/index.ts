@@ -18,6 +18,7 @@ const expressApp = createApp({
   getBookingByReference: runtime.getBookingByReference,
   listBookings: runtime.listBookings,
   listFlights: runtime.listFlights,
+  searchFlights: runtime.searchFlights,
   registerAirport: runtime.registerAirport,
   listAirports: runtime.listAirports,
   registerAircraft: runtime.registerAircraft,

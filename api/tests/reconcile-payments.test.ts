@@ -85,7 +85,7 @@ async function createRuntime(
   async function holdBooking(): Promise<Booking> {
     const created = await createBooking(
       flight.id,
-      { passengers: [{ name: "Alice" }, { name: "Bob" }] },
+      { fareClass: "ECONOMY", passengers: [{ name: "Alice" }, { name: "Bob" }] },
       ACTOR_A,
     );
     assert.equal(created.outcome, "created");

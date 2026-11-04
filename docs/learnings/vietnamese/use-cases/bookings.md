@@ -9,7 +9,7 @@
 ```json
 { "passengers": [ { "name": "Bob Tran", "seat": "12A" }, { "name": "Lan Tran", "seat": "12B" } ] }
 ```
-Hoặc không ghế nào: `{ "passengers": [ { "name": "Bob" }, { "name": "Lan" } ] }` → hệ thống chọn.
+Hoặc không ghế nào: `{ "fareClass": "ECONOMY", "passengers": [ { "name": "Bob" }, { "name": "Lan" } ] }` → hệ thống chọn **trong hạng đó** (Day 51: `fareClass` bắt buộc khi không chọn ghế, để khớp với kết quả tìm kiếm "còn N chỗ trong một hạng").
 
 **Validation theo thứ tự:**
 1. Không phải object → `INVALID_BODY`.
@@ -18,13 +18,14 @@ Hoặc không ghế nào: `{ "passengers": [ { "name": "Bob" }, { "name": "Lan" 
 4. Từng hành khách: `INVALID_PASSENGER`, `REQUIRED` (tên), `INVALID_SEAT` (mã như `12A`).
 5. Người có ghế người không → `MIXED_SEAT_SELECTION` (BR-BOOK-09).
 6. Ghế lặp → `DUPLICATE_SEAT` (BR-BOOK-02).
+7. (Day 51) Không chọn ghế mà thiếu `fareClass` → `MISSING_FIELD`; sai giá trị → `INVALID_FARE_CLASS`; có chọn ghế mà vẫn gửi `fareClass` → `UNSUPPORTED_FIELD`.
 
-Kết quả validate là kiểu `{ seatSelection: "auto" } | { seatSelection: "chosen" }`.
+Kết quả validate là kiểu `{ seatSelection: "auto"; fareClass } | { seatSelection: "chosen" }`.
 
 **Luồng (một transaction):**
 1. Sinh `bookingId` **trước**.
 2. `holdSeats(flightId, bookingId, auto n | chosen [ghế], now)` — **một câu SQL**, tất cả hoặc không:
-   - auto: `SKIP LOCKED`, `LIMIT n`, `WHERE enough.ok`;
+   - auto: `SKIP LOCKED`, `LIMIT n`, `WHERE enough.ok`, từ Day 51 thêm `seat.fare_class = $5`;
    - chosen: khoá theo `(row, letter)`, `WHERE verdict.ok` (đủ số + tất cả `AVAILABLE`).
    - **Day 49A**: cùng câu đó đọc giá của chuyến `FOR SHARE` (CTE `fares`, phải JOIN) → mỗi ghế
      giữ được trả về kèm `fareClass` + `price`. Ghế có hạng không có giá → **throw** (BR-FLT-09 hỏng).
@@ -42,7 +43,8 @@ Kết quả validate là kiểu `{ seatSelection: "auto" } | { seatSelection: "c
 | `created` | 201 + `Location: /api/bookings/:id` |
 | `validation_failed` | 422 `VALIDATION_FAILED` |
 | `flight-not-found` (gồm id sai định dạng) | 404 `FLIGHT_NOT_FOUND` |
-| `not-enough-seats` | 409 `NOT_ENOUGH_SEATS` |
+| `not-enough-seats` (hạng được yêu cầu không đủ ghế, kể cả khi hạng kia còn) | 409 `NOT_ENOUGH_SEATS` |
+| `fare-class-not-on-flight` (Day 51: chuyến không có ghế hạng đó) | 422 `FARE_CLASS_NOT_ON_AIRCRAFT`, `details[0].field = fareClass` |
 | `seats-unavailable` | 409 `SEATS_UNAVAILABLE`, `details` = mã ghế bị cản (không nói ai giữ) |
 | `unknown-seats` | 422, `details[].code = UNKNOWN_SEAT` |
 | `sales-closed` (chưa OPEN, huỷ, hoặc còn ≤ 1 giờ) | 409 `SALES_CLOSED` |

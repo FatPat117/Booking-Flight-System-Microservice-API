@@ -11,6 +11,7 @@ import {
   toStoredFlightStatus,
 } from "../../flights/flight-lifecycle.js";
 import { FlightEntity } from "../../flights/postgres/flight.entity.js";
+import { onSaleSql } from "../../flights/postgres/on-sale-sql.js";
 import { parseVndFromDatabase } from "../../money/money.js";
 import { classifyNotCancelled } from "../booking-lifecycle.js";
 import { bookingTotal } from "../booking-total.js";
@@ -241,7 +242,8 @@ function toHeldSeat(flightId: string, row: PricedSeatRow): HeldSeat {
 }
 
 /**
- * The `count` lowest free seats, in one statement (ADR-004 addendum):
+ * The `count` lowest free seats of one fare class (Decision 17), in one
+ * statement (ADR-004 addendum):
  * - SKIP LOCKED: seats other bookings are taking right now are passed over,
  *   so concurrent bookings take different seats instead of queueing.
  * - FOR SHARE OF flight: the sales window (BR-FLT-06, the SQL twin of
@@ -260,6 +262,7 @@ async function holdAutoSeats(
   flightId: string,
   bookingId: string,
   count: number,
+  fareClass: FareClass,
   now: Date,
 ): Promise<HoldSeatsResult> {
   const held = (await manager.query(
@@ -268,8 +271,8 @@ async function holdAutoSeats(
        FROM "flight_seats" seat
        JOIN "flights" flight ON flight."id" = seat."flight_id"
        WHERE seat."flight_id" = $1 AND seat."status" = 'AVAILABLE'
-         AND flight."status" = 'OPEN'
-         AND flight."departure_at" - interval '1 hour' > $3
+         AND seat."fare_class" = $5
+         AND ${onSaleSql("flight", "$3")}
        ORDER BY seat."row", seat."letter"
        LIMIT $4
        FOR UPDATE OF seat SKIP LOCKED
@@ -288,7 +291,7 @@ async function holdAutoSeats(
      SELECT held."row", held."letter", held."fare_class", fares."amount_vnd"
      FROM held
      LEFT JOIN fares ON fares."fare_class" = held."fare_class"`,
-    [flightId, bookingId, now, count],
+    [flightId, bookingId, now, count, fareClass],
   )) as PricedSeatRow[];
 
   if (held.length > 0) {
@@ -302,9 +305,16 @@ async function holdAutoSeats(
   }
 
   const reason = await classifyNothingHeld(manager, flightId, now);
-  return reason === "bookable"
-    ? { outcome: "not-enough-seats" }
-    : { outcome: reason };
+  if (reason !== "bookable") {
+    return { outcome: reason };
+  }
+  const [hasClass] = (await manager.query(
+    `SELECT 1 FROM "flight_seats" WHERE "flight_id" = $1 AND "fare_class" = $2 LIMIT 1`,
+    [flightId, fareClass],
+  )) as unknown[];
+  return hasClass === undefined
+    ? { outcome: "fare-class-not-on-flight" }
+    : { outcome: "not-enough-seats" };
 }
 
 /**
@@ -340,8 +350,7 @@ async function holdChosenSeats(
        JOIN "flights" flight ON flight."id" = seat."flight_id"
        WHERE seat."flight_id" = $1
          AND (seat."row", seat."letter"::text) IN (SELECT "row", "letter" FROM requested)
-         AND flight."status" = 'OPEN'
-         AND flight."departure_at" - interval '1 hour' > $5
+         AND ${onSaleSql("flight", "$5")}
        -- Keep: the global lock order. No test can see it go, because the
        -- current plan sorts the IN list anyway (Day 48A mutation survived).
        ORDER BY seat."row", seat."letter"
@@ -694,7 +703,7 @@ export function createPostgresBookingRepository(
       const manager = resolveEntityManager(dataSource);
 
       return request.kind === "auto"
-        ? holdAutoSeats(manager, flightId, bookingId, request.count, now)
+        ? holdAutoSeats(manager, flightId, bookingId, request.count, request.fareClass, now)
         : holdChosenSeats(manager, flightId, bookingId, request.seats, now);
     },
 
@@ -801,6 +810,9 @@ export function createPostgresBookingRepository(
      *   Served by idx_bookings_held_expiry in order (Day 48B Step 2).
      * - `expired` flips only the rows `due` locked.
      * - `locked` / `released` free their seats in lock order (releaseSeatsOf).
+     *   They find seats by booking_id in the statement's snapshot, which is
+     *   safe because a HELD booking's seats never change (Day 51 audit, see
+     *   confirmHold).
      */
     async expireDueHolds(now: Date, limit: number): Promise<ExpiredHold[]> {
       const manager = resolveEntityManager(dataSource);
@@ -855,6 +867,11 @@ export function createPostgresBookingRepository(
     // cancel or the expiry job (it re-checks the WHERE after waiting and
     // matches nothing) touches no seat. `> $2` is BR-BOOK-10's still-valid
     // side, at phase 3's own instant.
+    // No pre-lock, unlike cancel(): after waiting for the booking lock the
+    // seat CTE still finds seats by booking_id in its old snapshot. That is
+    // correct only while a HELD booking's seats never change (seat change is
+    // CONFIRMED-only). The control in postgres-snapshot-audit.integration.test.ts
+    // shows what breaks if that ever changes (Day 51).
     async confirmHold(bookingId, scope, now) {
       const manager = resolveEntityManager(dataSource);
       const ownerCondition =

@@ -1,3 +1,4 @@
+import { FARE_CLASSES, isFareClass, type FareClass } from "../aircraft/seat-layout.js";
 import {
   formatSeatPosition,
   parseSeatPosition,
@@ -11,10 +12,12 @@ export const MAX_PASSENGERS = 9;
 
 /**
  * BR-BOOK-09 as a type: every passenger names a seat, or none does — a mix
- * cannot be represented, so the use case never has to handle one.
+ * cannot be represented, so the use case never has to handle one. Without
+ * seats the request names the fare class to take them from (Decision 17):
+ * a search that said "economy has room for 2" leads to 2 economy seats.
  */
 export type CreateBookingInput =
-  | { seatSelection: "auto"; passengers: Array<{ name: string }> }
+  | { seatSelection: "auto"; fareClass: FareClass; passengers: Array<{ name: string }> }
   | {
       seatSelection: "chosen";
       passengers: Array<{ name: string; seat: SeatPosition }>;
@@ -122,13 +125,42 @@ export function validateCreateBookingInput(
   const named = valid.filter((passenger) => passenger.seat !== undefined);
 
   if (named.length === 0) {
+    if (input.fareClass === undefined) {
+      return invalid([
+        {
+          field: "fareClass",
+          code: "MISSING_FIELD",
+          message: `fareClass (${FARE_CLASSES.join(" or ")}) is required when no passenger names a seat`,
+        },
+      ]);
+    }
+    if (!isFareClass(input.fareClass)) {
+      return invalid([
+        {
+          field: "fareClass",
+          code: "INVALID_FARE_CLASS",
+          message: `fareClass must be one of ${FARE_CLASSES.join(", ")}`,
+        },
+      ]);
+    }
     return {
       success: true,
       value: {
         seatSelection: "auto",
+        fareClass: input.fareClass,
         passengers: valid.map(({ name }) => ({ name })),
       },
     };
+  }
+
+  // A chosen seat carries its own class; a second, possibly different
+  // class next to it would have to be ignored or reconciled.
+  if (input.fareClass !== undefined) {
+    issues.push({
+      field: "fareClass",
+      code: "UNSUPPORTED_FIELD",
+      message: "fareClass applies only when no passenger names a seat",
+    });
   }
 
   if (named.length < valid.length) {

@@ -1,8 +1,8 @@
-# Ôn tập nhanh: Day 1 → Day 50
+# Ôn tập nhanh: Day 1 → Day 51
 
 > Sổ tay tiếng Việt để đọc lại nhanh. Mỗi mục gồm: **vấn đề → cách xử lý → vì sao**, kèm đường dẫn tới code thật.
 > Các note tiếng Anh khác trong `docs/learnings/` đi sâu từng chủ đề; file này là bản đồ tổng.
-> Cập nhật đến: **Day 50** (2026-11-03). Số test hiện tại: api unit 532, integration 234 (trên `booking_test`), notifier 19, identity 12 + integration 7 (trên `identity_test`).
+> Cập nhật đến: **Day 51** (2026-11-04). Số test hiện tại: api unit 580, integration 260 (trên `booking_test`), notifier 19, identity 12 + integration 7 (trên `identity_test`).
 
 ---
 
@@ -11,7 +11,7 @@
 ```text
 npm workspaces
 ├── packages/contracts      kiểu event dùng chung + parser (flight-created, booking-held, booking-expired, booking-confirmed, booking-created cũ)
-├── api                     Express: flights (có giá theo hạng), airports, aircraft, bookings (chụp giá), thanh toán (3 pha + Idempotency-Key); outbox relay; job hết hạn giữ ghế; Postgres booking_db
+├── api                     Express: flights (có giá theo hạng; tìm kiếm keyset + chi tiết theo hạng qua port đọc FlightSearch), airports, aircraft, bookings (chụp giá, huỷ + đổi ghế), thanh toán (3 pha + Idempotency-Key, đối soát); outbox relay; job hết hạn giữ ghế; Postgres booking_db
 ├── services/identity       register/login, phát JWT (Postgres identity_db)
 └── services/flight-notifier  consumer RabbitMQ (log event, DLQ)
 
@@ -101,6 +101,7 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 | 49B | Thanh toán giả lập + Idempotency-Key, `HELD → CONFIRMED` | Gọi gateway **ngoài** transaction (3 pha); thua race thì **ghi `REFUND_PENDING` rồi mới hoàn tiền**; key claim bằng `ON CONFLICT DO NOTHING`; `jsonb` **đổi thứ tự key** → lưu response bằng `json` |
 | 49C | Lỗi thanh toán: kết quả không rõ, đối soát, dọn key; DB test riêng | Ba kết quả: thành công / từ chối / **không rõ** — không rõ thì **không bao giờ** `FAILED`, trả `202`; job đối soát **charge lại cùng `paymentId`**; `next_attempt_at` = ngưỡng tuổi + lease + backoff; một pha 3 dùng chung; refund chỉ ở job, 5 lần rồi `REFUND_FAILED`; test chạy trên `booking_test` có hàng rào |
 | 50 | Huỷ trong 24 h + hoàn tiền; đổi ghế | Mốc `departure_at − 24h > now` trong câu huỷ (đúng 24 h là đóng); huỷ đã trả tiền → `SUCCEEDED → REFUND_PENDING` **cùng transaction**, job đối soát hoàn; đổi ghế `PUT` "đặt thành X" (idempotent tự nhiên), khoá **hai ghế theo (row, letter)**; race test lộ lỗi **snapshot của câu lệnh** trong câu huỷ cũ; hàm bất biến toàn cục được chứng minh bắt dữ liệu hỏng |
+| 51 | Tìm chuyến bay + chi tiết theo hạng | "Ngày bay" là **ngày địa phương của sân bay đi**, đổi thành khoảng UTC **từ tham số** (cột để trần → dùng được index); "còn N chỗ" = N ghế **trong một hạng**, giữ ghế tự động phải có `fareClass`; **keyset** thay OFFSET (OFFSET bỏ sót một chuyến khi dữ liệu đổi giữa hai trang — đo được); đo trên 20 400 chuyến / 3,9 triệu ghế: đếm trực tiếp 4,8 ms, **chưa cần read model**; **differential test** với bộ lọc ngây thơ, 50 seed |
 
 ---
 
@@ -128,6 +129,8 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 - **Dùng `ON CONFLICT DO NOTHING RETURNING id` thay vì bắt `23505`** khi cần tiếp tục transaction (mã đặt chỗ, Day 48A): kết quả rỗng = trùng → sinh lại, ghế đã giữ vẫn còn.
 - **TypeORM không chặn transaction lồng nhau** → tự viết `NestedTransactionError` (Day 37).
 - `**.returning()` của TypeORM nhận tên property** (`flightId`), truyền tên cột thì nó lặng lẽ bỏ RETURNING (Day 39).
+- **Sargable: biến đổi tham số, không biến đổi cột** (Day 51): `(departure_at AT TIME ZONE tz)::date = $1` đúng nhưng tính cho mọi dòng, mất index; `departure_at >= ($1::timestamp AT TIME ZONE tz) AND < (($2 + 1)::timestamp AT TIME ZONE tz)` dùng index `(origin, destination, departure_at)`. Ngày địa phương không phải lúc nào cũng 24 h (London: 23 / 25 h).
+- **Rà soát snapshot** (Day 51): câu nào vừa có thể chờ khoá **vừa** tìm dòng theo khoá ngoại sau đó thì cần khoá trước bằng câu riêng, **hoặc** một bất biến giữ tập dòng không đổi — kèm test. `confirmHold`/`expireDueHolds` dựa vào "ghế của booking `HELD` không đổi"; test đối chứng cho thấy nếu bỏ luật đó thì sai.
 - **FK `DEFERRABLE INITIALLY DEFERRED`** (Day 47): giữ ghế trỏ tới booking id **trước** khi insert booking → giữ ghế thất bại thì không có gì để hoàn tác. Ngoài transaction, FK được kiểm cuối câu lệnh.
 
 ### 2.4 Concurrency — phần quan trọng nhất
@@ -243,6 +246,8 @@ Lỗi thanh toán và đối soát (Day 49C, Decision 15, ADR-010):
 - **Fake gateway có hook `onCharge`**: chặn ở pha 2 bằng cổng (promise mở tay) để chạy job hết hạn/huỷ **trong lúc** đang trừ tiền.
 - **Tiêm lỗi + một hàm bất biến toàn cục** (Day 49C): mỗi test dừng ở một điểm (sau pha 1, trong lúc charge, mất câu trả lời, sau `REFUND_PENDING`, refund lỗi), cho job chạy, rồi gọi `assertMoneyInvariants` so **ledger của fake** (provider thật sự làm gì) với DB. Fake phải **nhớ theo `paymentId`** như provider thật, không thì test thấy "trừ hai lần" giả.
 - **Mutation phải hợp lệ** (Day 49C): bỏ lease bằng comment làm `$2` thừa → Postgres lỗi kiểu, mọi test fail — đó là test chết vì cú pháp, không phải vì lease. Làm lại bằng `least($1, $2)` → chỉ race hai instance fail.
+- **Differential test** (Day 51): cùng một câu hỏi, so SQL với một bộ lọc **ngây thơ** viết lại từ định nghĩa nghiệp vụ, **không import gì từ `src/`**, trên 50 thế giới ngẫu nhiên có seed (in `FLIGHT_SEARCH_SEED=<n>` khi fail, kể cả khi code **ném lỗi**). Đột biến "lọc theo ngày UTC" fail ngay seed đầu.
+- **Đồng hồ tiêm vào thay vì đo mili-giây thật** (Day 51): test gateway từng assert `45 ≤ elapsed < 1000` — máy bận là fail. Giờ test tự quyết khi nào `wait` xong, khi nào timeout bắn.
 - **Đối chiếu số test** sau mỗi thay đổi; đừng tin "xanh" mà không nhìn số (`tests `** bỏ sót 23 file ở Day 36).
 - `--test-concurrency=1` cho integration: các file `TRUNCATE` chéo nhau.
 - **Database test riêng có hàng rào** (Day 49C): `test:integration` đặt `BOOKING_POSTGRES_DB=booking_test` và `--import` một file từ chối chạy nếu tên không kết thúc `_test` — chạy **trước mọi** `TRUNCATE`. Chứng minh bằng cách cố tình trỏ vào `booking_db`.
@@ -284,6 +289,11 @@ Lỗi thanh toán và đối soát (Day 49C, Decision 15, ADR-010):
 23. READ COMMITTED: một câu lệnh đọc **snapshot lúc nó bắt đầu**. Câu `UPDATE … ` chờ khoá xong vẫn tìm các dòng **khác** (ghế) theo snapshot cũ → huỷ chờ một lần đổi ghế đã nhả ghế cũ, bỏ sót ghế mới. Khoá dòng cha bằng **câu riêng trước** (Day 50).
 24. Khoá trước "cho chắc" mà không có điều kiện → job `SKIP LOCKED` bỏ qua dòng đó, hành vi cũ đổi (race test C của Day 48B bắt được, Day 50).
 25. Fake flight store của test HTTP tạo ghế toàn ECONOMY, bỏ qua layout máy bay vừa đăng ký → không test được khác hạng ở tầng HTTP; dùng contract + e2e (Day 50).
+26. Lọc theo **ngày UTC** thay vì ngày địa phương: chuyến 06:00 sáng ở VN (23:00 UTC hôm trước) biến mất khỏi ngày của nó (Day 51).
+27. Đo hiệu năng trên dữ liệu test vài dòng rồi kết luận. Trên 3,9 triệu ghế mới thấy **đếm ghế** mới là phần tốn, không phải tìm chuyến (Day 51).
+28. Fixture "chuyến 0 ghế" từng nghĩa là "hết chỗ"; khi thêm kiểm tra hạng nó thành "không có hạng này". Hết chỗ thật = có ghế nhưng đã bị giữ (Day 51).
+29. Ghi file JSON bằng `json.dumps` định dạng lại cả file Postman (352 dòng diff cho 11 thay đổi) → sửa theo **chuỗi văn bản** để diff đúng chỗ (Day 51).
+30. Route `/api/flights/search` phải khai báo **trước** `/api/flights/:id`, không thì `search` bị hiểu là id (Day 51).
 
 ---
 
@@ -314,11 +324,16 @@ Lỗi thanh toán và đối soát (Day 49C, Decision 15, ADR-010):
 23. Vì sao đổi ghế khoá hai ghế theo (row, letter) chứ không "ghế của mình trước"? A' đo được gì?
 24. Vì sao đổi ghế không cần Idempotency-Key mà thanh toán thì cần?
 25. Snapshot của một câu lệnh gây lỗi gì ở câu huỷ cũ khi có đổi ghế? Sửa thế nào mà không làm hỏng job hết hạn?
+26. Vì sao `confirmHold` không cần khoá trước như câu huỷ? Điều gì sẽ làm nó sai?
+27. "Tìm chuyến ngày 20/11" là khoảng UTC nào cho SGN? Cho LHR vào ngày đổi giờ? Vì sao không bọc `departure_at` trong `AT TIME ZONE`?
+28. Vì sao tìm kiếm dùng keyset mà danh sách admin vẫn OFFSET? Cursor chứa gì, vì sao cần hash, vì sao không cần khoá bí mật?
+29. Vì sao "còn 2 chỗ" phải trong **một hạng**, và vì sao câu giữ ghế tự động cũng phải đổi theo?
+30. Differential test bắt được gì mà contract test dễ bỏ sót? Vì sao bộ lọc ngây thơ không được dùng chung hàm với code production?
 
 ---
 
 ## 5. Tiếp theo
 
-**Day 51** (phase D bước 8): tìm kiếm chuyến bay (tuyến, khoảng ngày, số hành khách, sắp xếp, phân trang) — số liệu OFFSET sâu đo ở Day 47 trở thành một quyết định thật.
+**Day 52** (phase D bước 9): huỷ chuyến bay dây chuyền — huỷ mọi booking, giải phóng ghế, hoàn tiền qua đối soát, thông báo; nơi giả thuyết deadlock từ review Day 47 được kiểm chứng.
 
-Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [payments-and-idempotency-keys.md](../payments-and-idempotency-keys.md) (có mục Day 49C), [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008/009/010, domain-model Decision 16, `.cursor/progress/DAY-*.md`.
+Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [flight-search-local-dates-and-keyset.md](../flight-search-local-dates-and-keyset.md), [payments-and-idempotency-keys.md](../payments-and-idempotency-keys.md) (có mục Day 49C), [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008/009/010, domain-model Decision 16–17, `.cursor/progress/DAY-*.md`.

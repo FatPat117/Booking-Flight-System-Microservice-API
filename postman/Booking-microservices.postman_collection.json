@@ -80,7 +80,13 @@
     { "key": "day49bFlightId", "value": "" },
     { "key": "day49bBookingId", "value": "" },
     { "key": "day49bKey", "value": "" },
-    { "key": "day49bConfirmedBody", "value": "" }
+    { "key": "day49bConfirmedBody", "value": "" },
+    { "key": "day51FlightA", "value": "" },
+    { "key": "day51FlightB", "value": "" },
+    { "key": "day51FlightC", "value": "" },
+    { "key": "day51FlightD", "value": "" },
+    { "key": "day51Cursor", "value": "" },
+    { "key": "day51FirstId", "value": "" }
   ],
   "item": [
     {
@@ -411,7 +417,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [{ \"name\": \"Alice Nguyen\" }]\n}"
+              "raw": "{\n  \"fareClass\": \"BUSINESS\",\n  \"passengers\": [{ \"name\": \"Alice Nguyen\" }]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
             "description": "role=user JWT (bob). Owner = token sub.\n201 created (Location: /api/bookings/:id), body is a HELD booking with reference, holdExpiresAt (15 min) and passengers [{ name, seat }] (Day 48A: no seat named → the lowest free seats) | 409 NOT_ENOUGH_SEATS | 409 SEATS_UNAVAILABLE | 409 SALES_CLOSED (flight not OPEN or departing within 1 h) | 404 FLIGHT_NOT_FOUND | 422 validation / UNKNOWN_SEAT | 401 no token | 403 admin token.\nSaves {{bookingId}}. Wait ~5s → booking_held_consumed with same correlationId."
@@ -468,7 +474,7 @@
             "url": "{{baseUrl}}/api/flights/00000000-0000-0000-0000-000000000000/bookings",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [{ \"name\": \"Ghost\" }]\n}"
+              "raw": "{\n  \"fareClass\": \"BUSINESS\",\n  \"passengers\": [{ \"name\": \"Ghost\" }]\n}"
             },
             "description": "Expect 404 FLIGHT_NOT_FOUND."
           },
@@ -674,7 +680,7 @@
             "description": "Admins do not book on someone's behalf (BR-AUTH-03).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [{ \"name\": \"Alice Nguyen\" }]\n}"
+              "raw": "{\n  \"fareClass\": \"BUSINESS\",\n  \"passengers\": [{ \"name\": \"Alice Nguyen\" }]\n}"
             }
           },
           "response": [],
@@ -1318,7 +1324,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [{ \"name\": \"Bob Tran\" }]\n}"
+              "raw": "{\n  \"fareClass\": \"BUSINESS\",\n  \"passengers\": [{ \"name\": \"Bob Tran\" }]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{day46FlightId}}/bookings"
           },
@@ -1351,7 +1357,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [{ \"name\": \"Bob Tran\" }]\n}"
+              "raw": "{\n  \"fareClass\": \"BUSINESS\",\n  \"passengers\": [{ \"name\": \"Bob Tran\" }]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{day46ScheduledFlightId}}/bookings",
             "description": "BR-FLT-06: a seat can be held only while the effective status is OPEN — not before opening, not after cancellation, not within 1 hour of departure. Checked inside the seat-hold UPDATE itself."
@@ -1484,7 +1490,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [{ \"name\": \"Bob Tran\" }]\n}"
+              "raw": "{\n  \"fareClass\": \"BUSINESS\",\n  \"passengers\": [{ \"name\": \"Bob Tran\" }]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{day47FlightId}}/bookings",
             "description": "The system picks the lowest free seat in (row, letter) order."
@@ -1724,7 +1730,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [\n    { \"name\": \"Bob Tran\" },\n    { \"name\": \"Lan Tran\" },\n    { \"name\": \"Minh Tran\" }\n  ]\n}"
+              "raw": "{\n  \"fareClass\": \"BUSINESS\",\n  \"passengers\": [\n    { \"name\": \"Bob Tran\" },\n    { \"name\": \"Lan Tran\" },\n    { \"name\": \"Minh Tran\" }\n  ]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/bookings",
             "description": "BR-BOOK-09: no seat named → the lowest free seats in (row, letter) order. Row 1 is ACDF."
@@ -1864,7 +1870,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}]\n}"
+              "raw": "{\n  \"fareClass\": \"BUSINESS\",\n  \"passengers\": [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/bookings",
             "description": "BR-BOOK-01, counted before any passenger is read: ten invalid passengers still give exactly one issue."
@@ -2625,7 +2631,7 @@
             "url": "{{baseUrl}}/api/flights/{{day49bFlightId}}/bookings",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [{ \"name\": \"Bob Tran\" }, { \"name\": \"An Le\" }]\n}"
+              "raw": "{\n  \"fareClass\": \"ECONOMY\",\n  \"passengers\": [{ \"name\": \"Bob Tran\" }, { \"name\": \"An Le\" }]\n}"
             }
           },
           "response": [],
@@ -3125,7 +3131,7 @@
             "url": "{{baseUrl}}/api/flights/{{day49cFlightId}}/bookings",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [{ \"name\": \"Bob Tran\" }, { \"name\": \"An Le\" }]\n}"
+              "raw": "{\n  \"fareClass\": \"ECONOMY\",\n  \"passengers\": [{ \"name\": \"Bob Tran\" }, { \"name\": \"An Le\" }]\n}"
             }
           },
           "response": [],
@@ -3711,6 +3717,495 @@
       ]
     },
     {
+      "name": "Day 51 — Flight search and details",
+      "description": "Needs the dev seed (VN-A321/A632/A323: rows 1–2 BUSINESS; VN-A588 economy only), alice's accessToken (admin) and bob's userAccessToken.\nRun top to bottom on a database without VN511–VN514 on 12–13 January 2027. Search and details need no token.",
+      "item": [
+        {
+          "name": "POST /api/flights (VN511 on VN-A321, 06:00 local on 12 Jan = 23:00 UTC on the 11th → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN511\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2027-01-12T06:00:00+07:00\",\n  \"arrivalAt\": \"2027-01-12T08:00:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000,\n    \"BUSINESS\": 4200000\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day51FlightA', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (VN511 → 200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day51FlightA}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights (VN512 on VN-A588, economy only, 10:00 on 12 Jan → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN512\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A588\",\n  \"departureAt\": \"2027-01-12T10:00:00+07:00\",\n  \"arrivalAt\": \"2027-01-12T12:00:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1200000\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day51FlightB', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (VN512 → 200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day51FlightB}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights (VN513 on VN-A632, 23:30 on 13 Jan, lands 01:30 on the 14th → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN513\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A632\",\n  \"departureAt\": \"2027-01-13T23:30:00+07:00\",\n  \"arrivalAt\": \"2027-01-14T01:30:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000,\n    \"BUSINESS\": 4200000\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day51FlightC', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (VN513 → 200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day51FlightC}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights (VN514 on VN-A323, left SCHEDULED → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN514\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2027-01-12T12:00:00+07:00\",\n  \"arrivalAt\": \"2027-01-12T14:00:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000,\n    \"BUSINESS\": 4200000\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day51FlightD', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/search (12–13 Jan, 2 passengers, no token → 200, local dates, SCHEDULED left out)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-13&passengers=2&limit=50"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().items;",
+                  "const ids = items.map((item) => item.id);",
+                  "const [a, b, c, d] = ['day51FlightA', 'day51FlightB', 'day51FlightC', 'day51FlightD'].map((key) => pm.collectionVariables.get(key));",
+                  "pm.test('our three open flights, by departure', () => {",
+                  "  const ours = ids.filter((id) => [a, b, c].includes(id));",
+                  "  pm.expect(ours).to.eql([a, b, c]);",
+                  "});",
+                  "pm.test('the SCHEDULED VN514 is not on sale, so not found', () => pm.expect(ids).to.not.include(d));",
+                  "const first = items.find((item) => item.id === a);",
+                  "pm.test('VN511 is on 12 Jan local although it is 23:00 UTC on the 11th', () => {",
+                  "  pm.expect(first.departureAt).to.eql('2027-01-11T23:00:00.000Z');",
+                  "  pm.expect(first.departureLocal).to.eql('2027-01-12T06:00:00+07:00');",
+                  "});",
+                  "pm.test('per-class availability, cheapest first, and the lowest fare with room', () => {",
+                  "  pm.expect(first.availability.map((entry) => entry.fareClass)).to.eql(['ECONOMY', 'BUSINESS']);",
+                  "  pm.expect(first.lowestFare).to.eql({ amount: 1500000, currency: 'VND' });",
+                  "});",
+                  "pm.test('VN513 lands the next local day', () => pm.expect(items.find((item) => item.id === c).arrivalDayOffset).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/search?sort=price (→ 200, lowest fares never decrease)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-13&passengers=2&limit=50&sort=price"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const fares = pm.response.json().items.map((item) => item.lowestFare.amount);",
+                  "pm.test('sorted by lowest fare', () => pm.expect(fares).to.eql([...fares].sort((x, y) => x - y)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/search?limit=1 (→ 200 with nextCursor)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-13&passengers=2&limit=1"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('a next page exists', () => pm.expect(body.page.hasNextPage).to.eql(true));",
+                  "pm.collectionVariables.set('day51Cursor', body.page.nextCursor);",
+                  "pm.collectionVariables.set('day51FirstId', body.items[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/search?limit=1&cursor (→ 200, the next flight)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-13&passengers=2&limit=1&cursor={{day51Cursor}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('another flight than page 1', () => pm.expect(pm.response.json().items[0].id).to.not.eql(pm.collectionVariables.get('day51FirstId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/search with the cursor and 3 passengers (another search → 400 INVALID_CURSOR)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-13&passengers=3&limit=1&cursor={{day51Cursor}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));",
+                  "pm.test('INVALID_CURSOR', () => pm.expect(pm.response.json().error.code).to.eql('INVALID_CURSOR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/search over 8 days with 10 passengers (→ 422)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-19&passengers=10"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));",
+                  "pm.test('both problems named', () => pm.expect(pm.response.json().error.details.map((d) => d.code)).to.eql(['DATE_RANGE_TOO_LONG', 'INVALID_PASSENGER_COUNT']));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id (VN511 → 200, availability per class and local times)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day51FlightA}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('free seats per class', () => pm.expect(body.availability.map((a) => [a.fareClass, a.availableSeats])).to.eql([['ECONOMY', 168], ['BUSINESS', 8]]));",
+                  "pm.test('local times', () => pm.expect([body.departureLocal, body.arrivalLocal, body.arrivalDayOffset]).to.eql(['2027-01-12T06:00:00+07:00', '2027-01-12T08:00:00+07:00', 0]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking without seats and without fareClass (bob → 422 MISSING_FIELD)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day51FlightB}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"passengers\": [{ \"name\": \"Bob Tran\" }] }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));",
+                  "pm.test('fareClass is required', () => pm.expect(pm.response.json().error.details[0]).to.include({ field: 'fareClass', code: 'MISSING_FIELD' }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking BUSINESS on the economy-only VN512 (bob → 422 FARE_CLASS_NOT_ON_AIRCRAFT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day51FlightB}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"fareClass\": \"BUSINESS\", \"passengers\": [{ \"name\": \"Bob Tran\" }] }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422', () => pm.response.to.have.status(422));",
+                  "pm.test('FARE_CLASS_NOT_ON_AIRCRAFT', () => pm.expect(pm.response.json().error.code).to.eql('FARE_CLASS_NOT_ON_AIRCRAFT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking 2 × ECONOMY on VN511 (bob → 201, both seats economy)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day51FlightA}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"fareClass\": \"ECONOMY\", \"passengers\": [{ \"name\": \"Bob Tran\" }, { \"name\": \"An Le\" }] }"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('the lowest economy seats, 3A and 3B', () => pm.expect(pm.response.json().passengers.map((p) => [p.seat, p.fareClass])).to.eql([['3A', 'ECONOMY'], ['3B', 'ECONOMY']]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Day 29 — Correlation investigate",
       "description": "Fixed requestId for log grep across api + flight-notifier.",
       "item": [
@@ -3847,7 +4342,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"passengers\": [{ \"name\": \"Correlation Probe\" }]\n}"
+              "raw": "{\n  \"fareClass\": \"BUSINESS\",\n  \"passengers\": [{ \"name\": \"Correlation Probe\" }]\n}"
             },
             "url": "{{baseUrl}}/api/flights/{{flightId}}/bookings",
             "description": "Uses flightId from step 1 (opened in 1b). Grep {{requestId}}-booking in both logs after ~5s."

@@ -92,30 +92,81 @@ test("refunding a charge the simulator never made fails unknown_charge, not retr
   }
 });
 
-test("delayMs makes every call take at least that long", async () => {
-  const gateway = simulator({ delayMs: 40, timeoutMs: 1_000 });
+/**
+ * A clock the test drives (Day 51): the two tests below used to measure real
+ * milliseconds (`elapsed >= 45 && < 1000`), the kind of bound a loaded machine
+ * breaks. Here a wait resolves only when told to, and the timeout fires only
+ * when the test aborts it. The "never answers" tokens still run on the real
+ * clock with SHORT_TIMEOUT_MS, but assert only outcomes, never durations.
+ */
+function manualTimers() {
+  const waits: number[] = [];
+  const timeouts: number[] = [];
+  const controllers: AbortController[] = [];
+  let releaseWaits = true;
 
-  const started = performance.now();
-  await gateway.charge(charge(SIMULATOR_SUCCESS_TOKEN));
-  const elapsed = performance.now() - started;
+  return {
+    waits,
+    timeouts,
+    holdWaits() {
+      releaseWaits = false;
+    },
+    fireTimeouts() {
+      for (const controller of controllers) {
+        controller.abort(new DOMException("timed out", "TimeoutError"));
+      }
+    },
+    timers: {
+      wait(ms: number, signal: AbortSignal) {
+        waits.push(ms);
+        if (releaseWaits) {
+          return Promise.resolve();
+        }
+        return new Promise<void>((_, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      },
+      timeoutSignal(ms: number) {
+        timeouts.push(ms);
+        const controller = new AbortController();
+        controllers.push(controller);
+        return controller.signal;
+      },
+    },
+  };
+}
 
-  assert.ok(elapsed >= 35, `charge took ${elapsed.toFixed(1)} ms`);
+test("delayMs is waited once per call, under the adapter's timeout", async () => {
+  const clock = manualTimers();
+  const gateway = createSimulatedPaymentGateway({ delayMs: 40, timeoutMs: 1_000, timers: clock.timers });
+  const request = charge(SIMULATOR_SUCCESS_TOKEN);
+
+  await gateway.charge(request);
+  await gateway.refund(refundOf(request.paymentId));
+
+  assert.deepEqual(clock.waits, [40, 40]);
+  assert.deepEqual(clock.timeouts, [1_000, 1_000]);
 });
 
 test("the timeout aborts a slow call and answers unknown instead of waiting for it", async () => {
-  const gateway = simulator({ delayMs: 5_000, timeoutMs: 50 });
+  const clock = manualTimers();
+  const gateway = createSimulatedPaymentGateway({ delayMs: 5_000, timeoutMs: 50, timers: clock.timers });
   const request = charge(SIMULATOR_SUCCESS_TOKEN);
+  clock.holdWaits();
 
-  const started = performance.now();
-  const result = await gateway.charge(request);
-  const elapsed = performance.now() - started;
-
-  assert.deepEqual(result, { outcome: "unknown", reason: "timeout" });
-  assert.ok(elapsed >= 45 && elapsed < 1_000, `charge took ${elapsed.toFixed(1)} ms`);
-  assert.deepEqual(await gateway.refund(refundOf(request.paymentId)), {
-    outcome: "unknown",
-    reason: "timeout",
+  let settled = false;
+  const pending = gateway.charge(request).finally(() => {
+    settled = true;
   });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, "the call must still be waiting before the timeout fires");
+
+  clock.fireTimeouts();
+  assert.deepEqual(await pending, { outcome: "unknown", reason: "timeout" });
+
+  const refund = gateway.refund(refundOf(request.paymentId));
+  clock.fireTimeouts();
+  assert.deepEqual(await refund, { outcome: "unknown", reason: "timeout" });
 });
 
 test("tok_timeout_before_charge: the first charge never reaches the provider, so it takes no money; charging the same id again succeeds", async () => {

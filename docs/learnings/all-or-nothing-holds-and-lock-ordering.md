@@ -82,6 +82,31 @@ lock the candidates → compute a verdict over them → UPDATE … WHERE verdict
   provider's net money against the paid bookings — each check shown failing on data broken on
   purpose.
 
+## Day 51: auditing every statement for the snapshot trap
+
+**The rule.** A statement that can wait for a lock *and* then finds rows by a foreign key (seats
+`WHERE booking_id IN (…)`) finds them as they were before the wait. It needs one of two things:
+
+1. a pre-lock in a statement of its own, so the second statement starts after the wait (cancel,
+   Day 50); or
+2. an invariant that keeps the set fixed while it could wait — and a test that fails if the
+   invariant goes away.
+
+| Statement | Can wait for a lock? | Finds rows by a key whose set can change meanwhile? | Why it is safe |
+|---|---|---|---|
+| `holdAutoSeats` | flight/fares share locks only; seats `SKIP LOCKED` | no — `status = 'AVAILABLE'`, re-checked under the lock | a seat taken meanwhile is skipped |
+| `holdChosenSeats` | yes (seats) | no — seats by primary key | the status is re-read on the locked row |
+| `expireDueHolds` | seats only (bookings `SKIP LOCKED`) | seats by `booking_id` | **invariant**: a `HELD` booking's seats never change |
+| `confirmHold` (SettlePayment) | yes (booking) | seats by `booking_id` | **invariant**, same one |
+| `cancel` | yes (booking) | seats by `booking_id` | pre-lock statement (Day 50) |
+| `changeSeat` | yes | no — separate statements, seats by primary key | each statement starts after the lock |
+
+`api/tests/integration/postgres-snapshot-audit.integration.test.ts` races `confirmHold` against a
+cancel and a refused seat change (both correct), and adds a **control**: a test-only writer that moves
+a `HELD` booking's seat. The queued confirm then finds the old seat in its snapshot, books nothing,
+and leaves the new seat `HELD` for a `CONFIRMED` booking — caught by the invariants. Allowing a seat
+change on `HELD` bookings would need a pre-lock in `confirmHold` first.
+
 ## Related
 
 ADR-004 addenda (Day 47 `SKIP LOCKED`, Day 48A lock order); domain-model Decision 11;

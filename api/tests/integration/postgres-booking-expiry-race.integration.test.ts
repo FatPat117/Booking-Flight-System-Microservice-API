@@ -115,7 +115,8 @@ async function hold(
   flightId: string,
   passengers: Array<{ name: string; seat?: string }> = [{ name: "Alice" }],
 ): Promise<string> {
-  const result = await createBookingAt(HELD_AT)(flightId, { passengers }, OWNER);
+  const auto = passengers.every((passenger) => passenger.seat === undefined);
+  const result = await createBookingAt(HELD_AT)(flightId, auto ? { fareClass: "ECONOMY", passengers } : { passengers }, OWNER);
   assert.equal(result.outcome, "created", JSON.stringify(result));
   return result.outcome === "created" ? result.booking.id : "";
 }
@@ -424,7 +425,7 @@ test("Test D — the last seat's hold lapses while someone books it: the new boo
       expireHoldsAt(DEADLINE)(),
       // Staggered a little so both orders happen across the rounds.
       sleep(round % 3).then(() =>
-        createBookingAt(DEADLINE)(flightId, { passengers: [{ name: "Carol" }] }, OWNER),
+        createBookingAt(DEADLINE)(flightId, { fareClass: "ECONOMY", passengers: [{ name: "Carol" }] }, OWNER),
       ),
     ]);
 

@@ -16,14 +16,17 @@ import {
   createInMemoryAirportRepository,
   createInMemoryAuditRecorder,
   createInMemoryFlightRepository,
+  createInMemoryFlightSearch,
+  createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createInMemoryTransactionRunner,
   createUnusedBookingReads,
-  createUnusedPayForBooking,
   createUnusedFlightSeatMap,
   createUnusedOpenFlight,
+  createUnusedPayForBooking,
   type InMemoryAuditRecorder,
 } from "./fakes/in-memory.js";
+import { TEST_AIRPORTS } from "./fixtures/flights.js";
 
 const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
 const FIXED_TIME = new Date("2026-10-10T00:00:00.000Z");
@@ -76,7 +79,7 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
 
   const app = createApp({
     getFlight: createGetFlight({
-      flightRepository,
+      flightSearch: createInMemoryFlightSearch(createInMemoryFlightStore(), TEST_AIRPORTS),
       getCurrentTime: () => FIXED_TIME,
     }),
     listFlights: createListFlights({
@@ -89,6 +92,7 @@ function createContext(): { app: Express; audit: InMemoryAuditRecorder } {
     createBooking: async () => ({ outcome: "flight-not-found" }),
     cancelBooking: async () => ({ outcome: "not-found" }),
     changeSeat: async () => ({ outcome: "not-found" }),
+    searchFlights: async () => ({ outcome: "success" as const, items: [], page: { hasNextPage: false, nextCursor: null } }),
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     registerAirport: createRegisterAirport({ ...common, airportRepository }),

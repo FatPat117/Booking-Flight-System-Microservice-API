@@ -177,7 +177,7 @@ export function runBookingRepositoryContract(
   async function book(
     subject: BookingRepositoryContractSubject,
     booking: Booking,
-    request: SeatHoldRequest = { kind: "auto", count: 1 },
+    request: SeatHoldRequest = { kind: "auto", count: 1, fareClass: "ECONOMY" },
   ): Promise<HoldCodes> {
     const held = await holdPriced(subject, booking, request);
     return held.outcome === "held"
@@ -262,10 +262,46 @@ export function runBookingRepositoryContract(
 
   test(name("a sold-out open flight is not-enough-seats, not sales-closed"), async () => {
     const subject = await setup();
-    const flight = await seedFlight(subject, 0);
+    const flight = await seedFlight(subject, 1);
+    assert.equal((await book(subject, makeBooking(flight.id))).outcome, "held");
 
     assert.deepEqual(await book(subject, makeBooking(flight.id)), {
       outcome: "not-enough-seats",
+    });
+  });
+
+  // ---- Day 51: the auto hold takes one requested fare class (Decision 17, BR-BOOK-09) ----
+
+  test(name("an auto hold takes the lowest free seats of the requested class only: BUSINESS from 1A, ECONOMY from 3A"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 30, { aircraftId: FIXTURE_TWO_CLASS_AIRCRAFT_ID });
+
+    assert.deepEqual(await book(subject, makeBooking(flight.id), { kind: "auto", count: 2, fareClass: "ECONOMY" }), {
+      outcome: "held",
+      seats: ["3A", "3B"],
+    });
+    assert.deepEqual(await book(subject, makeBooking(flight.id), { kind: "auto", count: 2, fareClass: "BUSINESS" }), {
+      outcome: "held",
+      seats: ["1A", "1B"],
+    });
+  });
+
+  test(name("too few seats in the requested class is not-enough-seats, even with room in the other class"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 30, { aircraftId: FIXTURE_TWO_CLASS_AIRCRAFT_ID });
+
+    assert.deepEqual(await book(subject, makeBooking(flight.id), { kind: "auto", count: 13, fareClass: "BUSINESS" }), {
+      outcome: "not-enough-seats",
+    });
+    assert.deepEqual(await subject.seats(flight.id).then((seats) => seats.filter((seat) => seat.status !== "AVAILABLE")), []);
+  });
+
+  test(name("a class the flight has no seat in is fare-class-not-on-flight, and nothing is held"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 5);
+
+    assert.deepEqual(await book(subject, makeBooking(flight.id), { kind: "auto", count: 1, fareClass: "BUSINESS" }), {
+      outcome: "fare-class-not-on-flight",
     });
   });
 
@@ -277,7 +313,7 @@ export function runBookingRepositoryContract(
     await book(subject, makeBooking(flight.id)); // 1A, so the next three skip it
 
     const booking = makeBooking(flight.id);
-    assert.deepEqual(await book(subject, booking, { kind: "auto", count: 3 }), {
+    assert.deepEqual(await book(subject, booking, { kind: "auto", count: 3, fareClass: "ECONOMY" }), {
       outcome: "held",
       seats: ["1B", "1C", "1D"],
     });
@@ -297,7 +333,7 @@ export function runBookingRepositoryContract(
     const before = await statuses(subject, flight.id);
 
     assert.deepEqual(
-      await book(subject, makeBooking(flight.id), { kind: "auto", count: 3 }),
+      await book(subject, makeBooking(flight.id), { kind: "auto", count: 3, fareClass: "ECONOMY" }),
       { outcome: "not-enough-seats" },
     );
     assert.deepEqual(await statuses(subject, flight.id), before);
@@ -360,7 +396,7 @@ export function runBookingRepositoryContract(
     const subject = await setup();
     const flight = await seedFlight(subject, 3);
     const booking = makeBooking(flight.id);
-    await book(subject, booking, { kind: "auto", count: 3 });
+    await book(subject, booking, { kind: "auto", count: 3, fareClass: "ECONOMY" });
 
     assert.deepEqual(await subject.repository.cancel(booking.id, ADMIN, CANCEL_AT), {
       outcome: "cancelled",
@@ -500,7 +536,7 @@ export function runBookingRepositoryContract(
       passengers: ["Alice", "Bob"].map((name) => ({ name, seat: null, fareClass: null, price: null })),
     });
 
-    const held = await holdPriced(subject, booking, { kind: "auto", count: 2 });
+    const held = await holdPriced(subject, booking, { kind: "auto", count: 2, fareClass: "BUSINESS" });
     assert.equal(held.outcome, "held");
 
     const stored = await subject.repository.findById(booking.id, ADMIN);
@@ -661,7 +697,7 @@ export function runBookingRepositoryContract(
     subject: BookingRepositoryContractSubject,
     flight: Flight,
     holdExpiresAt: Date,
-    request: SeatHoldRequest = { kind: "auto", count: 1 },
+    request: SeatHoldRequest = { kind: "auto", count: 1, fareClass: "ECONOMY" },
   ): Promise<Booking> {
     const booking = {
       ...makeBooking(flight.id),
@@ -790,7 +826,7 @@ export function runBookingRepositoryContract(
   test(name("cancel 1 ms before the deadline cancels and releases the seats"), async () => {
     const subject = await setup();
     const flight = await seedFlight(subject, 2);
-    const valid = await seedHold(subject, flight, NOW, { kind: "auto", count: 2 });
+    const valid = await seedHold(subject, flight, NOW, { kind: "auto", count: 2, fareClass: "ECONOMY" });
 
     assert.deepEqual(
       await subject.repository.cancel(valid.id, ownerScope(ACCOUNT_A), new Date(NOW.getTime() - 1)),
@@ -1049,7 +1085,7 @@ export function runBookingRepositoryContract(
   test(name("confirmHold 1 ms before the deadline confirms the booking and books every seat"), async () => {
     const subject = await setup();
     const flight = await seedFlight(subject, 3);
-    const held = await seedHold(subject, flight, NOW, { kind: "auto", count: 2 });
+    const held = await seedHold(subject, flight, NOW, { kind: "auto", count: 2, fareClass: "ECONOMY" });
 
     const result = await subject.repository.confirmHold(
       held.id,

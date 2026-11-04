@@ -237,7 +237,7 @@ test("findPage keeps a sold-out flight and a flight with no seats at all, counti
   await keepFirstSeats(dataSource, seatless.id, 0);
   const booking = makeBooking({ flightId: soldOut.id });
   await createPostgresTransactionRunner(dataSource).run(async () => {
-    await bookingRepository.holdSeats(soldOut.id, booking.id, { kind: "auto", count: 1 }, new Date("2026-07-20T00:00:00.000Z"));
+    await bookingRepository.holdSeats(soldOut.id, booking.id, { kind: "auto", count: 1, fareClass: "ECONOMY" }, new Date("2026-07-20T00:00:00.000Z"));
     await bookingRepository.create(booking);
   });
 
@@ -259,7 +259,7 @@ test("findSeats reports a held seat as HELD", async () => {
   await repository.create(flight);
   const booking = makeBooking({ flightId: flight.id });
   await createPostgresTransactionRunner(dataSource).run(async () => {
-    await bookingRepository.holdSeats(flight.id, booking.id, { kind: "auto", count: 1 }, new Date("2026-07-20T00:00:00.000Z"));
+    await bookingRepository.holdSeats(flight.id, booking.id, { kind: "auto", count: 1, fareClass: "ECONOMY" }, new Date("2026-07-20T00:00:00.000Z"));
     await bookingRepository.create(booking);
   });
 

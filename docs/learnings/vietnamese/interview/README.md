@@ -6,11 +6,11 @@ Mỗi file là một nhóm câu hỏi. Mỗi câu có: **trả lời ngắn** (n
 | File | Chủ đề |
 |---|---|
 | [kien-truc-va-thiet-ke.md](./kien-truc-va-thiet-ke.md) | Port/adapter, use case, DI, monolith trước microservice, khi nào thêm pattern |
-| [database-va-transaction.md](./database-va-transaction.md) | Transaction, isolation, migration, index, bẫy Postgres/TypeORM |
+| [database-va-transaction.md](./database-va-transaction.md) | Transaction, isolation, migration, index, bẫy Postgres/TypeORM, sargable + keyset (Day 51) |
 | [concurrency.md](./concurrency.md) | Race condition, OCC, khoá, deadlock |
 | [messaging-va-outbox.md](./messaging-va-outbox.md) | RabbitMQ, outbox, DLQ, at-least-once, tiến hoá contract |
 | [bao-mat.md](./bao-mat.md) | JWT, 401/403/404, BOLA, least privilege |
-| [testing.md](./testing.md) | Chiến lược test, fake vs DB thật, contract test, mutation |
+| [testing.md](./testing.md) | Chiến lược test, fake vs DB thật, contract test, mutation, differential test (Day 51) |
 | [van-hanh-docker-va-observability.md](./van-hanh-docker-va-observability.md) | Config, Docker, compose, shutdown, health check, logging, truy vết, sự cố vận hành |
 
 Migration có thư mục riêng: [../migrations/](../migrations/README.md).
@@ -44,6 +44,6 @@ Migration có thư mục riêng: [../migrations/](../migrations/README.md).
 
 - Mở bằng **vấn đề**, rồi cách giải, rồi **đánh đổi** — đừng chỉ nói tên pattern.
 - Luôn có một con số hoặc một lần "tôi đã sai và phát hiện ra nhờ…" (xem mục bẫy trong
-  [on-tap-nhanh-day-01-50.md](../on-tap-nhanh-day-01-50.md)).
+  [on-tap-nhanh-day-01-51.md](../on-tap-nhanh-day-01-51.md)).
 - Nói rõ cái **chưa làm** và vì sao (chưa đối soát payment lỗi, sơ đồ ghế trễ tới ~60 s sau hạn, chưa dedupe consumer):
   biết giới hạn của mình được đánh giá cao.

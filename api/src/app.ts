@@ -21,6 +21,7 @@ import type { CreateFlight } from "./flights/create-flight.js";
 import type { GetFlight } from "./flights/get-flight.js";
 import type { GetFlightSeatMap } from "./flights/get-flight-seat-map.js";
 import type { ListFlights } from "./flights/list-flights.js";
+import type { SearchFlights } from "./flights/search-flights.js";
 import type { OpenFlight } from "./flights/open-flight.js";
 import type { HealthChecks } from "./health/health-checks.js";
 import { requestFingerprint } from "./idempotency/request-fingerprint.js";
@@ -55,6 +56,7 @@ export type AppDependencies = {
   getBookingByReference: GetBookingByReference;
   listBookings: ListBookings;
   listFlights: ListFlights;
+  searchFlights: SearchFlights;
   registerAirport: RegisterAirport;
   listAirports: ListAirports;
   registerAircraft: RegisterAircraft;
@@ -102,6 +104,7 @@ export function createApp(dependencies: AppDependencies) {
     getBookingByReference,
     listBookings,
     listFlights,
+    searchFlights,
     registerAirport,
     listAirports,
     registerAircraft,
@@ -163,6 +166,37 @@ export function createApp(dependencies: AppDependencies) {
       items: result.items,
       pagination: result.pagination,
     });
+  });
+
+  // Before /api/flights/:id, or "search" would be read as an id.
+  app.get("/api/flights/search", async (req, res) => {
+    const result = await searchFlights({
+      origin: req.query.origin,
+      destination: req.query.destination,
+      departureDateFrom: req.query.departureDateFrom,
+      departureDateTo: req.query.departureDateTo,
+      passengers: req.query.passengers,
+      sort: req.query.sort,
+      limit: req.query.limit,
+      cursor: req.query.cursor,
+    });
+
+    if (result.outcome === "validation_failed") {
+      return sendApiError(res, 422, {
+        code: "VALIDATION_FAILED",
+        message: "Request contains invalid search parameters",
+        details: result.issues,
+      });
+    }
+
+    if (result.outcome === "invalid_cursor") {
+      return sendApiError(res, 400, {
+        code: "INVALID_CURSOR",
+        message: "cursor does not belong to this search; start again without it",
+      });
+    }
+
+    return res.status(200).json({ items: result.items, page: result.page });
   });
 
   app.get("/api/flights/:id", async (req, res) => {
@@ -304,6 +338,16 @@ export function createApp(dependencies: AppDependencies) {
         return sendApiError(res, 409, {
           code: "NOT_ENOUGH_SEATS",
           message: "Not enough seats available for every passenger",
+        });
+      }
+
+      if (result.outcome === "fare-class-not-on-flight") {
+        return sendApiError(res, 422, {
+          code: "FARE_CLASS_NOT_ON_AIRCRAFT",
+          message: "This flight has no seats in the requested fare class",
+          details: [
+            { field: "fareClass", code: "FARE_CLASS_NOT_ON_AIRCRAFT", message: "This flight has no seats in the requested fare class" },
+          ],
         });
       }
 

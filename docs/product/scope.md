@@ -93,10 +93,11 @@ As a guest, I want to search flights by origin, destination and date.
 - Given two `OPEN` flights SGN→HAN on 2026-11-10 and one `CANCELLED`, when I search SGN→HAN on that date, then I see the two open flights ordered by departure time, each with its price per fare class and its number of available seats.
 - Given the date `2026-02-30`, then `422`.
 - Given no matching flights, then `200` with an empty list (not `404`).
+- *Added Day 51 (Decision 17):* "on that date" is the origin airport's local date; a range of up to 7 local dates is allowed. Given 2 passengers, a flight shows only if one fare class has 2 free seats, and each result shows local departure and arrival times. Results come in keyset pages (`nextCursor`); a cursor from another search is `400`.
 
 **US-FLT-05 (Must): View flight details**
 As a guest, I want to see one flight's route, times, status, prices and available seats per fare class.
-- Given `VN123` exists, then I get its details (`200`).
+- Given `VN123` exists, then I get its details (`200`), including free seats and the fare for each fare class and local departure/arrival times (Day 51).
 - Given an unknown id, then `404 FLIGHT_NOT_FOUND`.
 
 ### Seats

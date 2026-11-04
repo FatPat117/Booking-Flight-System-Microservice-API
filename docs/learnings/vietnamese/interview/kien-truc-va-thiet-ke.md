@@ -71,3 +71,13 @@ lần đếm ghế phải join `bookings` và câu giữ ghế phải "cướp" 
 thì **suy ra khi đọc** (`HELD` quá hạn hiển thị `EXPIRED`), giống `CLOSED` của chuyến bay. Còn quyết
 định (huỷ, thanh toán) **tự kiểm hạn trong `WHERE`**, không tin job. Đánh đổi chấp nhận: sơ đồ ghế
 trễ tới ~60 s — ghế vẫn không bán hai lần được.
+
+### 11. Có nên tách read model / CQRS cho tìm kiếm chuyến bay chưa? (Day 51)
+
+**Trả lời:** Đo trước. Sinh 20 400 chuyến, 3,9 triệu ghế, `EXPLAIN (ANALYZE, BUFFERS)`: tuyến đông
+nhất, 3 ngày, 2 khách mất 4,8 ms khi đếm ghế trống **trực tiếp** từ `flight_seats`. Phần tốn là đếm
+ghế, không phải tìm chuyến; đếm chỉ ghế `AVAILABLE` từ bảng giá giảm buffer 3,6 lần. Một partial
+index trên ghế trống theo hạng còn nhanh gấp đôi nữa nhưng **không làm**: nó nằm trên bảng nóng nhất
+và chưa có đau. Read model riêng sẽ thêm một đường ghi thứ hai vào mỗi lần giữ/huỷ/hết hạn — chưa có
+bằng chứng cần. Bước nhỏ đã làm: tìm kiếm có **port đọc riêng** (`FlightSearch`) với hình dạng dữ
+liệu của màn hình, không nhét vào `FlightRepository` — nếu giai đoạn E cần tách, ranh giới đã có.

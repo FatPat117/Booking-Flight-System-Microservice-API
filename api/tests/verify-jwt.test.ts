@@ -23,14 +23,16 @@ import {
   createInMemoryAirportRepository,
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
+  createInMemoryFlightSearch,
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
-  createUnusedPayForBooking,
   createUnusedFlightSeatMap,
   createUnusedOpenFlight,
+  createUnusedPayForBooking,
   createUnusedReferenceData,
 } from "./fakes/in-memory.js";
+import { TEST_AIRPORTS } from "./fixtures/flights.js";
 
 const TEST_JWT_SECRET = "test-jwt-secret-at-least-32-chars!!";
 
@@ -256,7 +258,7 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
 
   const app = createApp({
     getFlight: createGetFlight({
-      flightRepository,
+      flightSearch: createInMemoryFlightSearch(flights, TEST_AIRPORTS),
       getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
     }),
     ...createUnusedOpenFlight(),
@@ -288,6 +290,7 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
     }),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     changeSeat: async () => ({ outcome: "not-found" as const }),
+    searchFlights: async () => ({ outcome: "success" as const, items: [], page: { hasNextPage: false, nextCursor: null } }),
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
@@ -324,7 +327,7 @@ test("GET /api/whoami returns 401 without a token", async () => {
 
   const app = createApp({
     getFlight: createGetFlight({
-      flightRepository,
+      flightSearch: createInMemoryFlightSearch(flights, TEST_AIRPORTS),
       getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
     }),
     ...createUnusedOpenFlight(),
@@ -345,6 +348,7 @@ test("GET /api/whoami returns 401 without a token", async () => {
     createBooking: async () => ({ outcome: "flight-not-found" as const }),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     changeSeat: async () => ({ outcome: "not-found" as const }),
+    searchFlights: async () => ({ outcome: "success" as const, items: [], page: { hasNextPage: false, nextCursor: null } }),
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),

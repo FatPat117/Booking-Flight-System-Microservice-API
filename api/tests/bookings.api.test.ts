@@ -28,12 +28,13 @@ import {
   TEST_AIRPORTS,
 } from "./fixtures/flights.js";
 import {
+  createFakePaymentGateway,
   createInMemoryAircraftRepository,
   createInMemoryAirportRepository,
-  createFakePaymentGateway,
   createInMemoryAuditRecorder,
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
+  createInMemoryFlightSearch,
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createInMemoryIdempotencyRepository,
@@ -110,7 +111,7 @@ function createContext(): {
 
   const paymentRepository = createInMemoryPaymentRepository();
   const app = createApp({
-    getFlight: createGetFlight({ flightRepository, getCurrentTime }),
+    getFlight: createGetFlight({ flightSearch: createInMemoryFlightSearch(flights, TEST_AIRPORTS), getCurrentTime }),
     getFlightSeatMap: createGetFlightSeatMap({ flightRepository }),
     createFlight: createCreateFlight({
       ...common,
@@ -128,6 +129,7 @@ function createContext(): {
     }),
     cancelBooking: createCancelBooking({ ...common, bookingRepository, paymentRepository }),
     changeSeat: createChangeSeat({ ...common, bookingRepository }),
+    searchFlights: async () => ({ outcome: "success" as const, items: [], page: { hasNextPage: false, nextCursor: null } }),
     payForBooking: createPayForBooking({
       ...common,
       bookingRepository,
@@ -210,11 +212,14 @@ function book(
   accessToken: string,
   flightId: string,
   passengers: PassengerBody[] = [{ name: "Alice" }],
+  fareClass = "ECONOMY",
 ) {
+  // Without seats the request names a fare class (Decision 17); with seats it must not.
+  const auto = passengers.every((passenger) => passenger.seat === undefined);
   return request(app)
     .post(`/api/flights/${flightId}/bookings`)
     .set("Authorization", `Bearer ${accessToken}`)
-    .send({ passengers });
+    .send(auto ? { fareClass, passengers } : { passengers });
 }
 
 /** Who sits where, without the prices (the cases about seating only). */
@@ -467,6 +472,10 @@ test("POST booking rejects body shapes the rules forbid with 422 and the rule's 
       codes: ["UNSUPPORTED_FIELD"],
     },
     { body: { passengerName: "Alice" }, codes: ["UNSUPPORTED_FIELD", "INVALID_PASSENGER_COUNT"] },
+    // Decision 17: without seats a fare class is required; with seats it is not accepted.
+    { body: { passengers: [{ name: "Alice" }] }, codes: ["MISSING_FIELD"] },
+    { body: { fareClass: "FIRST", passengers: [{ name: "Alice" }] }, codes: ["INVALID_FARE_CLASS"] },
+    { body: { fareClass: "ECONOMY", passengers: [{ name: "Alice", seat: "1A" }] }, codes: ["UNSUPPORTED_FIELD"] },
   ];
 
   for (const { body, codes } of cases) {
@@ -483,6 +492,18 @@ test("POST booking rejects body shapes the rules forbid with 422 and the rule's 
   // None of them held a seat.
   const statuses = await seatStatuses(app, flightId);
   assert.ok(Object.values(statuses).every((status) => status === "AVAILABLE"));
+});
+
+test("POST booking without seats in a class the flight does not have is 422 FARE_CLASS_NOT_ON_AIRCRAFT, and no seat is taken", async () => {
+  const { app } = createContext();
+  const flightId = await seedFlight(app, 6);
+
+  const response = await book(app, USER_A, flightId, [{ name: "Alice" }], "BUSINESS");
+
+  assert.equal(response.status, 422);
+  assert.equal(response.body.error.code, "FARE_CLASS_NOT_ON_AIRCRAFT");
+  assert.deepEqual(response.body.error.details.map((issue: { field: string }) => issue.field), ["fareClass"]);
+  assert.ok(Object.values(await seatStatuses(app, flightId)).every((status) => status === "AVAILABLE"));
 });
 
 test("POST booking on a flight not yet opened for sale is 409 SALES_CLOSED, and no seat is taken", async () => {
@@ -540,7 +561,7 @@ test("every booking endpoint returns 401 without a token", async () => {
   const bookingId = await seedBooking(app, USER_A);
 
   const responses = await Promise.all([
-    request(app).post(`/api/flights/${flightId}/bookings`).send({ passengers: [{ name: "Alice" }] }),
+    request(app).post(`/api/flights/${flightId}/bookings`).send({ fareClass: "ECONOMY", passengers: [{ name: "Alice" }] }),
     request(app).get("/api/bookings"),
     request(app).get(`/api/bookings/${bookingId}`),
     request(app).get("/api/bookings/by-reference/K7Q4PZ"),

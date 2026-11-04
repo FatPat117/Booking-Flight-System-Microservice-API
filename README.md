@@ -85,7 +85,7 @@ Identity (`services/identity`, port `3001`) issues JWTs: `POST /api/identity/reg
 | Endpoint | Credential |
 |---|---|
 | `GET /live`, `GET /health`, `GET /ready` | none |
-| `GET /api/flights`, `GET /api/flights/:id` | none |
+| `GET /api/flights`, `GET /api/flights/search`, `GET /api/flights/:id` | none |
 | `GET /api/airports` | none |
 | `GET /api/whoami` | any valid JWT |
 | `POST /api/flights`, `POST /api/flights/:id/open` | JWT with `role=admin` |
@@ -184,7 +184,7 @@ POST /api/flights/:flightId/bookings
 GET /api/bookings/by-reference/K7Q4PZ
 ```
 
-- **Breaking change to the booking body.** `{ "passengerName": … }` is replaced by `passengers`: 1 to 9 (BR-BOOK-01, counted before any passenger is read), each with a non-empty `name`. Either every passenger names a `seat` (`12A`) or none does (BR-BOOK-09); with none the system holds the lowest free seats in (row, letter) order. The old body answers `422 UNSUPPORTED_FIELD`.
+- **Breaking change to the booking body.** `{ "passengerName": … }` is replaced by `passengers`: 1 to 9 (BR-BOOK-01, counted before any passenger is read), each with a non-empty `name`. Either every passenger names a `seat` (`12A`) or none does (BR-BOOK-09); with none the system holds the lowest free seats in (row, letter) order — since Day 51 of the `fareClass` the body names (required then, see Day 51). The old body answers `422 UNSUPPORTED_FIELD`.
 - **All or nothing** (BR-SEAT-02): either every passenger gets a seat or no seat is held. `409 NOT_ENOUGH_SEATS` (system-picked), `409 SEATS_UNAVAILABLE` with the taken seat codes in `details` (chosen; never who holds them), `422 UNKNOWN_SEAT` for a code the flight does not have, `422 MIXED_SEAT_SELECTION`, `422 DUPLICATE_SEAT`, `422 INVALID_PASSENGER_COUNT`. `FLIGHT_SOLD_OUT` is gone.
 - **A new booking is `HELD` for 15 minutes** (`holdExpiresAt`, BR-BOOK-04) and its seats show `HELD` on the map. Existing bookings were migrated `active → CONFIRMED`, `cancelled → CANCELLED`. A `HELD` booking can be cancelled until its hold expires (Day 48B, below); its passengers keep the seat codes they had, as history.
 - **Booking reference** (BR-BOOK-05): 6 characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no `0/O`, `1/I`), unique (`UQ_bookings_reference`). A clash is drawn again, up to 5 times, inside the same transaction (`INSERT … ON CONFLICT DO NOTHING` keeps it usable). `GET /api/bookings/by-reference/:reference` follows the same ownership rule as by id: another account's or a malformed reference → `404 BOOKING_NOT_FOUND`.
@@ -306,11 +306,45 @@ PUT … the same seat again                → 200, nothing written, no audit
 
 - **The 24 h rule (BR-BOOK-06, Decision 16).** A `CONFIRMED` booking is cancellable while `departure_at − 24 h > now`; at exactly 24 h it is already closed. The cancel statement reads the departure itself, with the flight row share-locked, so a departure change cannot slip between the check and the write. A `HELD` booking is limited only by its hold (BR-BOOK-10).
 - **Cancelling a paid booking refunds it in full, through reconciliation.** In the same transaction as the cancel, the `SUCCEEDED` payment becomes `REFUND_PENDING`, due at once; the `payment-reconciliation-job` refunds it on its next run, with its retries and `REFUND_FAILED` (Day 49C). The cancel request never calls the gateway. `refund` is `null` for an unpaid booking. There is no `GET` for a payment yet: `booking-cancelled` says a refund was started, not that it finished.
-- **`booking-cancelled` has a contract and a consumer** (`packages/contracts`, flight-notifier `booking_cancelled_consumed`): reference, flight, released seats, `refund` (`paymentId`, amount) or `null`; no names. Messages relayed before Day 50 lack `reference` and go to `booking-cancelled.dlq` (14 on the dev stack).
+- **`booking-cancelled` has a contract and a consumer** (`packages/contracts`, flight-notifier `booking_cancelled_consumed`): reference, flight, released seats, `refund` (`paymentId`, amount) or `null`; no names. Messages relayed before Day 50 lack `reference` and go to `booking-cancelled.dlq` (14 on the dev stack, recorded and purged on Day 51).
 - **Seat change (US-BOOK-06, BR-BOOK-07).** One passenger per request, `CONFIRMED` bookings only, the same fare class, while the flight is on sale (`OPEN` and more than 1 h before departure). The price snapshot and the total do not move. Answers: `409 SEAT_UNAVAILABLE` (held or booked by anyone, this booking included), `409 FARE_CLASS_MISMATCH`, `409 BOOKING_NOT_CHANGEABLE` (not `CONFIRMED`), `409 SALES_CLOSED`, `422` `UNKNOWN_SEAT` or `INVALID_SEAT`, `404 BOOKING_NOT_FOUND` / `PASSENGER_NOT_FOUND` (position not 1–9 or not in the booking). Audited as `BOOKING_SEAT_CHANGED`; no event.
 - **Why `PUT` and no Idempotency-Key.** "Set passenger 1's seat to 10C" is naturally idempotent: the repeat finds the passenger already there and changes nothing. A payment needs a key because "create a payment" twice is two payments.
 - **Locks.** The flight `FOR SHARE` and the booking `FOR UPDATE` first, then **both seats together in `(row, letter)` order**, whichever is the passenger's own. Locking the own seat first lets `12A → 14C` and `14C → 12A` deadlock; measured, that control deadlocks 5 rounds out of 5, the real change 0 in 10 (both answer `409 SEAT_UNAVAILABLE`). Cancel now takes the booking's lock in a statement of its own before releasing seats: a one-statement cancel that waited for a seat change released the seats from its older snapshot and left the new seat `BOOKED` for a cancelled booking (race test C, Decision 16).
 - **Measured** (e2e on the compose stack): a paid cancel answered in 11 ms with `REFUND_PENDING`; the job refunded it 4 s later; the notifier logged the refund's payment id.
+
+## Flight search and details (Day 51)
+
+```http
+GET /api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2026-12-01&departureDateTo=2026-12-03&passengers=2&sort=departure&limit=20
+→ 200 { "items": [ { "id", "flightNumber", "origin": { "code", "timeZone" }, "destination": { … },
+                     "departureAt", "arrivalAt", "departureLocal": "2026-12-01T06:00:00+07:00",
+                     "arrivalLocal", "arrivalDayOffset": 0,
+                     "lowestFare": { "amount": 1500000, "currency": "VND" },
+                     "availability": [ { "fareClass": "ECONOMY", "availableSeats": 118, "fare": { … } }, … ] } ],
+        "page": { "hasNextPage": true, "nextCursor": "eyJ2Ijox…" } }
+GET …same search…&cursor=eyJ2Ijox…      → the next page
+GET /api/flights/:id                     → the flight as before + availability, departureLocal, arrivalLocal, arrivalDayOffset
+```
+
+| Param | Default | Rules |
+|-------|---------|-------|
+| `origin`, `destination` | required | Three-letter codes, different; an unknown code finds nothing (`200`, empty) |
+| `departureDateFrom` | required | `YYYY-MM-DD`, a real date, the **origin airport's local date** |
+| `departureDateTo` | `departureDateFrom` | Inclusive, not before `From`, at most 7 dates in all |
+| `passengers` | `1` | `1–9`; a flight matches when **one fare class** has that many free seats |
+| `sort` | `departure` | `departure` → `(departureAt, id)`; `price` → `(lowestFare, departureAt, id)` |
+| `limit` | `20` | `1–50` |
+| `cursor` | — | The `nextCursor` of the previous page of **the same search** |
+
+Errors: `422 VALIDATION_FAILED` naming every bad parameter (`INVALID_DATE`, `DATE_RANGE_TOO_LONG`, `INVALID_PASSENGER_COUNT`, …); `400 INVALID_CURSOR` for a cursor that does not decode or belongs to another search. Public, like the seat map. Rules: Decision 17, BR-FLT-10/11.
+
+- **Local dates, sargable.** "1 December from SGN" is 1 December in Vietnam: `[30 Nov 17:00 UTC, 1 Dec 17:00 UTC)`. The query turns the dates into that interval from the parameters (`$date::timestamp AT TIME ZONE origin.time_zone`, so a 23- or 25-hour DST day is right) and compares `departure_at` bare, so `idx_flights_route_departure (origin, destination, departure_at)` serves it.
+- **Only flights on sale**, by the same SQL fragment the hold uses (`onSaleSql`: `OPEN` and `departure_at − 1 h > now`). One statement per page, pinned by a test; seats are counted only for the route's flights in the interval.
+- **Keyset pages, not `OFFSET`.** A flight on page 1 can sell out before page 2 is read; with `OFFSET` every later flight moves up and one is skipped (shown by a control test). The cursor is base64url JSON with the last item's sort key and a SHA-256 binding it to the search; it is not a secret (a forged key for the same search is only another start in its order) and the server stores nothing. No `total`: `limit + 1` rows say whether a next page exists. `GET /api/flights` (the admin list) keeps `page`/`pageSize` with `totalItems`.
+- **A result is a snapshot, not a promise.** "3 seats left" was true when the query ran; the hold decides under its locks. Nothing re-checks a search result.
+- **The auto hold takes one class (BR-BOOK-09 changed).** A booking body without seats must name `fareClass` (`422 MISSING_FIELD` / `INVALID_FARE_CLASS`; refused next to chosen seats as `UNSUPPORTED_FIELD`); the hold takes the lowest free seats of that class, `409 NOT_ENOUGH_SEATS` if it has too few, `422 FARE_CLASS_NOT_ON_AIRCRAFT` if the flight has none. Before, it took the lowest seats of any class (business first) and could mix classes in one booking.
+- **Local times** come from each airport's IANA zone through `Intl` (`departureLocal` in the origin's, `arrivalLocal` in the destination's); `arrivalDayOffset` is `1` for 23:30 → 01:30.
+- **Measured** on 20 400 flights / 3.9 M seats in `booking_test` (`npm run perf:search:seed`, then `perf:search:explain`): SGN→HAN over 3 days, 2 passengers, 4.8 ms with the route index (10.7 ms without); counting only free seats from the fares cut the buffers 3.6×. Numbers and the rejected options in `.cursor/progress/DAY-51.md`, "Evidence for phase E". On the compose stack: search 77 ms cold, details 2 ms.
 
 ## Audit trail
 
@@ -450,7 +484,7 @@ Every successful write enqueues an outbox row in the same Postgres transaction a
 | Delivery | Eventual (relay interval, default 5s) | Trade latency for reliability — no lost events when broker is unavailable |
 | Publish failure in relay | Log `outbox_publish_failed`; retry next tick | Row stays unpublished until publish succeeds |
 | Order | Relay stops batch on first failure (`break`) | Preserve publish order by `created_at` |
-| DLQ | `<queue>.dlq` via a per-queue dead-letter exchange | Poison messages after delivery — manual investigation only |
+| DLQ | `<queue>.dlq` via a per-queue dead-letter exchange | Poison messages after delivery — manual investigation only: read them without consuming (management API `get` with `ackmode=reject_requeue_true`), record what they were, check the database for damage, then replay or purge (Day 51: 14 pre-Day 50 `booking-cancelled` messages recorded in `DAY-51.md` and purged) |
 
 Startup connects publisher with bounded retry (`connectPublisherWithRetry`, 10 × 2s) then fail-fast. `close()` is async: stop jobs → close publisher → close DB.
 
@@ -584,7 +618,7 @@ Response shape:
 }
 ```
 
-Invalid pagination → `422`. Empty page beyond the end → `200` with empty `items`.
+Invalid pagination → `422`. Empty page beyond the end → `200` with empty `items`. This is the admin list; the customer search pages by cursor (Day 51).
 
 ## Scripts
 
@@ -633,7 +667,7 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 
 - `owner_account_id` has no foreign key to Identity's accounts (different database by design) — deleting an account does not touch its bookings
 - No route cancels a flight yet (phase D step 9); a status change other than the creation has no event
-- `Flight` is both the write model and the read shape; only `status` is mapped to a separate `FlightView`
+- `Flight` is both the write model and the read shape of `GET /api/flights`; search and flight details read through a separate `FlightSearch` port with its own shape (Day 51), the same database
 - Two overlapping flights of one aircraft inserted at the same instant can deadlock (`40P01`) instead of failing the exclusion constraint; the loser is answered `409 AIRCRAFT_UNAVAILABLE`, which is safe to retry if the winner also rolled back
 - `REFUND_FAILED` has no endpoint: a person settles it with the provider and psql, and the only alert is an error log line and an audit row until phase G
 - The simulated provider remembers charges in the api process: after a restart, reconciliation of a payment whose first charge went through charges it again (a real provider keeps its idempotency keys)
@@ -647,7 +681,9 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - A seat change moves one passenger per request; two passengers of one booking cannot swap with each other (the target must be `AVAILABLE`), and nothing crosses fare classes (that would need a payment for the difference or a partial refund)
 - A customer cannot ask whether a refund finished: no `GET` for a payment, no `payment-refunded` event (Day 50)
 - Two system-picked multi-seat holds racing for the last seats could in theory both find fewer seats than needed (each skips rows the other just locked) and both answer `409 NOT_ENOUGH_SEATS`; not observed in 200 measured rounds (Day 48A race test A)
-- The flight list counts seats for every row the `OFFSET` skips, so deep pages get slower (measured Day 47: 1.4 ms on page 1, 52 ms on page 100 of 2000 flights); flights have no index on `(departure_at, id)`
+- The admin flight list counts seats for every row the `OFFSET` skips, so deep pages get slower (measured Day 47: 1.4 ms on page 1, 52 ms on page 100 of 2000 flights); it has no index on `(departure_at, id)`. The search does not have this cost (keyset, route index)
+- Search has no fare-class filter, no sort by duration, no total, and no "previous page"; a cursor is valid only for its own search. Availability is counted live from `flight_seats` (no read model): measured fine on 3.9 M seats, and a partial index on free seats per class would halve it again if needed (DAY-51)
+- Auto-held seats come from one requested class; passengers of one booking in two classes need chosen seats (each chosen seat keeps its own class and price)
 - Seat layouts cannot be edited (BR-REF-05); there are no read routes for a single airport or aircraft
 - Roles are a single `user` | `admin` claim — no permission tables, no refresh tokens
 - A role change takes effect only at the next login: a token keeps the role it was issued with until it expires, both after promotion (still `403`) and after demotion (still admin)
@@ -661,4 +697,4 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 - Migrations run in-process at startup (safe only while one instance runs); no down migrations, no zero-downtime strategy
 - `guest`/`guest` RabbitMQ credentials are for local compose only
 - Logs go to console only; no metrics or distributed tracing
-- Offset pagination only (no cursor)
+- Two pagination styles on purpose: `page`/`pageSize` for admin lists, a keyset `cursor` for flight search (Day 51)

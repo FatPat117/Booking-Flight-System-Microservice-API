@@ -66,7 +66,7 @@ async function createRuntime(options: { batchSize?: number; maxBatches?: number 
     const held = await bookingRepository.holdSeats(
       flight.id,
       booking.id,
-      { kind: "auto", count: seats },
+      { kind: "auto", count: seats, fareClass: "ECONOMY" },
       HELD_AT,
     );
     assert.equal(held.outcome, "held");

@@ -1,9 +1,9 @@
 import { isUuid } from "../types.js";
-import type { FlightRepository } from "./flight-repository.js";
-import { toFlightView, type FlightView } from "./flight-view.js";
+import { toFlightDetailsView, type FlightDetailsView } from "./flight-details-view.js";
+import type { FlightSearch } from "./flight-search.js";
 
 export type GetFlightResult =
-  | { outcome: "found"; flight: FlightView }
+  | { outcome: "found"; flight: FlightDetailsView }
   | { outcome: "not-found" };
 
 /**
@@ -14,21 +14,25 @@ export type GetFlightResult =
  */
 export type GetFlight = (flightId: string) => Promise<GetFlightResult>;
 
+/**
+ * Day 51: read through the FlightSearch read port — one statement for the
+ * flight, both zones and every class's free seats (US-FLT-05).
+ */
 export function createGetFlight(dependencies: {
-  flightRepository: FlightRepository;
+  flightSearch: FlightSearch;
   getCurrentTime: () => Date;
 }): GetFlight {
-  const { flightRepository, getCurrentTime } = dependencies;
+  const { flightSearch, getCurrentTime } = dependencies;
 
   return async (flightId) => {
     if (!isUuid(flightId)) {
       return { outcome: "not-found" };
     }
 
-    const flight = await flightRepository.findById(flightId);
+    const details = await flightSearch.findDetails(flightId);
 
-    return flight === undefined
+    return details === undefined
       ? { outcome: "not-found" }
-      : { outcome: "found", flight: toFlightView(flight, getCurrentTime()) };
+      : { outcome: "found", flight: toFlightDetailsView(details, getCurrentTime()) };
   };
 }

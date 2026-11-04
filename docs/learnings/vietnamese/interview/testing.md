@@ -98,3 +98,22 @@ thật, nếu không test sẽ thấy "trừ hai lần" giả. Chạy trên `boo
 thoát nếu tên không kết thúc bằng `_test`. Chứng minh bằng cách cố tình trỏ vào `booking_db`: process
 dừng trước khi thân test nào chạy. Rồi chạy cả suite khi app dev đang chạy: số dòng dev không đổi.
 
+
+### 14. Differential testing là gì, khi nào đáng dùng? (Day 51)
+
+**Trả lời:** Kiểm chứng một cài đặt phức tạp bằng một cài đặt **thứ hai, ngây thơ**: câu SQL tìm
+chuyến (tuyến, khoảng ngày theo múi giờ, ghế theo hạng, cửa sổ bán) so với một hàm TypeScript duyệt
+từng chuyến, hỏi `Intl` ngày địa phương, đếm ghế từng cái. Sinh 50 "thế giới" ngẫu nhiên có seed
+(cả hai ngày đổi giờ của London, giờ đi đúng nửa đêm ±1 phút, `now` đúng lúc đóng bán) và đòi hai
+danh sách **giống hệt, kể cả thứ tự**. Luật quan trọng: bộ lọc ngây thơ **không import gì từ
+`src/`** — dùng chung hàm sai thì hai bên cùng sai và test vẫn xanh. Chứng minh giá trị bằng đột
+biến: lọc theo ngày UTC → fail ngay seed đầu và in `FLIGHT_SEARCH_SEED=1000` để tái hiện. Bài học
+phụ: lỗi **ném ra** (không phải assert) cũng phải in seed.
+
+### 15. Test có thời gian thật bị chập chờn — sửa thế nào? (Day 51)
+
+**Trả lời:** Không tăng timeout rồi để đó. Tìm thứ phụ thuộc đồng hồ thật và tiêm nó vào: gateway
+giả lập nhận `timers` (`wait`, `timeoutSignal`), mặc định là thời gian thật; test truyền đồng hồ tự
+điều khiển — `wait` chỉ xong khi test cho phép, timeout chỉ bắn khi test `abort`. Thay vì assert
+`45 ≤ elapsed < 1000 ms`, test assert "chưa xong trước khi timeout bắn, xong với `unknown` sau đó".
+Thêm `--test-reporter=spec` để lần sau fail thì biết tên.

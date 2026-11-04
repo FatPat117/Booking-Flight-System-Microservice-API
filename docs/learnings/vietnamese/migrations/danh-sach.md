@@ -3,7 +3,7 @@
 Thư mục: `api/src/postgres/migrations/` (database `booking_db`) và
 `services/identity/src/migrations/` (database `identity_db`). Tên file = timestamp + tên lớp.
 
-## `booking_db` — 27 migration
+## `booking_db` — 28 migration
 
 | # | Migration | Day | Làm gì | Điểm hay / lý do |
 |---|---|---|---|---|
@@ -34,6 +34,7 @@ Thư mục: `api/src/postgres/migrations/` (database `booking_db`) và
 | 25 | `CreatePayments` | 49B | Bảng `payments` (5 trạng thái, `amount_vnd bigint` ≤ 2^53 − 1); CHECK: đã trừ tiền thì phải có `provider_reference`, `FAILED` phải có `failure_reason`; partial unique `(booking_id) WHERE status = 'SUCCEEDED'` và `… = 'PROCESSING'` | Dòng `PROCESSING` ghi ở pha 1, **trước** khi gọi gateway → request lặp, restart, đối soát đều thấy "đã bắt đầu". Partial index `SUCCEEDED` = BR-PAY-05 do **DB** giữ, không phải do key. Index `PROCESSING` làm trọng tài cho `ON CONFLICT … WHERE` (không `23505`) |
 | 26 | `CreateIdempotencyKeys` | 49B | Bảng `idempotency_keys`, PK `(account_id, operation, key)`, fingerprint, `IN_PROGRESS`/`COMPLETED`, `response_status` + `response_body json`, `payment_id` FK; CHECK `COMPLETED ⇔ có response`; index `created_at` | Key thuộc về account (Day 44). `response_body` là **`json`** chứ không `jsonb`: `jsonb` sắp lại key nên câu trả lời phát lại không giống từng byte (e2e phát hiện, sửa trước khi commit). Index `created_at` cho việc dọn key > 24 h (49C) |
 | 27 | `AddPaymentReconciliation` | 49C | `payments`: `payment_method_token`, `attempts`, `next_attempt_at`; trạng thái `REFUND_FAILED`; CHECK token có **đúng khi** `PROCESSING`, `next_attempt_at` có **đúng khi** `PROCESSING`/`REFUND_PENDING`; partial index `IDX_payments_due (next_attempt_at, id)`; `UQ_idempotency_keys_payment_id` | Token chỉ giữ khi cần charge lại, rời `PROCESSING` là xoá (CHECK bắt buộc). Một cột `next_attempt_at` = ngưỡng tuổi + lease + backoff. Unique theo `payment_id` để pha 3 (cả job) tìm key theo payment. **Từ chối kèm danh sách** nếu còn payment `PROCESSING` cũ — không có token để charge lại, bịa token là trừ tiền bằng phương thức không ai chọn |
+| 28 | `AddFlightSearchIndex` | 51 | Index `idx_flights_route_departure (origin_airport_id, destination_airport_id, departure_at)` | Phục vụ tìm kiếm: hai cột so bằng đứng trước, cột khoảng thời gian đứng cuối. Đo trên 20 400 chuyến / 3,9 triệu ghế: SGN→HAN 3 ngày 10,7 ms (quét cả bảng) → 4,8 ms; index chỉ `(departure_at)` nhanh ngang trên dữ liệu này nhưng đọc mọi tuyến trong khoảng giờ rồi bỏ 211–561 dòng, tệ dần khi nhiều tuyến. Kèm index cho FK `origin_airport_id` (trước đó không có). `CREATE INDEX` thường — bảng lớn đang chạy thì `CONCURRENTLY` |
 
 ## `identity_db` — 2 migration
 

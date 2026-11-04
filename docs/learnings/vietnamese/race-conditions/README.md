@@ -38,6 +38,7 @@ Postgres thật** chứng minh nó.
 | Request sống và job cùng một bản ghi | Ngưỡng tuổi + chuyển trạng thái có điều kiện, bên thua rollback | Request chậm vs job đối soát | [11](./11-doi-soat-thanh-toan-va-lease.md) |
 | Hai thao tác cùng khoá hai ghế, mỗi bên "của mình" một ghế | Khoá **cả hai** theo thứ tự toàn cục (row, letter) | Hoán đổi ghế chéo (Day 50) | [12](./12-doi-ghe-va-huy-booking-da-tra-tien.md) |
 | Câu lệnh chờ khoá rồi đọc dòng **khác** theo snapshot cũ | Khoá dòng cha bằng câu riêng **trước**, có điều kiện | Huỷ vs đổi ghế (Day 50) | [12](./12-doi-ghe-va-huy-booking-da-tra-tien.md) |
+| Câu chờ khoá rồi tìm ghế theo `booking_id`, **không** có khoá trước | Một bất biến giữ tập dòng không đổi (ghế của `HELD` không đổi) + test đối chứng phá bất biến | `confirmHold`, `expireDueHolds` (Day 51) | [13](./13-ra-soat-snapshot-cau-lenh-cho-khoa.md) |
 
 Cách test tất cả những thứ trên: [06-cach-test-race-condition.md](./06-cach-test-race-condition.md).
 
@@ -64,3 +65,5 @@ Bảy file race test trong `api/tests/integration/`: `postgres-booking-race` (m�
 | Day 49B E: gateway trong transaction (charge 1 s) / ba pha | huỷ chờ 908–922 ms, job bỏ qua booking / huỷ 2–11 ms |
 | Day 49B C đúng hạn: pha 3 vs job, 20 vòng | 17–19 confirm thắng, phần còn lại expire + hoàn tiền; mỗi booking một kết cục |
 | Day 49C: hai job đối soát, 30 payment; có / không lease | 0 / **30** lời gọi gateway trùng; vẫn 1 lần trừ tiền mỗi payment |
+| Day 51: `confirm` chờ sau huỷ / sau đổi ghế bị từ chối / sau đoạn ghi đổi ghế `HELD` (đối chứng) | đúng / đúng / **ghế mới `HELD` cho booking `CONFIRMED`** |
+| Day 51: một chuyến ở trang 1 hết chỗ trước khi đọc trang 2; keyset / OFFSET | trang 2 = chuyến 4–6 / chuyến 5–7 (**chuyến 4 bị bỏ sót**) |

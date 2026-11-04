@@ -72,13 +72,44 @@ Response trả dạng `Money`: `"fares": { "ECONOMY": { "amount": 1500000, "curr
 - `availableSeats` **tính khi đọc** bằng scalar subquery trên partial index (chuyến hết ghế hiện 0).
 - Trả `{ items, pagination: { page, pageSize, totalItems, totalPages } }`.
 
-**Giới hạn đã đo:** OFFSET sâu chậm (trang 100 / 2000 chuyến: 52 ms vs 1,4 ms trang đầu).
+**Giới hạn đã đo:** OFFSET sâu chậm (trang 100 / 2000 chuyến: 52 ms vs 1,4 ms trang đầu). Day 51 giữ nguyên OFFSET cho list này (màn hình admin, cần nhảy trang và `totalItems`); khách tìm chuyến dùng `SearchFlights` bên dưới.
+
+## SearchFlights — `GET /api/flights/search` (public, Day 51)
+
+**Code:** `api/src/flights/search-flights.ts`, `flight-search-validation.ts`, `search-cursor.ts`,
+`postgres/flight-search-sql.ts`, `postgres/postgres-flight-search.ts` (port đọc `FlightSearch`)
+
+```text
+?origin=SGN&destination=HAN&departureDateFrom=2026-12-01&departureDateTo=2026-12-03
+ &passengers=2&sort=departure|price&limit=20&cursor=…
+```
+
+- **Ngày theo giờ địa phương của sân bay đi**, cả hai đầu tính vào, tối đa 7 ngày; `To` mặc định = `From`.
+- Khớp khi **một hạng** còn ≥ N ghế trống (N = 1–9). `lowestFare` = hạng rẻ nhất **còn đủ chỗ**;
+  `availability` liệt kê mọi hạng, rẻ trước, hạng hết chỗ hiện 0.
+- Chỉ chuyến **đang bán** (cùng đoạn SQL `onSaleSql` với câu giữ ghế).
+- Mỗi kết quả có `departureLocal`, `arrivalLocal` (ISO kèm offset) và `arrivalDayOffset` (`+1` khi qua nửa đêm).
+- Trả `{ items, page: { hasNextPage, nextCursor } }` — **keyset**, không có `total`.
+- Một câu SQL mỗi trang (đã ghim), dùng `idx_flights_route_departure`.
+
+| Outcome | HTTP |
+|---|---|
+| `success` (kể cả rỗng, kể cả mã sân bay không tồn tại) | 200 |
+| `validation_failed` (`MISSING_FIELD`, `INVALID_AIRPORT_CODE`, `ORIGIN_EQUALS_DESTINATION`, `INVALID_DATE`, `INVALID_DATE_RANGE`, `DATE_RANGE_TOO_LONG`, `INVALID_PASSENGER_COUNT`, `INVALID_SORT`, `INVALID_LIMIT`; tham số lặp → mảng → sai) | 422 `VALIDATION_FAILED`, báo mọi lỗi một lần |
+| `invalid_cursor` (không giải mã được, hỏng, hoặc của câu tìm khác) | 400 `INVALID_CURSOR` |
+
+Tham số sai thắng cursor sai (cursor chỉ đánh giá được khi câu tìm hợp lệ). Kết quả là **ảnh chụp**,
+không phải lời hứa: câu giữ ghế mới quyết định.
 
 ## GetFlight — `GET /api/flights/:id` (public)
 
 id sai định dạng hoặc không có → 404 `FLIGHT_NOT_FOUND`. Trả `FlightView` với `status` hiệu lực,
 `origin/destination` là mã IATA, kèm `originAirportId`, `destinationAirportId`, `aircraftId`, và
 `fares` (Day 49A; danh sách đọc giá của cả trang bằng **một** query).
+
+**Day 51 (US-FLT-05):** đọc qua `FlightSearch.findDetails` — **một** câu SQL (trước đây 4) — và thêm
+`availability` (ghế trống + giá từng hạng, khớp sơ đồ ghế), `departureLocal`, `arrivalLocal`,
+`arrivalDayOffset`. Mọi trường cũ giữ nguyên.
 
 ## GetFlightSeatMap — `GET /api/flights/:id/seats` (public)
 

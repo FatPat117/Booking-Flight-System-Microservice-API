@@ -45,14 +45,31 @@ const TRANSIENT_REFUND_FAILURES = 2;
  * stays done — that is the lost-response case. `delayMs` is the simulated
  * network time per call.
  *
+ * `timers` replaces the clock in unit tests (Day 51): the default sleeps and
+ * aborts on real time, which made two tests assert on measured milliseconds.
+ *
  * Limitation: the provider's memory lives in the api process, so a restart
  * forgets every charge, and a charge after a restart is a new charge. A real
  * provider does not forget (ADR-010).
  */
+export type SimulatorTimers = Readonly<{
+  /** Resolves after `ms`, or rejects when `signal` aborts first. */
+  wait(ms: number, signal: AbortSignal): Promise<void>;
+  /** A signal that aborts once `ms` have passed. */
+  timeoutSignal(ms: number): AbortSignal;
+}>;
+
+const REAL_TIMERS: SimulatorTimers = {
+  wait: (ms, signal) => sleep(ms, undefined, { signal }),
+  timeoutSignal: (ms) => AbortSignal.timeout(ms),
+};
+
 export function createSimulatedPaymentGateway(options: {
   delayMs: number;
   timeoutMs: number;
+  timers?: SimulatorTimers;
 }): PaymentGateway {
+  const timers = options.timers ?? REAL_TIMERS;
   const charges = new Map<string, ChargeResult>();
   const tokens = new Map<string, string>();
   const unreachedOnce = new Set<string>();
@@ -61,7 +78,7 @@ export function createSimulatedPaymentGateway(options: {
 
   async function network(signal: AbortSignal): Promise<void> {
     if (options.delayMs > 0) {
-      await sleep(options.delayMs, undefined, { signal });
+      await timers.wait(options.delayMs, signal);
     }
   }
 
@@ -124,7 +141,7 @@ export function createSimulatedPaymentGateway(options: {
   async function withTimeout<T>(
     call: (signal: AbortSignal) => Promise<T>,
   ): Promise<T | undefined> {
-    const signal = AbortSignal.timeout(options.timeoutMs);
+    const signal = timers.timeoutSignal(options.timeoutMs);
     try {
       return await call(signal);
     } catch (error) {

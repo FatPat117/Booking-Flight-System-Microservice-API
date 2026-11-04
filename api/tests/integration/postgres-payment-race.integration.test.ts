@@ -135,7 +135,7 @@ async function heldBooking(): Promise<{ flightId: string; bookingId: string }> {
     generateOutboxId: () => crypto.randomUUID(),
     getRequestId: () => undefined,
     getCurrentTime: () => HELD_AT,
-  })(flight.id, { passengers: [{ name: "Alice" }, { name: "Bob" }] }, OWNER);
+  })(flight.id, { fareClass: "ECONOMY", passengers: [{ name: "Alice" }, { name: "Bob" }] }, OWNER);
   assert.equal(result.outcome, "created", JSON.stringify(result));
   return {
     flightId: flight.id,

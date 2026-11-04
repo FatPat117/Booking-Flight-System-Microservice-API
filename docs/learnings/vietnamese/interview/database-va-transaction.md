@@ -106,3 +106,25 @@ không bắt được vì dùng `deepEqual` (không quan tâm thứ tự key). S
 dùng `ON CONFLICT ("booking_id") WHERE "status" = 'PROCESSING' DO NOTHING` — phải **lặp lại
 predicate** để Postgres suy ra đúng partial index làm trọng tài. Trùng thì `INSERT 0 0`, không có
 `23505`, nên transaction vẫn dùng tiếp được (bắt `23505` trong transaction sẽ làm nó bị abort).
+
+### 14. Lọc "chuyến bay ngày 20/11" thế nào cho đúng và vẫn dùng được index? (Day 51)
+
+**Trả lời:** "Ngày 20/11" là ngày **theo giờ sân bay đi**: ở SGN (UTC+7) đó là
+`[19/11 17:00 UTC, 20/11 17:00 UTC)`. Viết `(departure_at AT TIME ZONE tz)::date = '2026-11-20'` thì
+đúng nhưng Postgres tính biểu thức cho **mọi** dòng — index trên `departure_at` vô dụng. Cách
+sargable: đổi **tham số** thành khoảng UTC (`'2026-11-20'::timestamp AT TIME ZONE tz` và ngày kế
+tiếp cũng vậy) rồi so `departure_at >= start AND < end`; cột để trần. Index ghép
+`(origin, destination, departure_at)` — hai cột so bằng trước, cột khoảng cuối. Tính "nửa đêm của
+ngày kế tiếp" chứ không `+ 24 h`, vì ngày đổi giờ ở London dài 23 hoặc 25 giờ. Đo trên 20 400 chuyến:
+10,7 ms → 4,8 ms.
+
+### 15. OFFSET hay keyset (cursor)? (Day 51)
+
+**Trả lời:** Tuỳ hình dạng truy vấn. OFFSET sâu thì chậm (Day 47: trang 100 tốn 52 ms), nhưng với
+tìm kiếm theo tuyến + vài ngày, tập kết quả nhỏ nên lý do thật là **tính ổn định**: kết quả có điều
+kiện "còn chỗ" thay đổi trong lúc khách đọc; một chuyến ở trang 1 hết chỗ thì mọi chuyến sau dịch lên
+và OFFSET của trang 2 **bỏ sót** một chuyến (đo được bằng test đối chứng). Keyset hỏi "các dòng **sau**
+khoá cuối tôi đã thấy" — `(departure_at, id) > (…)`, khoá phải là thứ tự toàn phần nên có `id` phá
+hoà. Cursor = base64url JSON gồm khoá + SHA-256 gắn với tham số tìm kiếm → cursor của câu tìm khác
+bị `400`. Server không lưu gì. Cái giá: không nhảy tới trang N, không có `total` (lấy `limit + 1` để
+biết còn trang sau). List admin vẫn OFFSET vì cần nhảy trang và tổng số.

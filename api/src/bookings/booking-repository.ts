@@ -67,11 +67,12 @@ export type BookingPage = {
 
 /**
  * What to hold (BR-BOOK-09: one kind per request, never a mix):
- * - auto: the `count` lowest AVAILABLE seats, row then letter.
+ * - auto: the `count` lowest AVAILABLE seats of `fareClass`, row then
+ *   letter (Decision 17).
  * - chosen: exactly these seats, distinct (the caller validated BR-BOOK-02).
  */
 export type SeatHoldRequest =
-  | Readonly<{ kind: "auto"; count: number }>
+  | Readonly<{ kind: "auto"; count: number; fareClass: FareClass }>
   | Readonly<{ kind: "chosen"; seats: readonly SeatPosition[] }>;
 
 /**
@@ -88,8 +89,10 @@ export type HeldSeat = Readonly<{
  * All or nothing (BR-SEAT-02): every outcome but `held` wrote nothing.
  * - held: one seat per passenger — `auto` in (row, letter) order,
  *   `chosen` in the request's order — each with its price.
- * - not-enough-seats (auto): fewer AVAILABLE seats than requested that this
- *   caller could take.
+ * - not-enough-seats (auto): fewer AVAILABLE seats of the class than
+ *   requested that this caller could take.
+ * - fare-class-not-on-flight (auto): the flight has no seat of that class
+ *   (it has no fare for it either, BR-FLT-09).
  * - seats-unavailable (chosen): these requested seats are held or booked;
  *   never says by whom.
  * - unknown-seats (chosen): these positions do not exist on this flight.
@@ -98,6 +101,7 @@ export type HeldSeat = Readonly<{
 export type HoldSeatsResult =
   | { outcome: "held"; seats: HeldSeat[] }
   | { outcome: "not-enough-seats" }
+  | { outcome: "fare-class-not-on-flight" }
   | { outcome: "seats-unavailable"; seats: string[] }
   | { outcome: "unknown-seats"; seats: string[] }
   | { outcome: "sales-closed" }

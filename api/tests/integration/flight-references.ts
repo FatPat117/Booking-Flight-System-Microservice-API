@@ -3,6 +3,7 @@ import type { DataSource } from "typeorm";
 import {
   FIXTURE_AIRCRAFT_ID,
   FIXTURE_DESTINATION,
+  FIXTURE_LONDON,
   FIXTURE_ORIGIN,
   FIXTURE_OTHER_AIRCRAFT_ID,
   FIXTURE_TWO_CLASS_AIRCRAFT_ID,
@@ -22,13 +23,17 @@ export async function insertFlightReferences(
   await dataSource.query(
     `INSERT INTO "airports" ("id", "code", "name", "city", "time_zone", "created_at")
      VALUES ($1, $2, 'Fixture Origin', 'Origin City', 'Asia/Ho_Chi_Minh', now()),
-            ($3, $4, 'Fixture Destination', 'Destination City', 'Asia/Ho_Chi_Minh', now())
+            ($3, $4, 'Fixture Destination', 'Destination City', 'Asia/Ho_Chi_Minh', now()),
+            ($5, $6, 'Fixture London', 'London', $7, now())
      ON CONFLICT DO NOTHING`,
     [
       FIXTURE_ORIGIN.id,
       FIXTURE_ORIGIN.code,
       FIXTURE_DESTINATION.id,
       FIXTURE_DESTINATION.code,
+      FIXTURE_LONDON.id,
+      FIXTURE_LONDON.code,
+      FIXTURE_LONDON.timeZone,
     ],
   );
 

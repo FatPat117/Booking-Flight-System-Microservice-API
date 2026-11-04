@@ -39,7 +39,7 @@ const OWNER_ACCOUNT_ID = "11111111-1111-4111-8111-111111111111";
 const OWNER_SCOPE = { kind: "owner", accountId: OWNER_ACCOUNT_ID } as const;
 const OWNER_ACTOR = { accountId: OWNER_ACCOUNT_ID };
 const NOW = new Date("2026-07-20T00:00:00.000Z");
-const ONE_SEAT = { kind: "auto", count: 1 } as const;
+const ONE_SEAT = { kind: "auto", count: 1, fareClass: "ECONOMY" } as const;
 
 let dataSource: DataSource;
 
@@ -88,7 +88,7 @@ async function bookConcurrently(
 ) {
   const results = await Promise.all(
     Array.from({ length: callers }, (_, i) =>
-      createBooking(flightId, { passengers: [{ name: `Passenger ${i}` }] }, OWNER_ACTOR),
+      createBooking(flightId, { fareClass: "ECONOMY", passengers: [{ name: `Passenger ${i}` }] }, OWNER_ACTOR),
     ),
   );
   const seats = results.flatMap((r) =>
@@ -217,7 +217,7 @@ function createRepositoryWithoutSkipLocked(): BookingRepository {
 
 /** The controls replicate the one-seat statement only. */
 function assertOneAutoSeat(request: SeatHoldRequest): void {
-  assert.deepEqual(request, { kind: "auto", count: 1 });
+  assert.deepEqual(request, { kind: "auto", count: 1, fareClass: "ECONOMY" });
 }
 
 function oneSeatResult(rows: Array<{ row: number; letter: string }>): HoldSeatsResult {
@@ -395,7 +395,7 @@ test("Test D — on a full flight, a cancel racing a new booking never leaves tw
     const [cancelled, newcomer] = await Promise.all([
       cancelBooking(victim.id, OWNER_SCOPE, OWNER_ACTOR),
       sleep(STAGGER_MS[round % STAGGER_MS.length] ?? 0).then(() =>
-        createBooking(flightId, { passengers: [{ name: "Newcomer" }] }, OWNER_ACTOR),
+        createBooking(flightId, { fareClass: "ECONOMY", passengers: [{ name: "Newcomer" }] }, OWNER_ACTOR),
       ),
     ]);
 

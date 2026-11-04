@@ -39,8 +39,10 @@ import type {
   FlightRepository,
   FlightSeatStatus,
 } from "../../src/flights/flight-repository.js";
+import type { FlightSearch, FlightSearchResult } from "../../src/flights/flight-search.js";
 import type { GetFlightSeatMap } from "../../src/flights/get-flight-seat-map.js";
 import type { OpenFlight } from "../../src/flights/open-flight.js";
+import type { Money } from "../../src/money/money.js";
 import type {
   HealthChecks,
   HealthStatus,
@@ -281,8 +283,11 @@ export function createInMemoryBookingRepository(deps: {
       let picked: InMemoryFlightSeat[];
 
       if (request.kind === "auto") {
+        if (!flightSeats.some((seat) => seat.fareClass === request.fareClass)) {
+          return { outcome: "fare-class-not-on-flight" };
+        }
         picked = flightSeats
-          .filter((seat) => seat.status === "AVAILABLE")
+          .filter((seat) => seat.status === "AVAILABLE" && seat.fareClass === request.fareClass)
           .slice(0, request.count);
         if (picked.length < request.count) {
           return { outcome: "not-enough-seats" };
@@ -546,6 +551,124 @@ export function createInMemoryBookingRepository(deps: {
     peek(id) {
       const booking = bookings.get(id);
       return booking === undefined ? undefined : read(booking);
+    },
+  };
+}
+
+/**
+ * The FlightSearch fake (Day 51): the same answers as the Postgres search,
+ * reached another way. Where SQL turns the local dates into one UTC
+ * interval, this asks Intl for each flight's local departure date in its
+ * origin's zone and compares the date strings. The flight repository
+ * contract's twin, tests/contracts/flight-search.contract.ts, holds the two
+ * together.
+ */
+export function createInMemoryFlightSearch(
+  store: InMemoryFlightStore,
+  airports: readonly Airport[],
+): FlightSearch {
+  const zoneOf = new Map(airports.map((airport) => [airport.code, airport.timeZone]));
+
+  function localDate(instant: string, timeZone: string): string {
+    // en-CA formats as YYYY-MM-DD.
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(instant));
+  }
+
+  function availabilityOf(flight: Omit<Flight, "availableSeats">) {
+    return (Object.entries(flight.fares) as Array<[FareClass, Money]>)
+      .map(([fareClass, fare]) => ({
+        fareClass,
+        fare,
+        availableSeats: (store.seats.get(flight.id) ?? []).filter(
+          (seat) => seat.fareClass === fareClass && seat.status === "AVAILABLE",
+        ).length,
+      }))
+      .sort((a, b) => a.fare.amount - b.fare.amount || (a.fareClass < b.fareClass ? -1 : 1));
+  }
+
+  return {
+    async findDetails(flightId) {
+      const flight = store.flights.get(flightId);
+      const originTimeZone = flight === undefined ? undefined : zoneOf.get(flight.origin);
+      const destinationTimeZone = flight === undefined ? undefined : zoneOf.get(flight.destination);
+      if (flight === undefined || originTimeZone === undefined || destinationTimeZone === undefined) {
+        return undefined;
+      }
+      const availability = availabilityOf(flight);
+      return {
+        ...structuredClone(flight),
+        departureAt: new Date(flight.departureAt).toISOString(),
+        arrivalAt: new Date(flight.arrivalAt).toISOString(),
+        availableSeats: availability.reduce((total, entry) => total + entry.availableSeats, 0),
+        originTimeZone,
+        destinationTimeZone,
+        availability,
+      };
+    },
+
+    async search(query, now) {
+      const originZone = zoneOf.get(query.origin);
+      const destinationZone = zoneOf.get(query.destination);
+      if (originZone === undefined || destinationZone === undefined) {
+        return { items: [], hasNextPage: false };
+      }
+
+      const matches: FlightSearchResult[] = [];
+      for (const flight of store.flights.values()) {
+        if (flight.origin !== query.origin || flight.destination !== query.destination) continue;
+        const date = localDate(flight.departureAt, originZone);
+        if (date < query.departureDateFrom || date > query.departureDateTo) continue;
+        if (!isBookable(flight.status, flight.departureAt, now)) continue;
+
+        const availability = availabilityOf(flight);
+        const roomy = availability.filter((entry) => entry.availableSeats >= query.passengers);
+        const [cheapest] = roomy;
+        if (cheapest === undefined) continue;
+
+        matches.push({
+          id: flight.id,
+          flightNumber: flight.flightNumber,
+          origin: { code: flight.origin, timeZone: originZone },
+          destination: { code: flight.destination, timeZone: destinationZone },
+          departureAt: new Date(flight.departureAt).toISOString(),
+          arrivalAt: new Date(flight.arrivalAt).toISOString(),
+          lowestFare: cheapest.fare,
+          availability,
+        });
+      }
+
+      const keyOf = (result: FlightSearchResult): Array<number | string> =>
+        query.sort === "price"
+          ? [result.lowestFare.amount, toInstant(result.departureAt), result.id]
+          : [toInstant(result.departureAt), result.id];
+      const compare = (a: Array<number | string>, b: Array<number | string>): number => {
+        for (let index = 0; index < a.length; index += 1) {
+          const [x, y] = [a[index]!, b[index]!];
+          if (x !== y) return x < y ? -1 : 1;
+        }
+        return 0;
+      };
+
+      const after = query.after;
+      const afterKey =
+        after === undefined
+          ? undefined
+          : query.sort === "price"
+            ? [after.lowestFare, toInstant(after.departureAt), after.id]
+            : [toInstant(after.departureAt), after.id];
+      const ordered = matches
+        .filter((result) => afterKey === undefined || compare(keyOf(result), afterKey) > 0)
+        .sort((a, b) => compare(keyOf(a), keyOf(b)));
+
+      return {
+        items: ordered.slice(0, query.limit),
+        hasNextPage: ordered.length > query.limit,
+      };
     },
   };
 }

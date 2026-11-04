@@ -24,6 +24,13 @@ export const FIXTURE_DESTINATION = Object.freeze({
   code: "ZZB",
 });
 
+/** A fixture airport with daylight saving time (Day 51: flight search). */
+export const FIXTURE_LONDON = Object.freeze({
+  id: "a1a1a1a1-0000-4000-8000-000000000003",
+  code: "ZZL",
+  timeZone: "Europe/London",
+});
+
 export const FIXTURE_AIRCRAFT_ID = "c1c1c1c1-0000-4000-8000-000000000001";
 export const FIXTURE_OTHER_AIRCRAFT_ID = "c1c1c1c1-0000-4000-8000-000000000002";
 export const FIXTURE_TWO_CLASS_AIRCRAFT_ID = "c1c1c1c1-0000-4000-8000-000000000003";
@@ -57,13 +64,18 @@ export function faresFor(seats: readonly LayoutSeat[]): FlightFares {
   };
 }
 
-function makeAirport(id: string, code: string, city: string): Airport {
+function makeAirport(
+  id: string,
+  code: string,
+  city: string,
+  timeZone = "Asia/Ho_Chi_Minh",
+): Airport {
   return {
     id,
     code,
     name: `${city} International`,
     city,
-    timeZone: "Asia/Ho_Chi_Minh",
+    timeZone,
     createdAt: "2026-01-01T00:00:00.000Z",
   };
 }
@@ -81,6 +93,7 @@ export const TEST_AIRPORTS: readonly Airport[] = [
   makeAirport("a1a1a1a1-0000-4000-8000-000000000011", "SGN", "Ho Chi Minh City"),
   makeAirport("a1a1a1a1-0000-4000-8000-000000000012", "HAN", "Hanoi"),
   makeAirport("a1a1a1a1-0000-4000-8000-000000000013", "DAD", "Da Nang"),
+  makeAirport(FIXTURE_LONDON.id, FIXTURE_LONDON.code, "Fixture London", FIXTURE_LONDON.timeZone),
 ];
 
 export const TEST_AIRCRAFT: readonly Aircraft[] = [

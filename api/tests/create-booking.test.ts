@@ -37,7 +37,7 @@ const ACTOR_A: Actor = { accountId: ACCOUNT_A };
 
 /** A request body with one passenger per name, no seats named. */
 function passengers(...names: string[]) {
-  return { passengers: names.map((name) => ({ name })) };
+  return { fareClass: "ECONOMY", passengers: names.map((name) => ({ name })) };
 }
 
 /** An OPEN flight departing in 2027, well after FIXED_TIME. */
@@ -307,7 +307,7 @@ test("a held seat whose class has no fare is a broken invariant: it throws, noth
   });
 
   await assert.rejects(
-    () => createBooking(FLIGHT_ID, passengers("Alice"), ACTOR_A),
+    () => createBooking(FLIGHT_ID, { passengers: [{ name: "Alice", seat: "1A" }] }, ACTOR_A),
     /no BUSINESS fare for seat 1A \(BR-FLT-09\)/,
   );
   assert.equal(entries.length, 0);

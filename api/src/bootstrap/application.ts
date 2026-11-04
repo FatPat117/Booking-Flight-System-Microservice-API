@@ -58,6 +58,8 @@ import {
 } from "../flights/list-flights.js";
 import { createOpenFlight, type OpenFlight } from "../flights/open-flight.js";
 import { createPostgresFlightRepository } from "../flights/postgres/postgres-flight-repository.js";
+import { createPostgresFlightSearch } from "../flights/postgres/postgres-flight-search.js";
+import { createSearchFlights, type SearchFlights } from "../flights/search-flights.js";
 import type { HealthChecks } from "../health/health-checks.js";
 import { createPostgresHealthChecks } from "../health/postgres/postgres-health-checks.js";
 import { createBookingHoldExpiryJob } from "../jobs/booking-hold-expiry-job.js";
@@ -131,6 +133,7 @@ export type Application = Readonly<{
   getFlight: GetFlight;
   getFlightSeatMap: GetFlightSeatMap;
   listFlights: ListFlights;
+  searchFlights: SearchFlights;
   registerAirport: RegisterAirport;
   listAirports: ListAirports;
   registerAircraft: RegisterAircraft;
@@ -335,13 +338,18 @@ export async function createApplication(
     getCurrentTime: () => new Date(),
   });
 
+  const flightSearch = createPostgresFlightSearch(dataSource);
   const getFlight = createGetFlight({
-    flightRepository,
+    flightSearch,
     getCurrentTime: () => new Date(),
   });
   const getFlightSeatMap = createGetFlightSeatMap({ flightRepository });
   const listFlights = createListFlights({
     flightRepository,
+    getCurrentTime: () => new Date(),
+  });
+  const searchFlights = createSearchFlights({
+    flightSearch,
     getCurrentTime: () => new Date(),
   });
 
@@ -422,6 +430,7 @@ export async function createApplication(
     getFlight,
     getFlightSeatMap,
     listFlights,
+    searchFlights,
     registerAirport,
     listAirports,
     registerAircraft,

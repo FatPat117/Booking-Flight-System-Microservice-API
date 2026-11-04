@@ -290,13 +290,13 @@ test("Test B1 (auto) — a system-picked hold waits the same way: its own statem
   const flightId = await createFlight();
   const commitChange = await startFareChange(flightId, 5_000_000, 2_000_000);
 
-  const booking = createBooking()(flightId, { passengers: [{ name: "Alice" }, { name: "Bob" }] }, OWNER);
+  const booking = createBooking()(flightId, { fareClass: "BUSINESS", passengers: [{ name: "Alice" }, { name: "Bob" }] }, OWNER);
   const waited = await isPendingAfter(booking, QUEUE_MS);
   await commitChange();
   const held = bookedOrFail(await booking);
 
   assert.equal(waited, true, "the hold should queue on the fare rows");
-  // Lowest seats first: 1A and 1B are BUSINESS.
+  // The lowest BUSINESS seats: 1A and 1B (Day 51: the auto hold takes one requested class).
   assert.equal(priced(await readBooking(held.id)), "BUSINESS 5000000, BUSINESS 5000000 = 10000000");
 });
 

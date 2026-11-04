@@ -54,7 +54,7 @@ export type CreateBooking = (
 
 function toHoldRequest(input: CreateBookingInput): SeatHoldRequest {
   return input.seatSelection === "auto"
-    ? { kind: "auto", count: input.passengers.length }
+    ? { kind: "auto", count: input.passengers.length, fareClass: input.fareClass }
     : { kind: "chosen", seats: input.passengers.map(({ seat }) => seat) };
 }
 

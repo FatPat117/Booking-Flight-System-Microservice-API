@@ -110,7 +110,7 @@ test("cancels booking, releases seat, audits and enqueues outbox", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  const created = await createBooking(FLIGHT_ID, { passengers: [{ name: "Alice" }] }, ACTOR_A);
+  const created = await createBooking(FLIGHT_ID, { fareClass: "ECONOMY", passengers: [{ name: "Alice" }] }, ACTOR_A);
   assert.equal(created.outcome, "created");
   assert.equal(
     (await flightRepository.findById(FLIGHT_ID))?.availableSeats,
@@ -160,7 +160,7 @@ test("second cancel is already-cancelled and does not release another seat", asy
     getCurrentTime: () => FIXED_TIME,
   });
 
-  await createBooking(FLIGHT_ID, { passengers: [{ name: "Alice" }] }, ACTOR_A);
+  await createBooking(FLIGHT_ID, { fareClass: "ECONOMY", passengers: [{ name: "Alice" }] }, ACTOR_A);
   const first = await cancelBooking(BOOKING_ID, SCOPE_A, ACTOR_A);
   const second = await cancelBooking(BOOKING_ID, SCOPE_A, ACTOR_A);
 
@@ -208,7 +208,7 @@ test("cancelling a hold at its deadline is expired: nothing recorded, the seat s
     getCurrentTime: () => deadline,
   });
 
-  await createBooking(FLIGHT_ID, { passengers: [{ name: "Alice" }] }, ACTOR_A);
+  await createBooking(FLIGHT_ID, { fareClass: "ECONOMY", passengers: [{ name: "Alice" }] }, ACTOR_A);
   const writesBefore = { records: records.length, entries: entries.length };
 
   assert.deepEqual(await cancelBooking(BOOKING_ID, SCOPE_A, ACTOR_A), { outcome: "expired" });
@@ -277,7 +277,7 @@ test("another account cannot cancel the booking: not-found, booking stays active
     getCurrentTime: () => FIXED_TIME,
   });
 
-  await createBooking(FLIGHT_ID, { passengers: [{ name: "Alice" }] }, ACTOR_A);
+  await createBooking(FLIGHT_ID, { fareClass: "ECONOMY", passengers: [{ name: "Alice" }] }, ACTOR_A);
 
   const result = await cancelBooking(BOOKING_ID, SCOPE_B, ACTOR_B);
 
@@ -318,7 +318,7 @@ test("cancel records the acting account in the audit log", async () => {
     getCurrentTime: () => FIXED_TIME,
   });
 
-  await createBooking(FLIGHT_ID, { passengers: [{ name: "Alice" }] }, ACTOR_A);
+  await createBooking(FLIGHT_ID, { fareClass: "ECONOMY", passengers: [{ name: "Alice" }] }, ACTOR_A);
   await cancelBooking(BOOKING_ID, SCOPE_A, ACTOR_A);
 
   const cancelRecord = records.find((r) => r.action === "BOOKING_CANCELLED");
@@ -364,7 +364,7 @@ async function createPaidBooking(cancelAt: Date, options: { paid?: boolean } = {
   });
   const created = await createBooking(
     FLIGHT_ID,
-    { passengers: [{ name: "Alice" }, { name: "Bob" }] },
+    { fareClass: "ECONOMY", passengers: [{ name: "Alice" }, { name: "Bob" }] },
     ACTOR_A,
   );
   assert.equal(created.outcome, "created");

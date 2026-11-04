@@ -22,9 +22,10 @@ validate input (ngoài transaction)  →  transactionRunner.run(
 | `POST /api/flights` | admin | CreateFlight | 201 + Location | 422, 409 `FLIGHT_ALREADY_EXISTS` / `AIRCRAFT_UNAVAILABLE` | [flights](./flights.md) |
 | `POST /api/flights/:id/open` | admin | OpenFlight | 200 | 404, 409 `INVALID_FLIGHT_STATUS` / `FLIGHT_STATUS_CHANGED` | [flights](./flights.md) |
 | `GET /api/flights` | public | ListFlights | 200 | 422 | [flights](./flights.md) |
-| `GET /api/flights/:id` | public | GetFlight | 200 | 404 | [flights](./flights.md) |
+| `GET /api/flights/search` | public | SearchFlights (Day 51) | 200 `{ items, page }` | 422, 400 `INVALID_CURSOR` | [flights](./flights.md) |
+| `GET /api/flights/:id` | public | GetFlight (Day 51: + availability theo hạng, giờ địa phương) | 200 | 404 | [flights](./flights.md) |
 | `GET /api/flights/:id/seats` | public | GetFlightSeatMap | 200 | 404 | [flights](./flights.md) |
-| `POST /api/flights/:id/bookings` | user | CreateBooking | 201 + Location | 422, 404, 409 `NOT_ENOUGH_SEATS` / `SEATS_UNAVAILABLE` / `SALES_CLOSED` | [bookings](./bookings.md) |
+| `POST /api/flights/:id/bookings` | user | CreateBooking | 201 + Location | 422, 404, 409 `NOT_ENOUGH_SEATS`, 422 `FARE_CLASS_NOT_ON_AIRCRAFT` (Day 51) / `SEATS_UNAVAILABLE` / `SALES_CLOSED` | [bookings](./bookings.md) |
 | `GET /api/bookings` | user/admin | ListBookings | 200 | 422 | [bookings](./bookings.md) |
 | `GET /api/bookings/:id` | user/admin | GetBooking | 200 | 404 | [bookings](./bookings.md) |
 | `GET /api/bookings/by-reference/:ref` | user/admin | GetBookingByReference | 200 | 404 | [bookings](./bookings.md) |

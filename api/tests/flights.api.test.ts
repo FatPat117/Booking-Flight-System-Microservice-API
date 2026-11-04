@@ -14,17 +14,26 @@ import { createGetFlight } from "../src/flights/get-flight.js";
 import { createGetFlightSeatMap } from "../src/flights/get-flight-seat-map.js";
 import { createListFlights } from "../src/flights/list-flights.js";
 import { createOpenFlight } from "../src/flights/open-flight.js";
+import { createSearchFlights } from "../src/flights/search-flights.js";
 import type { HealthChecks } from "../src/health/health-checks.js";
 import type { Logger, LogFields } from "../src/observability/logger.js";
 import { getRequestContext } from "../src/observability/request-context.js";
 import { nextBookingReference } from "./fixtures/bookings.js";
-import { TEST_AIRCRAFT, TEST_AIRPORTS } from "./fixtures/flights.js";
+import {
+  FIXTURE_AIRCRAFT_ID,
+  FIXTURE_OTHER_AIRCRAFT_ID,
+  FIXTURE_TWO_CLASS_AIRCRAFT_ID,
+  makeFlight,
+  TEST_AIRCRAFT,
+  TEST_AIRPORTS,
+} from "./fixtures/flights.js";
 import {
   createInMemoryAircraftRepository,
   createInMemoryAirportRepository,
   createInMemoryAuditRecorder,
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
+  createInMemoryFlightSearch,
   createInMemoryFlightStore,
   createInMemoryTransactionRunner,
   createUnusedBookingReads,
@@ -180,7 +189,7 @@ function createAppWithRepository(
   const { logger } = createMemoryLogger();
 
   return createApp({
-    getFlight: createGetFlight({ flightRepository, getCurrentTime: () => NOW }),
+    getFlight: createGetFlight({ flightSearch: createInMemoryFlightSearch(flights, TEST_AIRPORTS), getCurrentTime: () => NOW }),
     getFlightSeatMap: createGetFlightSeatMap({ flightRepository }),
     createFlight,
     openFlight,
@@ -191,6 +200,10 @@ function createAppWithRepository(
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
     listFlights,
+    searchFlights: createSearchFlights({
+      flightSearch: createInMemoryFlightSearch(flights, TEST_AIRPORTS),
+      getCurrentTime: () => NOW,
+    }),
     logger,
     healthChecks,
     jwtSecret: TEST_JWT_SECRET,
@@ -682,7 +695,7 @@ test("the seat map shows a held seat as HELD and no key anywhere says who holds 
   const booking = await request(app)
     .post(`/api/flights/${flightId}/bookings`)
     .set("Authorization", `Bearer ${signAccessToken("user")}`)
-    .send({ passengers: [{ name: "Alice Nguyen" }] });
+    .send({ fareClass: "ECONOMY", passengers: [{ name: "Alice Nguyen" }] });
   assert.equal(booking.status, 201);
 
   const response = await request(app).get(`/api/flights/${flightId}/seats`);
@@ -1293,4 +1306,109 @@ test("duplicate create request does not record an additional audit log", async (
   assert.equal(duplicate.status, 409);
 
   assert.equal(audit.records.length, 1);
+});
+
+// ---- Day 51: GET /api/flights/search (US-FLT-04, Decision 17) ----
+
+async function searchContext() {
+  const { app, repository } = createTestContext();
+  const flights = [FIXTURE_AIRCRAFT_ID, FIXTURE_OTHER_AIRCRAFT_ID, FIXTURE_TWO_CLASS_AIRCRAFT_ID].map((aircraftId, index) =>
+    makeFlight({
+      aircraftId,
+      departureAt: `2027-03-11T0${index + 1}:00:00.000Z`,
+      arrivalAt: `2027-03-11T0${index + 3}:00:00.000Z`,
+    }),
+  );
+  for (const flight of flights) {
+    assert.equal((await repository.create(flight)).outcome, "created");
+  }
+  return { app, flights };
+}
+
+const SEARCH = "/api/flights/search?origin=ZZA&destination=ZZB&departureDateFrom=2027-03-11";
+
+test("GET /api/flights/search needs no token and pages with nextCursor until hasNextPage is false", async () => {
+  const { app, flights } = await searchContext();
+
+  const first = await request(app).get(`${SEARCH}&limit=2`);
+  assert.equal(first.status, 200);
+  assert.deepEqual(first.body.items.map((item: { id: string }) => item.id), [flights[0]?.id, flights[1]?.id]);
+  assert.equal(first.body.page.hasNextPage, true);
+  assert.equal(typeof first.body.page.nextCursor, "string");
+  assert.deepEqual(first.body.items[0].lowestFare, { amount: 1_500_000, currency: "VND" });
+  assert.deepEqual(first.body.items[0].availability, [
+    { fareClass: "ECONOMY", availableSeats: 120, fare: { amount: 1_500_000, currency: "VND" } },
+  ]);
+
+  const second = await request(app).get(`${SEARCH}&limit=2&cursor=${first.body.page.nextCursor}`);
+  assert.equal(second.status, 200);
+  assert.deepEqual(second.body.items.map((item: { id: string }) => item.id), [flights[2]?.id]);
+  assert.deepEqual(second.body.page, { hasNextPage: false, nextCursor: null });
+});
+
+test("GET /api/flights/search answers 422 with every invalid parameter: 8 days, 10 passengers, a bad code", async () => {
+  const { app } = await searchContext();
+
+  const response = await request(app).get(
+    "/api/flights/search?origin=Z1&destination=ZZB&departureDateFrom=2027-03-11&departureDateTo=2027-03-18&passengers=10",
+  );
+
+  assert.equal(response.status, 422);
+  assert.equal(response.body.error.code, "VALIDATION_FAILED");
+  assert.deepEqual(
+    response.body.error.details.map((issue: { code: string }) => issue.code),
+    ["INVALID_AIRPORT_CODE", "DATE_RANGE_TOO_LONG", "INVALID_PASSENGER_COUNT"],
+  );
+});
+
+test("GET /api/flights/search answers 400 INVALID_CURSOR for a damaged cursor or one from another search", async () => {
+  const { app } = await searchContext();
+  const first = await request(app).get(`${SEARCH}&limit=1`);
+  const cursor: string = first.body.page.nextCursor;
+
+  const damaged = await request(app).get(`${SEARCH}&limit=1&cursor=${cursor.slice(0, -2)}xx`);
+  const otherSearch = await request(app).get(`${SEARCH}&limit=1&passengers=2&cursor=${cursor}`);
+
+  for (const response of [damaged, otherSearch]) {
+    assert.equal(response.status, 400);
+    assert.equal(response.body.error.code, "INVALID_CURSOR");
+  }
+});
+
+test("GET /api/flights/:id adds availability per class matching the seat map, and local times (US-FLT-05)", async () => {
+  const { app, repository } = createTestContext();
+  const flight = makeFlight({
+    aircraftId: FIXTURE_TWO_CLASS_AIRCRAFT_ID,
+    departureAt: "2027-03-11T16:00:00.000Z",
+    arrivalAt: "2027-03-11T22:00:00.000Z",
+  });
+  assert.equal((await repository.create(flight)).outcome, "created");
+
+  const details = await request(app).get(`/api/flights/${flight.id}`);
+  const seatMap = await request(app).get(`/api/flights/${flight.id}/seats`);
+
+  assert.equal(details.status, 200);
+  assert.equal(details.body.departureLocal, "2027-03-11T23:00:00+07:00");
+  assert.equal(details.body.arrivalLocal, "2027-03-12T05:00:00+07:00");
+  assert.equal(details.body.arrivalDayOffset, 1);
+  const seats = seatMap.body.rows.flatMap((row: { seats: Array<{ fareClass: string; status: string }> }) => row.seats);
+  const free = (fareClass: string) =>
+    seats.filter((seat: { fareClass: string; status: string }) => seat.fareClass === fareClass && seat.status === "AVAILABLE").length;
+  assert.deepEqual(details.body.availability, [
+    { fareClass: "ECONOMY", availableSeats: free("ECONOMY"), fare: { amount: 1_500_000, currency: "VND" } },
+    { fareClass: "BUSINESS", availableSeats: free("BUSINESS"), fare: { amount: 4_200_000, currency: "VND" } },
+  ]);
+});
+
+test("GET /api/flights/search items carry departure and arrival in local time with the day offset", async () => {
+  const { app, flights } = await searchContext();
+
+  const response = await request(app).get(`${SEARCH}&limit=1`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.items[0].id, flights[0]?.id);
+  assert.deepEqual(
+    [response.body.items[0].departureLocal, response.body.items[0].arrivalLocal, response.body.items[0].arrivalDayOffset],
+    ["2027-03-11T08:00:00+07:00", "2027-03-11T10:00:00+07:00", 0],
+  );
 });

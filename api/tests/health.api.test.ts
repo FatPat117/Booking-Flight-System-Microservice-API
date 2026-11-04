@@ -18,14 +18,16 @@ import {
   createInMemoryAirportRepository,
   createInMemoryBookingRepository,
   createInMemoryFlightRepository,
+  createInMemoryFlightSearch,
   createInMemoryFlightStore,
   createInMemoryHealthChecks,
   createUnusedBookingReads,
-  createUnusedPayForBooking,
   createUnusedFlightSeatMap,
   createUnusedOpenFlight,
+  createUnusedPayForBooking,
   createUnusedReferenceData,
 } from "./fakes/in-memory.js";
+import { TEST_AIRPORTS } from "./fixtures/flights.js";
 
 
 function createNoopAuditRecorder(): AuditRecorder {
@@ -96,7 +98,7 @@ function createTestContext() {
 
   const app = createApp({
     getFlight: createGetFlight({
-      flightRepository,
+      flightSearch: createInMemoryFlightSearch(flights, TEST_AIRPORTS),
       getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
     }),
     createFlight,
@@ -105,6 +107,7 @@ function createTestContext() {
     createBooking: createTestCreateBooking(bookingRepository),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     changeSeat: async () => ({ outcome: "not-found" as const }),
+    searchFlights: async () => ({ outcome: "success" as const, items: [], page: { hasNextPage: false, nextCursor: null } }),
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
@@ -198,7 +201,7 @@ test("GET /ready returns 503 when database is unavailable", async () => {
 
   const app = createApp({
     getFlight: createGetFlight({
-      flightRepository,
+      flightSearch: createInMemoryFlightSearch(flights, TEST_AIRPORTS),
       getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
     }),
     createFlight,
@@ -207,6 +210,7 @@ test("GET /ready returns 503 when database is unavailable", async () => {
     createBooking: createTestCreateBooking(bookingRepository),
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     changeSeat: async () => ({ outcome: "not-found" as const }),
+    searchFlights: async () => ({ outcome: "success" as const, items: [], page: { hasNextPage: false, nextCursor: null } }),
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),

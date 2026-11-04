@@ -67,7 +67,7 @@ test("created: writes one booking row, claims its seat, one audit row, one outbo
   await keepFirstSeats(dataSource, flight.id, 1);
 
   const createBooking = createUseCase();
-  const result = await createBooking(flight.id, { passengers: [{ name: "Alice" }] }, OWNER_ACTOR);
+  const result = await createBooking(flight.id, { fareClass: "ECONOMY", passengers: [{ name: "Alice" }] }, OWNER_ACTOR);
 
   assert.equal(result.outcome, "created");
   if (result.outcome !== "created") {
@@ -184,7 +184,7 @@ test("a taken reference on the first draw: the booking is stored with the next o
   await keepFirstSeats(dataSource, flight.id, 2);
   const existing = await createUseCase(() => "AAAAAA")(
     flight.id,
-    { passengers: [{ name: "Alice" }] },
+    { fareClass: "ECONOMY", passengers: [{ name: "Alice" }] },
     OWNER_ACTOR,
   );
   assert.equal(existing.outcome, "created");
@@ -192,7 +192,7 @@ test("a taken reference on the first draw: the booking is stored with the next o
   const draws = ["AAAAAA", "BBBBBB"];
   const result = await createUseCase(() => draws.shift() ?? "ZZZZZZ")(
     flight.id,
-    { passengers: [{ name: "Bob" }] },
+    { fareClass: "ECONOMY", passengers: [{ name: "Bob" }] },
     OWNER_ACTOR,
   );
 
@@ -221,12 +221,12 @@ test("a taken reference on the first draw: the booking is stored with the next o
 
 test("not-enough-seats: no booking, audit, or outbox row is written, and the seat count is unchanged", async () => {
   const flightRepository = createPostgresFlightRepository(dataSource);
-  const flight = makeFlight({ availableSeats: 0 });
+  const flight = makeFlight({ availableSeats: 1 });
   await flightRepository.create(flight);
-  await keepFirstSeats(dataSource, flight.id, 0);
+  await keepFirstSeats(dataSource, flight.id, 1);
 
   const createBooking = createUseCase();
-  const result = await createBooking(flight.id, { passengers: [{ name: "Alice" }] }, OWNER_ACTOR);
+  const result = await createBooking(flight.id, { fareClass: "ECONOMY", passengers: [{ name: "Alice" }, { name: "Bob" }] }, OWNER_ACTOR);
 
   assert.equal(result.outcome, "not-enough-seats");
 
@@ -239,7 +239,7 @@ test("not-enough-seats: no booking, audit, or outbox row is written, and the sea
   assert.equal(outboxRows.length, 0);
 
   const afterFlight = await flightRepository.findById(flight.id);
-  assert.equal(afterFlight?.availableSeats, 0);
+  assert.equal(afterFlight?.availableSeats, 1);
 });
 
 test("flight-not-found: resolves flight-not-found for an unknown flight id", async () => {
@@ -247,7 +247,7 @@ test("flight-not-found: resolves flight-not-found for an unknown flight id", asy
 
   const result = await createBooking(
     crypto.randomUUID(),
-    { passengers: [{ name: "Alice" }] },
+    { fareClass: "ECONOMY", passengers: [{ name: "Alice" }] },
     OWNER_ACTOR,
   );
 
