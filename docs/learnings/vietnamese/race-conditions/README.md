@@ -39,12 +39,14 @@ Postgres thật** chứng minh nó.
 | Hai thao tác cùng khoá hai ghế, mỗi bên "của mình" một ghế | Khoá **cả hai** theo thứ tự toàn cục (row, letter) | Hoán đổi ghế chéo (Day 50) | [12](./12-doi-ghe-va-huy-booking-da-tra-tien.md) |
 | Câu lệnh chờ khoá rồi đọc dòng **khác** theo snapshot cũ | Khoá dòng cha bằng câu riêng **trước**, có điều kiện | Huỷ vs đổi ghế (Day 50) | [12](./12-doi-ghe-va-huy-booking-da-tra-tien.md) |
 | Câu chờ khoá rồi tìm ghế theo `booking_id`, **không** có khoá trước | Một bất biến giữ tập dòng không đổi (ghế của `HELD` không đổi) + test đối chứng phá bất biến | `confirmHold`, `expireDueHolds` (Day 51) | [13](./13-ra-soat-snapshot-cau-lenh-cho-khoa.md) |
+| Thao tác lớn trên hàng trăm dòng mà người khác vẫn dùng | Một transaction ngắn đổi trạng thái cha + job dây chuyền điều khiển bởi trạng thái, mỗi transaction một dòng con, `SKIP LOCKED` | Huỷ chuyến bay (Day 52) | [14](./14-huy-chuyen-bay-day-chuyen-va-thi-nghiem-deadlock.md) |
+| Xác nhận đua với lệnh huỷ cha chưa commit | Điều kiện về cha nằm **trong** câu xác nhận, dưới `FOR SHARE` (đọc lại dòng sau khi chờ) | Thanh toán vs huỷ chuyến (Day 52) | [14](./14-huy-chuyen-bay-day-chuyen-va-thi-nghiem-deadlock.md) |
 
 Cách test tất cả những thứ trên: [06-cach-test-race-condition.md](./06-cach-test-race-condition.md).
 
 Bảy file race test trong `api/tests/integration/`: `postgres-booking-race` (một ghế mỗi booking, Day 47),
 `postgres-booking-hold-race` (nhiều ghế, Day 48A), `postgres-booking-expiry-race` (hết hạn giữ ghế, Day 48B),
-`postgres-fare-snapshot` (chụp giá, Day 49A), `postgres-payment-race` (thanh toán, Day 49B), `postgres-payment-reconciliation` (đối soát + tiêm lỗi, Day 49C), `flight-schedule-race.postgres` (lịch máy bay, Day 46).
+`postgres-fare-snapshot` (chụp giá, Day 49A), `postgres-payment-race` (thanh toán, Day 49B), `postgres-payment-reconciliation` (đối soát + tiêm lỗi, Day 49C), `flight-schedule-race.postgres` (lịch máy bay, Day 46), `postgres-flight-cancellation-race` (huỷ chuyến dây chuyền, ma trận A–G, Day 52).
 
 ## Các con số đã đo (thuộc lòng để kể khi phỏng vấn)
 
@@ -67,3 +69,6 @@ Bảy file race test trong `api/tests/integration/`: `postgres-booking-race` (m�
 | Day 49C: hai job đối soát, 30 payment; có / không lease | 0 / **30** lời gọi gateway trùng; vẫn 1 lần trừ tiền mỗi payment |
 | Day 51: `confirm` chờ sau huỷ / sau đổi ghế bị từ chối / sau đoạn ghi đổi ghế `HELD` (đối chứng) | đúng / đúng / **ghế mới `HELD` cho booking `CONFIRMED`** |
 | Day 51: một chuyến ở trang 1 hết chỗ trước khi đọc trang 2; keyset / OFFSET | trang 2 = chuyến 4–6 / chuyến 5–7 (**chuyến 4 bị bỏ sót**) |
+| Day 52 A': huỷ chuyến kiểu một transaction (khoá chuyến rồi ghế) vs giữ ghế 12A, ép thứ tự | **`40P01` 3/3** (giả thuyết Day 47 đúng); lệnh huỷ thật: 0 |
+| Day 52: 100 booking đã trả; một transaction / dây chuyền | giữ dòng chuyến 536–601 ms / 3–8 ms; giữ ghế cùng chuyến bị chặn 535–600 ms / 19–55 ms |
+| Day 52 E: hai job dây chuyền, 100 booking | mỗi booking huỷ đúng một lần, 20/20 hoàn tiền |

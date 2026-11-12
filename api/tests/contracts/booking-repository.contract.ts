@@ -61,6 +61,8 @@ export type BookingRepositoryContractSubject = Readonly<{
    * port, so "nothing was written" can be checked on both sides.
    */
   seats(flightId: string): Promise<StoredSeat[]>;
+  /** Marks an OPEN flight CANCELLED, as the cancel-flight command does (Day 52). */
+  cancelFlight(flightId: string): Promise<void>;
 }>;
 
 export type StoredSeat = Readonly<{
@@ -398,7 +400,7 @@ export function runBookingRepositoryContract(
     const booking = makeBooking(flight.id);
     await book(subject, booking, { kind: "auto", count: 3, fareClass: "ECONOMY" });
 
-    assert.deepEqual(await subject.repository.cancel(booking.id, ADMIN, CANCEL_AT), {
+    assert.deepEqual(await subject.repository.cancel(booking.id, ADMIN, CANCEL_AT, "CUSTOMER"), {
       outcome: "cancelled",
       flightId: flight.id,
       reference: booking.reference,
@@ -417,7 +419,7 @@ export function runBookingRepositoryContract(
     await book(subject, first);
     assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "not-enough-seats" });
 
-    await subject.repository.cancel(first.id, ADMIN, CANCEL_AT);
+    await subject.repository.cancel(first.id, ADMIN, CANCEL_AT, "CUSTOMER");
 
     assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "held", seats: ["1A"] });
     assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "not-enough-seats" });
@@ -430,7 +432,7 @@ export function runBookingRepositoryContract(
     await book(subject, inFront); // 1A
     await book(subject, makeBooking(flight.id)); // 1B
 
-    await subject.repository.cancel(inFront.id, ADMIN, CANCEL_AT);
+    await subject.repository.cancel(inFront.id, ADMIN, CANCEL_AT, "CUSTOMER");
 
     assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "held", seats: ["1A"] });
     assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "held", seats: ["1C"] });
@@ -441,10 +443,10 @@ export function runBookingRepositoryContract(
     const flight = await seedFlight(subject, 2);
     const cancelledTwice = makeBooking(flight.id);
     await book(subject, cancelledTwice); // 1A
-    await subject.repository.cancel(cancelledTwice.id, ADMIN, CANCEL_AT);
+    await subject.repository.cancel(cancelledTwice.id, ADMIN, CANCEL_AT, "CUSTOMER");
     await book(subject, makeBooking(flight.id)); // takes 1A again
 
-    assert.deepEqual(await subject.repository.cancel(cancelledTwice.id, ADMIN, CANCEL_AT), {
+    assert.deepEqual(await subject.repository.cancel(cancelledTwice.id, ADMIN, CANCEL_AT, "CUSTOMER"), {
       outcome: "already-cancelled",
     });
     assert.deepEqual(await book(subject, makeBooking(flight.id)), { outcome: "held", seats: ["1B"] });
@@ -455,7 +457,7 @@ export function runBookingRepositoryContract(
     const subject = await setup();
     const booking = await seedHeldBooking(subject);
 
-    assert.deepEqual(await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), CANCEL_AT), {
+    assert.deepEqual(await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), CANCEL_AT, "CUSTOMER"), {
       outcome: "cancelled",
       flightId: booking.flightId,
       reference: booking.reference,
@@ -466,9 +468,9 @@ export function runBookingRepositoryContract(
   test(name("cancelling the same booking twice returns already-cancelled"), async () => {
     const subject = await setup();
     const booking = await seedHeldBooking(subject);
-    await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), CANCEL_AT);
+    await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), CANCEL_AT, "CUSTOMER");
 
-    assert.deepEqual(await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), CANCEL_AT), {
+    assert.deepEqual(await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), CANCEL_AT, "CUSTOMER"), {
       outcome: "already-cancelled",
     });
   });
@@ -552,15 +554,16 @@ export function runBookingRepositoryContract(
     assert.deepEqual(stored?.total, vnd(2 * big));
   });
 
-  test(name("a cancelled booking reads CANCELLED and keeps its passengers' seat copy (the seat itself is released)"), async () => {
+  test(name("a cancelled booking reads CANCELLED with its reason and keeps its passengers' seat copy (the seat itself is released)"), async () => {
     const subject = await setup();
     const booking = await seedHeldBooking(subject);
 
-    await subject.repository.cancel(booking.id, ADMIN, CANCEL_AT);
+    await subject.repository.cancel(booking.id, ADMIN, CANCEL_AT, "CUSTOMER");
 
     assert.deepEqual(await subject.repository.findById(booking.id, ADMIN), {
       ...booking,
       status: "CANCELLED",
+      cancellationReason: "CUSTOMER",
     });
     assert.deepEqual(await book(subject, makeBooking(booking.flightId)), {
       outcome: "held",
@@ -609,7 +612,7 @@ export function runBookingRepositoryContract(
   test(name("cancel on an unknown booking returns not-found"), async () => {
     const subject = await setup();
 
-    assert.deepEqual(await subject.repository.cancel(crypto.randomUUID(), ADMIN, CANCEL_AT), {
+    assert.deepEqual(await subject.repository.cancel(crypto.randomUUID(), ADMIN, CANCEL_AT, "CUSTOMER"), {
       outcome: "not-found",
     });
   });
@@ -647,7 +650,7 @@ export function runBookingRepositoryContract(
     const subject = await setup();
     const bookingOfB = await seedHeldBooking(subject, ACCOUNT_B);
 
-    assert.deepEqual(await subject.repository.cancel(bookingOfB.id, ownerScope(ACCOUNT_A), CANCEL_AT), {
+    assert.deepEqual(await subject.repository.cancel(bookingOfB.id, ownerScope(ACCOUNT_A), CANCEL_AT, "CUSTOMER"), {
       outcome: "not-found",
     });
     assert.equal((await subject.repository.findById(bookingOfB.id, ADMIN))?.status, "HELD");
@@ -656,9 +659,9 @@ export function runBookingRepositoryContract(
   test(name("cancel of another account's already-cancelled booking is not-found, not already-cancelled"), async () => {
     const subject = await setup();
     const bookingOfB = await seedHeldBooking(subject, ACCOUNT_B);
-    await subject.repository.cancel(bookingOfB.id, ownerScope(ACCOUNT_B), CANCEL_AT);
+    await subject.repository.cancel(bookingOfB.id, ownerScope(ACCOUNT_B), CANCEL_AT, "CUSTOMER");
 
-    assert.deepEqual(await subject.repository.cancel(bookingOfB.id, ownerScope(ACCOUNT_A), CANCEL_AT), {
+    assert.deepEqual(await subject.repository.cancel(bookingOfB.id, ownerScope(ACCOUNT_A), CANCEL_AT, "CUSTOMER"), {
       outcome: "not-found",
     });
   });
@@ -742,7 +745,7 @@ export function runBookingRepositoryContract(
     const flight = await seedFlight(subject, 3);
     const past = new Date(NOW.getTime() - HOLD_MS);
     const cancelled = await seedHold(subject, flight, past);
-    await subject.repository.cancel(cancelled.id, ADMIN, CANCEL_AT);
+    await subject.repository.cancel(cancelled.id, ADMIN, CANCEL_AT, "CUSTOMER");
     const expired = await seedHold(subject, flight, past);
     assert.equal((await subject.repository.expireDueHolds(NOW, 50)).length, 1);
     // CONFIRMED keeps its old deadline as history. Stored directly: no port
@@ -811,7 +814,7 @@ export function runBookingRepositoryContract(
     const flight = await seedFlight(subject, 2);
     const due = await seedHold(subject, flight, NOW);
 
-    assert.deepEqual(await subject.repository.cancel(due.id, ADMIN, NOW), { outcome: "expired" });
+    assert.deepEqual(await subject.repository.cancel(due.id, ADMIN, NOW, "CUSTOMER"), { outcome: "expired" });
     assert.equal((await subject.repository.findById(due.id, ADMIN))?.status, "HELD");
     assert.deepEqual(await statuses(subject, flight.id), ["1A:HELD", "1B:AVAILABLE"]);
 
@@ -829,7 +832,7 @@ export function runBookingRepositoryContract(
     const valid = await seedHold(subject, flight, NOW, { kind: "auto", count: 2, fareClass: "ECONOMY" });
 
     assert.deepEqual(
-      await subject.repository.cancel(valid.id, ownerScope(ACCOUNT_A), new Date(NOW.getTime() - 1)),
+      await subject.repository.cancel(valid.id, ownerScope(ACCOUNT_A), new Date(NOW.getTime() - 1), "CUSTOMER"),
       { outcome: "cancelled", flightId: flight.id, reference: valid.reference, seats: ["1A", "1B"] },
     );
     assert.deepEqual(await statuses(subject, flight.id), ["1A:AVAILABLE", "1B:AVAILABLE"]);
@@ -846,7 +849,7 @@ export function runBookingRepositoryContract(
     const windowCloses = new Date(NOW.getTime() + 24 * HOUR_MS);
 
     assert.deepEqual(
-      await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), new Date(windowCloses.getTime() - 1)),
+      await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), new Date(windowCloses.getTime() - 1), "CUSTOMER"),
       { outcome: "cancelled", flightId: flight.id, reference: booking.reference, seats: ["1A"] },
     );
     assert.deepEqual(await statuses(subject, flight.id), ["1A:AVAILABLE", "1B:AVAILABLE"]);
@@ -859,7 +862,7 @@ export function runBookingRepositoryContract(
     await subject.repository.confirmHold(booking.id, ADMIN, NOW);
     const windowCloses = new Date(NOW.getTime() + 24 * HOUR_MS);
 
-    assert.deepEqual(await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), windowCloses), {
+    assert.deepEqual(await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), windowCloses, "CUSTOMER"), {
       outcome: "cancellation-window-closed",
       cancellableUntil: windowCloses.toISOString(),
     });
@@ -875,11 +878,11 @@ export function runBookingRepositoryContract(
     const confirmed = await seedHold(subject, flight, new Date(NOW.getTime() + HOLD_MS));
     await subject.repository.confirmHold(confirmed.id, ADMIN, NOW);
 
-    assert.equal((await subject.repository.cancel(held.id, ownerScope(ACCOUNT_A), NOW)).outcome, "cancelled");
-    assert.deepEqual(await subject.repository.cancel(confirmed.id, ownerScope(ACCOUNT_B), NOW), {
+    assert.equal((await subject.repository.cancel(held.id, ownerScope(ACCOUNT_A), NOW, "CUSTOMER")).outcome, "cancelled");
+    assert.deepEqual(await subject.repository.cancel(confirmed.id, ownerScope(ACCOUNT_B), NOW, "CUSTOMER"), {
       outcome: "not-found",
     });
-    assert.equal((await subject.repository.cancel(confirmed.id, ownerScope(ACCOUNT_A), NOW)).outcome, "cancellation-window-closed");
+    assert.equal((await subject.repository.cancel(confirmed.id, ownerScope(ACCOUNT_A), NOW, "CUSTOMER")).outcome, "cancellation-window-closed");
   });
 
   // ---- Day 50: seat change (BR-BOOK-07, Decision 16) ----
@@ -1056,7 +1059,7 @@ export function runBookingRepositoryContract(
     const { flight, booking } = await seedConfirmed(subject, ["3A"]);
     assert.equal((await subject.repository.changeSeat(booking.id, 1, seat("5F"), ADMIN, NOW)).outcome, "changed");
 
-    assert.deepEqual(await subject.repository.cancel(booking.id, ADMIN, NOW), {
+    assert.deepEqual(await subject.repository.cancel(booking.id, ADMIN, NOW, "CUSTOMER"), {
       outcome: "cancelled",
       flightId: flight.id,
       reference: booking.reference,
@@ -1073,10 +1076,10 @@ export function runBookingRepositoryContract(
     const lapsedOfA = await seedHold(subject, flight, NOW);
     const later = new Date(NOW.getTime() + HOLD_MS);
 
-    assert.deepEqual(await subject.repository.cancel(swept.id, ADMIN, later), { outcome: "expired" });
+    assert.deepEqual(await subject.repository.cancel(swept.id, ADMIN, later, "CUSTOMER"), { outcome: "expired" });
     // Out of scope is not-found whatever the state (BR-AUTH-02).
     assert.deepEqual(
-      await subject.repository.cancel(lapsedOfA.id, ownerScope(ACCOUNT_B), later),
+      await subject.repository.cancel(lapsedOfA.id, ownerScope(ACCOUNT_B), later, "CUSTOMER"),
       { outcome: "not-found" },
     );
     assert.equal((await subject.repository.findById(swept.id, ADMIN))?.status, "EXPIRED");
@@ -1127,7 +1130,7 @@ export function runBookingRepositoryContract(
     const flight = await seedFlight(subject, 3);
     const before = new Date(NOW.getTime() - 1);
     const cancelled = await seedHold(subject, flight, NOW);
-    await subject.repository.cancel(cancelled.id, ADMIN, before);
+    await subject.repository.cancel(cancelled.id, ADMIN, before, "CUSTOMER");
     const expired = await seedHold(subject, flight, NOW);
     await subject.repository.expireDueHolds(NOW, 50);
     const confirmed = await seedHold(subject, flight, NOW);
@@ -1158,6 +1161,127 @@ export function runBookingRepositoryContract(
     );
     assert.equal((await subject.repository.findById(held.id, ADMIN))?.status, "HELD");
     assert.deepEqual(await statuses(subject, flight.id), ["1A:HELD"]);
+  });
+
+  test(name("countLiveOnFlight counts CONFIRMED and still-valid HELD bookings of that flight only, not lapsed, cancelled or another flight's"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 4);
+    const other = await seedFlight(subject, 1);
+    const valid = new Date(NOW.getTime() + HOLD_MS);
+
+    await seedHold(subject, flight, valid);
+    // Lapsing exactly at NOW: shown EXPIRED (BR-BOOK-10), the expiry job's.
+    await seedHold(subject, flight, NOW);
+    const confirmed = await seedHold(subject, flight, valid);
+    assert.equal((await subject.repository.confirmHold(confirmed.id, ADMIN, NOW)).outcome, "confirmed");
+    const cancelled = await seedHold(subject, flight, valid);
+    assert.equal((await subject.repository.cancel(cancelled.id, ADMIN, NOW, "CUSTOMER")).outcome, "cancelled");
+    await seedHold(subject, other, valid);
+
+    assert.equal(await subject.repository.countLiveOnFlight(flight.id, NOW), 2);
+    assert.equal(await subject.repository.countLiveOnFlight(flight.id, valid), 1);
+    assert.equal(await subject.repository.countLiveOnFlight(crypto.randomUUID(), NOW), 0);
+  });
+
+  // Day 52 (Decision 18): the reason decides the rule.
+
+  test(name("an AIRLINE cancel of a CONFIRMED booking inside 24 h of departure cancels it on a cancelled flight, stores the reason and releases its seats"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 2, departingIn(2 * HOUR_MS));
+    const booking = await seedHold(subject, flight, new Date(NOW.getTime() + HOLD_MS));
+    assert.equal((await subject.repository.confirmHold(booking.id, ADMIN, NOW)).outcome, "confirmed");
+    await subject.cancelFlight(flight.id);
+
+    assert.deepEqual(await subject.repository.cancel(booking.id, ADMIN, NOW, "AIRLINE"), {
+      outcome: "cancelled",
+      flightId: flight.id,
+      reference: booking.reference,
+      seats: ["1A"],
+    });
+    const stored = await subject.repository.findById(booking.id, ADMIN);
+    assert.equal(stored?.status, "CANCELLED");
+    assert.equal(stored?.cancellationReason, "AIRLINE");
+    assert.deepEqual(await statuses(subject, flight.id), ["1A:AVAILABLE", "1B:AVAILABLE"]);
+  });
+
+  test(name("the same CONFIRMED booking inside 24 h is window-closed for a CUSTOMER cancel, even on a cancelled flight"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 1, departingIn(2 * HOUR_MS));
+    const booking = await seedHold(subject, flight, new Date(NOW.getTime() + HOLD_MS));
+    await subject.repository.confirmHold(booking.id, ADMIN, NOW);
+    await subject.cancelFlight(flight.id);
+
+    const result = await subject.repository.cancel(booking.id, ownerScope(ACCOUNT_A), NOW, "CUSTOMER");
+
+    assert.equal(result.outcome, "cancellation-window-closed");
+    assert.equal((await subject.repository.findById(booking.id, ADMIN))?.status, "CONFIRMED");
+  });
+
+  test(name("an AIRLINE cancel on a flight that is not CANCELLED throws and writes nothing"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 1);
+    const booking = await seedHold(subject, flight, new Date(NOW.getTime() + HOLD_MS));
+
+    await assert.rejects(
+      subject.transaction(() => subject.repository.cancel(booking.id, ADMIN, NOW, "AIRLINE")),
+      /needs a CANCELLED flight/,
+    );
+    assert.equal((await subject.repository.findById(booking.id, ADMIN))?.status, "HELD");
+    assert.deepEqual(await statuses(subject, flight.id), ["1A:HELD"]);
+  });
+
+  test(name("an AIRLINE cancel of a lapsed hold is expired: the expiry job ends it, not the cascade"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 1);
+    const booking = await seedHold(subject, flight, NOW);
+    await subject.cancelFlight(flight.id);
+
+    assert.deepEqual(await subject.repository.cancel(booking.id, ADMIN, NOW, "AIRLINE"), {
+      outcome: "expired",
+    });
+    assert.deepEqual(await statuses(subject, flight.id), ["1A:HELD"]);
+  });
+
+  test(name("confirmHold on a cancelled flight is not-payable and books no seat, even with a valid hold"), async () => {
+    const subject = await setup();
+    const flight = await seedFlight(subject, 1);
+    const booking = await seedHold(subject, flight, new Date(NOW.getTime() + HOLD_MS));
+    await subject.cancelFlight(flight.id);
+
+    assert.deepEqual(await subject.repository.confirmHold(booking.id, ADMIN, NOW), {
+      outcome: "not-payable",
+    });
+    assert.equal((await subject.repository.findById(booking.id, ADMIN))?.status, "HELD");
+    assert.deepEqual(await statuses(subject, flight.id), ["1A:HELD"]);
+  });
+
+  test(name("claimLiveBookingOfCancelledFlight finds live bookings of cancelled flights only, lowest id first, then nothing"), async () => {
+    const subject = await setup();
+    const cancelled = await seedFlight(subject, 4);
+    const open = await seedFlight(subject, 1);
+    const valid = new Date(NOW.getTime() + HOLD_MS);
+    const held = await seedHold(subject, cancelled, valid);
+    const confirmed = await seedHold(subject, cancelled, valid);
+    await subject.repository.confirmHold(confirmed.id, ADMIN, NOW);
+    await seedHold(subject, cancelled, NOW); // lapsed: the expiry job's
+    const gone = await seedHold(subject, cancelled, valid);
+    await subject.repository.cancel(gone.id, ADMIN, NOW, "CUSTOMER");
+    await seedHold(subject, open, valid); // its flight is not cancelled
+    await subject.cancelFlight(cancelled.id);
+
+    const claimNext = () =>
+      subject.transaction(async () => {
+        const id = await subject.repository.claimLiveBookingOfCancelledFlight(NOW);
+        if (id !== undefined) {
+          assert.equal((await subject.repository.cancel(id, ADMIN, NOW, "AIRLINE")).outcome, "cancelled");
+        }
+        return id;
+      });
+
+    const expected = [held.id, confirmed.id].sort();
+    assert.equal(await claimNext(), expected[0]);
+    assert.equal(await claimNext(), expected[1]);
+    assert.equal(await claimNext(), undefined);
   });
 
   test(name("findPage with the admin scope returns every account's bookings"), async () => {

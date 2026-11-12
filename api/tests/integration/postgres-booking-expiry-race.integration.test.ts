@@ -514,7 +514,7 @@ async function raceHoldAgainstRelease(
 function cancelLockingSeatsBackwards(_: string, bookingId: string) {
   return resolveEntityManager(dataSource).query(
     `WITH cancelled AS (
-       UPDATE "bookings" SET "status" = 'CANCELLED'
+       UPDATE "bookings" SET "status" = 'CANCELLED', "cancellation_reason" = 'CUSTOMER'
        WHERE "id" = $1 AND "status" = 'HELD'
        RETURNING "id"
      ), locked AS (
@@ -559,7 +559,7 @@ function assertNoDeadlock(settled: PromiseSettledResult<unknown>[]) {
 test("Test E — the real cancel locks 12A before 12B: same interleaving, no deadlock; the hold finds the seats taken, then the cancel frees them", async () => {
   for (let round = 0; round < 5; round += 1) {
     const { flightId, holder, settled } = await raceHoldAgainstRelease((_, bookingId) =>
-      createPostgresBookingRepository(dataSource).cancel(bookingId, OWNER_SCOPE, HELD_AT),
+      createPostgresBookingRepository(dataSource).cancel(bookingId, OWNER_SCOPE, HELD_AT, "CUSTOMER"),
     );
 
     assertNoDeadlock(settled);

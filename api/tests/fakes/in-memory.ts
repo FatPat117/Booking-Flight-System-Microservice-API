@@ -41,6 +41,7 @@ import type {
 } from "../../src/flights/flight-repository.js";
 import type { FlightSearch, FlightSearchResult } from "../../src/flights/flight-search.js";
 import type { GetFlightSeatMap } from "../../src/flights/get-flight-seat-map.js";
+import type { CancelFlight } from "../../src/flights/cancel-flight.js";
 import type { OpenFlight } from "../../src/flights/open-flight.js";
 import type { Money } from "../../src/money/money.js";
 import type {
@@ -380,7 +381,7 @@ export function createInMemoryBookingRepository(deps: {
       };
     },
 
-    async cancel(bookingId, scope, now) {
+    async cancel(bookingId, scope, now, reason) {
       const booking = bookings.get(bookingId);
 
       // Out of scope is not-found, never already-cancelled (BR-AUTH-02).
@@ -391,25 +392,33 @@ export function createInMemoryBookingRepository(deps: {
       if (flight === undefined) {
         throw new Error(`Booking ${bookingId} points at a missing flight`);
       }
-      // Same condition as the Postgres UPDATE: CONFIRMED more than 24 h
-      // before departure (BR-BOOK-06), or HELD still valid at `now`
-      // (BR-BOOK-10).
+      // Same condition as the Postgres UPDATE (cancellableSql): HELD still
+      // valid at `now` (BR-BOOK-10); CONFIRMED more than 24 h before
+      // departure for the customer (BR-BOOK-06), at any time for the
+      // airline (BR-FLT-07) — whose cancel needs the flight CANCELLED.
+      const heldStillValid =
+        booking.status === "HELD" &&
+        booking.holdExpiresAt !== null &&
+        !isHoldLapsed(booking.holdExpiresAt, now);
       const cancellable =
-        (booking.status === "CONFIRMED" &&
-          isCancellationWindowOpen(flight.departureAt, now)) ||
-        (booking.status === "HELD" &&
-          booking.holdExpiresAt !== null &&
-          !isHoldLapsed(booking.holdExpiresAt, now));
+        reason === "CUSTOMER"
+          ? heldStillValid ||
+            (booking.status === "CONFIRMED" &&
+              isCancellationWindowOpen(flight.departureAt, now))
+          : flight.status === "CANCELLED" &&
+            (heldStillValid || booking.status === "CONFIRMED");
       if (!cancellable) {
         return classifyNotCancelled(
           booking.status,
           booking.holdExpiresAt,
           flight.departureAt,
           now,
+          reason,
+          flight.status === "CANCELLED",
         );
       }
 
-      bookings.set(bookingId, { ...booking, status: "CANCELLED" });
+      bookings.set(bookingId, { ...booking, status: "CANCELLED", cancellationReason: reason });
       const released: string[] = [];
       for (const seat of seats.get(booking.flightId) ?? []) {
         if (seat.bookingId === bookingId) {
@@ -524,13 +533,14 @@ export function createInMemoryBookingRepository(deps: {
     },
 
     // Same condition as the Postgres UPDATE: in scope, HELD and still valid
-    // at `now` (BR-BOOK-10).
+    // at `now` (BR-BOOK-10), on a flight that is not CANCELLED (Day 52).
     async confirmHold(bookingId, scope, now) {
       const booking = bookings.get(bookingId);
 
       if (
         booking === undefined ||
         !isInScope(booking, scope) ||
+        flights.get(booking.flightId)?.status === "CANCELLED" ||
         booking.status !== "HELD" ||
         booking.holdExpiresAt === null ||
         isHoldLapsed(booking.holdExpiresAt, now)
@@ -546,6 +556,34 @@ export function createInMemoryBookingRepository(deps: {
         }
       }
       return { outcome: "confirmed", booking: read(confirmed) };
+    },
+
+    // No locks here: the fake is single-threaded, so "skip what another
+    // transaction holds" never applies. Lowest id first, like Postgres.
+    async claimLiveBookingOfCancelledFlight(now) {
+      const live = [...bookings.values()]
+        .filter(
+          (booking) =>
+            flights.get(booking.flightId)?.status === "CANCELLED" &&
+            (booking.status === "CONFIRMED" ||
+              (booking.status === "HELD" &&
+                booking.holdExpiresAt !== null &&
+                !isHoldLapsed(booking.holdExpiresAt, now))),
+        )
+        .map((booking) => booking.id)
+        .sort();
+      return live[0];
+    },
+
+    async countLiveOnFlight(flightId, now) {
+      return [...bookings.values()].filter(
+        (booking) =>
+          booking.flightId === flightId &&
+          (booking.status === "CONFIRMED" ||
+            (booking.status === "HELD" &&
+              booking.holdExpiresAt !== null &&
+              !isHoldLapsed(booking.holdExpiresAt, now))),
+      ).length;
     },
 
     peek(id) {
@@ -1189,11 +1227,17 @@ export function createInMemoryHealthChecks(
 }
 
 /**
- * For HTTP tests that build createApp() but never open a flight. Opening is
- * tested in flights.api.test.ts with the real use case.
+ * For HTTP tests that build createApp() but never open or cancel a flight.
+ * Both are tested in flights.api.test.ts with the real use cases.
  */
-export function createUnusedOpenFlight(): { openFlight: OpenFlight } {
-  return { openFlight: async () => ({ outcome: "not-found" }) };
+export function createUnusedOpenFlight(): {
+  openFlight: OpenFlight;
+  cancelFlight: CancelFlight;
+} {
+  return {
+    openFlight: async () => ({ outcome: "not-found" }),
+    cancelFlight: async () => ({ outcome: "not-found" }),
+  };
 }
 
 /**

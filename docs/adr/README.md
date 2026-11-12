@@ -32,5 +32,6 @@ ADRs do **not** describe how to implement the choice. That lives in code and day
 | [008](./008-time-derived-flight-status.md) | Derive Time-Based Flight Statuses Instead of Storing Them | Accepted |
 | [009](./009-external-calls-outside-transactions.md) | External Calls Stay Outside Database Transactions — Three-Phase Payment with Compensation | Accepted |
 | [010](./010-payment-reconciliation.md) | Reconciliation Finishes Every In-Flight Payment — Re-Charge with the Provider's Idempotency Key, Leased Batches | Accepted |
+| [011](./011-flight-cancellation-cascade.md) | Cancel a Flight in One Short Transaction, Cascade Its Bookings with a State-Driven Job | Accepted |
 
 See also: [architecture overview](../architecture-overview.md) — current topology and gap vs the destination architecture.

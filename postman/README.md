@@ -69,6 +69,21 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 18. Folder **Day 49C — Payment failures** → the seed, alice's `accessToken`, bob's `userAccessToken`, and the app's reconciliation job running (docker compose `app` or `npm run dev`); run top to bottom on a database without VN496 on 2026-12-11. `tok_lost_response` answers `202` after the gateway timeout (`PAYMENT_GATEWAY_TIMEOUT_MS`, default 10 s); request 7 waits 75 s for the job, so the folder takes about 1.5 min. Headless like step 13
 19. Folder **Day 50 — Cancellation and seat change** → the seed (VN-A321, rows 1–2 BUSINESS), alice's `accessToken`, bob's `userAccessToken` and carol's `userBAccessToken`; run top to bottom on a database without VN501 on 2026-12-14. It pays, changes bob's seat 10A → 10C, repeats the change (the same `200`, nothing written), tries a BUSINESS seat (`409 FARE_CLASS_MISMATCH`) and carol's access (`404`), then cancels the paid booking (`200`, refund `REFUND_PENDING`). The 24 h window needs `departure_at` moved with psql: see README, Day 50. Headless like step 13. Since Day 50 a first cancel answers `200` with `{ booking, refund }`, not `204` (the Bookings, Day 47 and Day 48A requests were updated)
 20. Folder **Day 51 — Flight search and details** → the seed (VN-A321/A632/A323 with business rows 1–2, VN-A588 economy only), alice's `accessToken` and bob's `userAccessToken`; run top to bottom on a database without VN511–VN514 on 12–13 January 2027. It searches 12–13 January SGN→HAN for 2 passengers without a token (VN511 at 06:00 local is 23:00 UTC the day before and is still on the 12th; the `SCHEDULED` VN514 is left out; VN513 lands `+1`), sorts by price, follows a `nextCursor`, refuses the cursor with 3 passengers (`400 INVALID_CURSOR`) and an 8-day range with 10 passengers (`422`), reads VN511's details per class, and shows the auto hold's `fareClass` (`422 MISSING_FIELD`, `422 FARE_CLASS_NOT_ON_AIRCRAFT`, `201` on 3A + 3B). Headless like step 13. Since Day 51 every booking body without seats names `fareClass` (the older folders were updated: `BUSINESS` where they expected row 1, `ECONOMY` on VN-B210)
+21. Folder **Day 52 — Flight cancellation cascade** → the seed (VN-A588, 180 economy seats), alice's `accessToken` and bob's `userAccessToken`; run top to bottom on a database without VN522 on 2027-02-16 (flight number + departure stays unique for a cancelled flight: a second run gets `409 FLIGHT_ALREADY_EXISTS`). It holds 11A, holds and pays 11B, refuses the cancel to a user (`403`), cancels the flight (`200`, `remainingBookings: 2`) and cancels again (`200`), shows the flight `CANCELLED` and out of search, refuses a new hold (`409 SALES_CLOSED`), waits 32 s once for the cascade job, then finds both bookings `CANCELLED` with `cancellationReason: "AIRLINE"`, the seat map empty and `remainingBookings: 0`. The refund of 11B is made by the reconciliation job about 30 s later (check `payments` with psql). Headless like step 13. To run it again, delete VN522 first:
+
+   ```sql
+   WITH f AS (SELECT "id" FROM "flights" WHERE "flight_number" = 'VN522' AND "departure_at" = '2027-02-16T01:00:00Z'),
+        b AS (SELECT "id" FROM "bookings" WHERE "flight_id" IN (SELECT "id" FROM f)),
+        p AS (SELECT "id" FROM "payments" WHERE "booking_id" IN (SELECT "id" FROM b)),
+        keys AS (DELETE FROM "idempotency_keys" WHERE "payment_id" IN (SELECT "id" FROM p)),
+        pay AS (DELETE FROM "payments" WHERE "id" IN (SELECT "id" FROM p)),
+        pas AS (DELETE FROM "booking_passengers" WHERE "booking_id" IN (SELECT "id" FROM b)),
+        seats AS (DELETE FROM "flight_seats" WHERE "flight_id" IN (SELECT "id" FROM f)),
+        fares AS (DELETE FROM "flight_fares" WHERE "flight_id" IN (SELECT "id" FROM f)),
+        bk AS (DELETE FROM "bookings" WHERE "id" IN (SELECT "id" FROM b))
+   SELECT count(*) AS "bookings" FROM b;
+   DELETE FROM "flights" WHERE "flight_number" = 'VN522' AND "departure_at" = '2027-02-16T01:00:00Z';
+   ```
 
 **Booking body since Day 48A:** `{ "passengers": [{ "name": "…", "seat": "12A" }] }` — 1 to 9 passengers, `seat` on every passenger or on none; without seats, `"fareClass": "ECONOMY"` or `"BUSINESS"` as well (Day 51). The old `{ "passengerName": … }` answers `422 UNSUPPORTED_FIELD`. A new booking is `HELD` (seats `HELD` on the map) and the notifier logs `booking_held_consumed`.
 

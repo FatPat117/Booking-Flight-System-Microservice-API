@@ -448,7 +448,7 @@ test("cancelling a paid booking at exactly departure − 24 h, or 1 ms later, is
   }
 });
 
-test("a paid cancel records BOOKING_CANCELLED with the refund's payment and PAYMENT_REFUND_PENDING, both by the owner", async () => {
+test("a paid cancel records BOOKING_CANCELLED with the refund's payment and PAYMENT_REFUND_PENDING, both by the owner with reason CUSTOMER", async () => {
   const runtime = await createPaidBooking(FIXED_TIME);
 
   await runtime.cancelBooking(BOOKING_ID, SCOPE_A, ACTOR_A);
@@ -463,6 +463,7 @@ test("a paid cancel records BOOKING_CANCELLED with the refund's payment and PAYM
         metadata: {
           flightId: FLIGHT_ID,
           correlationId: "fixed-request-id",
+          reason: "CUSTOMER",
           refundPaymentId: PAYMENT_ID,
         },
       },
@@ -475,13 +476,14 @@ test("a paid cancel records BOOKING_CANCELLED with the refund's payment and PAYM
           amountVnd: runtime.total.amount,
           providerReference: "sim_ch_1",
           reason: "booking-cancelled",
+          cancellationReason: "CUSTOMER",
         },
       },
     ],
   );
 });
 
-test("booking-cancelled carries the reference, the released seats and the refund; no passenger names", async () => {
+test("booking-cancelled carries the reference, the released seats, reason CUSTOMER and the refund; no passenger names", async () => {
   const runtime = await createPaidBooking(FIXED_TIME);
 
   await runtime.cancelBooking(BOOKING_ID, SCOPE_A, ACTOR_A);
@@ -493,6 +495,7 @@ test("booking-cancelled carries the reference, the released seats and the refund
     type: "booking.cancelled",
     occurredAt: FIXED_TIME.toISOString(),
     booking: { id: BOOKING_ID, reference: "K7Q4PZ", flightId: FLIGHT_ID, seats: ["1A", "1B"] },
+    reason: "CUSTOMER",
     refund: { paymentId: PAYMENT_ID, amount: { amount: runtime.total.amount, currency: "VND" } },
   };
   assert.deepEqual(runtime.entries[0]?.payload, expected);

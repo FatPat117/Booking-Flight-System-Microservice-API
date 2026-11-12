@@ -1,4 +1,4 @@
-import type { Booking, BookingStatus } from "./booking-repository.js";
+import type { Booking, BookingStatus, CancellationReason } from "./booking-repository.js";
 
 /**
  * BR-BOOK-10: at `now`, a hold whose deadline is `<= now` has lapsed. The
@@ -49,13 +49,20 @@ export function isCancellationWindowOpen(departureAt: string, now: Date): boolea
  * Why a cancel matched no row, for a booking the caller can see — shared
  * by the Postgres adapter's follow-up read and the fake. A lapsed HELD
  * counts as expired (BR-BOOK-10), the same answer as a stored EXPIRED; a
- * CONFIRMED one inside 24 h of departure is past its window (BR-BOOK-06).
+ * CONFIRMED one inside 24 h of departure is past its window (BR-BOOK-06),
+ * for a CUSTOMER cancel only.
+ *
+ * An AIRLINE cancel of a booking whose flight is not CANCELLED is a caller
+ * bug (only the cascade cancels for the airline, Decision 18), so it
+ * throws rather than borrowing a customer's answer.
  */
 export function classifyNotCancelled(
   status: BookingStatus,
   holdExpiresAt: string | null,
   departureAt: string,
   now: Date,
+  reason: CancellationReason,
+  flightCancelled: boolean,
 ):
   | { outcome: "already-cancelled" }
   | { outcome: "expired" }
@@ -68,7 +75,14 @@ export function classifyNotCancelled(
   if (effective === "EXPIRED") {
     return { outcome: "expired" };
   }
-  if (effective === "CONFIRMED" && !isCancellationWindowOpen(departureAt, now)) {
+  if (reason === "AIRLINE" && !flightCancelled) {
+    throw new Error("An AIRLINE cancel needs a CANCELLED flight");
+  }
+  if (
+    reason === "CUSTOMER" &&
+    effective === "CONFIRMED" &&
+    !isCancellationWindowOpen(departureAt, now)
+  ) {
     return {
       outcome: "cancellation-window-closed",
       cancellableUntil: cancellableUntil(departureAt),

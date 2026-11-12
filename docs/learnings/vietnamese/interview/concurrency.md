@@ -167,3 +167,26 @@ dùng đúng điều kiện huỷ, để job hết hạn `SKIP LOCKED` không b�
 **Bằng chứng:** race test C forced vs control C' (câu cũ để lại ghế `BOOKED` cho booking đã huỷ);
 mutation bỏ câu khoá trước → C forced fail.
 
+
+### 20. Huỷ một chuyến bay có 100 booking: làm trong một transaction hay không? (Day 52)
+
+**Trả lời:** Không. Request của admin chỉ đổi trạng thái chuyến bay (compare-and-set, một dòng audit)
+— transaction vài ms, không chạm ghế/booking. Một job điều khiển bởi trạng thái huỷ từng booking,
+mỗi booking một transaction ngắn, claim bằng `SKIP LOCKED`, dùng lại đúng lõi huỷ của khách với lý
+do `AIRLINE`. Một transaction lớn giữ dòng chuyến bay + hàng trăm dòng suốt cả lần huỷ, mọi người
+giữ ghế trên chuyến đó phải chờ; nó còn khoá chuyến **rồi** ghế, ngược với câu giữ ghế → deadlock;
+crash là rollback hết. Cái giá của cách tôi chọn: một khoảng trung gian (chuyến đã huỷ mà còn booking
+sống) — ghi thành bất biến và test.
+**Bằng chứng:** 100 booking đã trả: một transaction giữ dòng chuyến 536–601 ms, người giữ ghế cùng
+chuyến chờ đúng chừng đó; cách dây chuyền: 3–8 ms, từ chối người giữ ghế sau 19–55 ms. Đối chứng
+phương án A ép thứ tự: `40P01` 3/3 vòng; lệnh huỷ thật cùng xen kẽ: 0.
+
+### 21. Khách đang thanh toán thì chuyến bị huỷ — có thể ra booking `CONFIRMED` trên chuyến đã huỷ không? (Day 52)
+
+**Trả lời:** Trước Day 52 thì có: câu xác nhận chỉ nhìn booking. Giờ nó khoá chia sẻ dòng chuyến bay
+và đòi `status <> 'CANCELLED'` **trong cùng câu**. Nếu lệnh huỷ đã `UPDATE` mà chưa commit, câu xác
+nhận phải chờ (`FOR SHARE` xung đột với khoá của `UPDATE`); commit xong, Postgres đọc lại bản mới của
+dòng chuyến bay, điều kiện sai → 0 dòng → payment `REFUND_PENDING`, job đối soát hoàn. Chỉ JOIN đọc
+mà không khoá thì snapshot vẫn thấy `OPEN` và xác nhận nhầm.
+**Bằng chứng:** race test B3 (pha 3 chờ sau `UPDATE` chưa commit); đối chứng B' (câu cũ xác nhận được
+trên chuyến đã huỷ); mutation bỏ điều kiện → B2, B3 fail.

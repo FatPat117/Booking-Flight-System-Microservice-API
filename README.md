@@ -154,7 +154,7 @@ POST /api/flights/:id/open
 - **Only `SCHEDULED`, `OPEN` and `CANCELLED` are stored.** `CLOSED` (from 1 hour before departure) and `DEPARTED` are derived from the clock on every read and every seat hold ([ADR-008](docs/adr/008-time-derived-flight-status.md)), so they are right at any moment without a job. `GET /api/flights(/:id)` returns this effective `status`.
 - **Booking** holds a seat only while the effective status is `OPEN`; the condition is part of the seat-hold `UPDATE` itself, so a flight cannot close between a check and the write → otherwise `409 SALES_CLOSED`.
 - Responses keep `origin`/`destination` as IATA codes (read through a join, not stored) and add `originAirportId`, `destinationAirportId`, `aircraftId`, `status`.
-- No route cancels a flight yet: `→ CANCELLED` comes with the booking cascade (phase D step 9).
+- **Cancelling** a `SCHEDULED`, `OPEN` or `CLOSED` flight: `POST /api/flights/:id/cancel` (admin), Day 52 — see [Flight cancellation cascade](#flight-cancellation-cascade-day-52).
 
 Rules: BR-FLT-01..08 in [docs/product/domain-model.md](docs/product/domain-model.md).
 
@@ -346,6 +346,27 @@ Errors: `422 VALIDATION_FAILED` naming every bad parameter (`INVALID_DATE`, `DAT
 - **Local times** come from each airport's IANA zone through `Intl` (`departureLocal` in the origin's, `arrivalLocal` in the destination's); `arrivalDayOffset` is `1` for 23:30 → 01:30.
 - **Measured** on 20 400 flights / 3.9 M seats in `booking_test` (`npm run perf:search:seed`, then `perf:search:explain`): SGN→HAN over 3 days, 2 passengers, 4.8 ms with the route index (10.7 ms without); counting only free seats from the fares cut the buffers 3.6×. Numbers and the rejected options in `.cursor/progress/DAY-51.md`, "Evidence for phase E". On the compose stack: search 77 ms cold, details 2 ms.
 
+## Flight cancellation cascade (Day 52)
+
+```http
+POST /api/flights/:id/cancel            (admin)
+→ 200 { "flight": { …, "status": "CANCELLED" }, "remainingBookings": 3 }
+POST /api/flights/:id/cancel            (again, or after a timeout)
+→ 200 { "flight": { …, "status": "CANCELLED" }, "remainingBookings": 0 }   ← once the cascade has run
+```
+
+`409 INVALID_FLIGHT_STATUS` for a `DEPARTED` flight, `409 FLIGHT_STATUS_CHANGED` if a concurrent open won, `404` for an unknown id, `403` for a user. Rules: Decision 18, BR-FLT-07, [ADR-011](docs/adr/011-flight-cancellation-cascade.md).
+
+- **The request changes only the flight.** One short transaction: a compare-and-set of the stored status to `CANCELLED` and an audit entry (`FLIGHT_CANCELLED`). It touches no seat, booking or payment, so it never waits for a seat a hold has locked. From its commit, every hold is refused (`409 SALES_CLOSED`, the shared on-sale condition) and search no longer lists the flight. A second call answers `200` again with no second audit entry.
+- **`remainingBookings`** is the number of live bookings (`CONFIRMED`, or `HELD` with a valid hold) still to cancel: the progress is derived from the bookings, not stored.
+- **The cascade is a job** (`flight-cancellation-cascade-job`, every 30 s, up to 500 bookings per run). It claims one live booking of a `CANCELLED` flight with `FOR UPDATE SKIP LOCKED` and runs the same cancel core as `DELETE /api/bookings/:id`, with reason `AIRLINE`: seats `AVAILABLE`, a `SUCCEEDED` payment → `REFUND_PENDING`, audit by `system` / `flight-cancellation`, `booking-cancelled` with `reason: "AIRLINE"`. One booking per transaction. The 24 h window does not apply. The refund itself is the reconciliation job's. A crash midway loses nothing: the next run finds what is left.
+- **A lapsed hold is not cancelled** by the cascade: it reads `EXPIRED` already and the expiry job ends it.
+- **A payment loses to a cancelled flight.** Payment phase 3 (and reconciliation) confirms a booking only if its flight is not `CANCELLED`, read under a share lock; otherwise the charge is refunded. A booking is never confirmed after its flight was cancelled. A `CLOSED` flight still accepts payment for a valid hold (BR-PAY-06).
+- **`cancellationReason`** (`CUSTOMER` | `AIRLINE`) is on every booking response, set exactly when the status is `CANCELLED`; bookings cancelled before Day 52 read `CUSTOMER`.
+- **Seats go back to `AVAILABLE`**, not `UNAVAILABLE`: the flight is off sale, so nothing can take them.
+- **Measured** (Day 52, 100 paid bookings on a 120-seat test flight in `booking_test`): the cancel's transaction 3–8 ms; the cascade's transactions median 5–9 ms; a hold on the same flight is refused in 19–55 ms. Option A (everything in one transaction, test-only) held the flight row 536–601 ms and made that hold wait as long, and deadlocked with a chosen-seat hold in 3 of 3 forced rounds. Details in `.cursor/progress/DAY-52.md`.
+- On the compose stack (e2e): cancel answered in 34 ms with 3 bookings remaining; the cascade had cancelled them 8 s later; both refunds were `REFUNDED` about 18 s after that.
+
 ## Audit trail
 
 Every successful write records an audit entry in the `audit_logs` table, in the same Postgres transaction as the write itself. If the audit insert fails, the whole write rolls back.
@@ -354,13 +375,14 @@ Every successful write records an audit entry in the `audit_logs` table, in the 
 |---|---|---|
 | `FLIGHT_CREATED` | `POST /api/flights` | `account` / admin's JWT `sub` (metadata includes `aircraftRegistration`, `fares` as `ECONOMY:1500000,BUSINESS:4200000`) |
 | `FLIGHT_OPENED` | `POST /api/flights/:id/open` | `account` / admin's JWT `sub` (metadata: `previousStatus`) |
+| `FLIGHT_CANCELLED` | `POST /api/flights/:id/cancel` (Day 52) | `account` / admin's JWT `sub` (metadata: `flightNumber`, effective `previousStatus`, e.g. `CLOSED`); not recorded again for an already cancelled flight |
 | `BOOKING_CREATED` | `POST /api/flights/:flightId/bookings` | `account` / owner's JWT `sub` (metadata: `reference`, `passengerCount`, `seats`, `totalVnd`, `holdExpiresAt` — no passenger names) |
-| `BOOKING_CANCELLED` | `DELETE /api/bookings/:id` | `account` / owner's JWT `sub` (metadata: `flightId`, `correlationId`, `refundPaymentId` when paid — Day 50) |
+| `BOOKING_CANCELLED` | `DELETE /api/bookings/:id`, or `flight-cancellation-cascade-job` (Day 52) | `account` / owner's JWT `sub`, or `system` / `flight-cancellation` (metadata: `flightId`, `correlationId`, `reason` `CUSTOMER`/`AIRLINE` since Day 52, `refundPaymentId` when paid — Day 50) |
 | `BOOKING_SEAT_CHANGED` | `PUT /api/bookings/:id/passengers/:position/seat` | `account` / owner's JWT `sub` (metadata: `position`, `from`, `to`); not recorded when the seat was already set |
 | `BOOKING_EXPIRED` | `booking-hold-expiry-job` | `system` / `booking-hold-expiry` (metadata: `reference`, `seats`, `holdExpiresAt`) |
 | `BOOKING_CONFIRMED` | `POST /api/bookings/:id/payments` (charged and confirmed), or `payment-reconciliation-job` | `account` / payer's JWT `sub`, or `system` / `payment-reconciliation` (metadata: `reference`, `paymentId`, `amountVnd`) |
 | `PAYMENT_FAILED` | same, gateway declined | same actors; target `payment` (metadata: `bookingId`, `reason`) |
-| `PAYMENT_REFUND_PENDING` | same, charged but the booking expired or was cancelled; or `DELETE /api/bookings/:id` of a paid booking (Day 50) | same actors, or the owner who cancelled; target `payment` (metadata `reason: "booking-cancelled"` for a cancel) |
+| `PAYMENT_REFUND_PENDING` | same, charged but the booking expired or was cancelled, or its flight was cancelled (Day 52); or the cancel of a paid booking (Day 50), by its owner or the cascade | same actors, or whoever cancelled; target `payment` (metadata `reason: "booking-cancelled"` and `cancellationReason` for a cancel) |
 | `PAYMENT_REFUNDED` | `payment-reconciliation-job` | `system` / `payment-reconciliation` (Day 49B rows: `payment-refund`); target `payment` |
 | `PAYMENT_REFUND_FAILED` | `payment-reconciliation-job`, refund given up (BR-PAY-09) | `system` / `payment-reconciliation`; target `payment` (metadata: `reason`, `attempts`) |
 | `AIRPORT_REGISTERED` | `POST /api/airports` | `account` / admin's JWT `sub` |
@@ -404,6 +426,7 @@ Current jobs:
 | `booking-hold-expiry-job` | 60s (default) | Expires lapsed holds in batches of 50, at most 20 per run (see Hold expiry) |
 | `payment-reconciliation-job` | 30s (default) | Finishes `PROCESSING` / `REFUND_PENDING` payments in leased batches of 20, at most 5 per run (see Day 49C) |
 | `idempotency-key-cleanup-job` | 1h (default) | Deletes `COMPLETED` Idempotency-Keys older than 24 h, batches of 500, at most 20 per run |
+| `flight-cancellation-cascade-job` | 30s (default) | Cancels the live bookings of `CANCELLED` flights, one per transaction, at most 500 per run (Day 52, see Flight cancellation cascade) |
 
 Design notes:
 
@@ -411,7 +434,7 @@ Design notes:
 - Failures are logged; they do not crash the process or other jobs.
 - Recursive `setTimeout` avoids overlapping runs of the same job.
 - `stop()` waits for the run in progress before it resolves (Day 48B), so `close()` never destroys the `DataSource` under a running transaction.
-- Multi-instance deployments would duplicate job execution (accepted while a single instance runs — no distributed lock). The expiry, reconciliation and key cleanup jobs are safe to run twice (`SKIP LOCKED`, and the reconciliation lease); the outbox relay is not.
+- Multi-instance deployments would duplicate job execution (accepted while a single instance runs — no distributed lock). The expiry, reconciliation, key cleanup and flight cancellation jobs are safe to run twice (`SKIP LOCKED`, and the reconciliation lease; two cascade instances over 100 bookings cancelled each once, Day 52 race test E); the outbox relay is not.
 - Flight count reuses `FlightRepository.findPage({ limit: 1 }).totalItems` (`COUNT(*)` in the database), avoiding a new repository method for one consumer.
 
 ## Docker
@@ -492,7 +515,7 @@ After startup, the publisher reconnects lazily: an unexpected connection/channel
 
 ### flight-notifier service
 
-`services/flight-notifier/` has its own `package.json`, build, Dockerfile and process. It subscribes to `flight-created`, `booking-held`, `booking-expired`, `booking-confirmed`, `booking-cancelled` (Day 50) and `booking-created` (no longer produced since Day 48A; kept for messages already queued), validates each event against `packages/contracts`, logs `flight_created_consumed` (with `fares` since Day 49A) / `booking_held_consumed` (reference, passenger count and `total`, no names) / `booking_expired_consumed` (reference and seat count) / `booking_created_consumed` with the `correlationId` (for `booking-expired`, the event's own id: no request is behind it), and acks/nacks manually. `booking-cancelled` got its contract and consumer on Day 50 (`booking_cancelled_consumed`: reference, seat count, the refund's payment id).
+`services/flight-notifier/` has its own `package.json`, build, Dockerfile and process. It subscribes to `flight-created`, `booking-held`, `booking-expired`, `booking-confirmed`, `booking-cancelled` (Day 50) and `booking-created` (no longer produced since Day 48A; kept for messages already queued), validates each event against `packages/contracts`, logs `flight_created_consumed` (with `fares` since Day 49A) / `booking_held_consumed` (reference, passenger count and `total`, no names) / `booking_expired_consumed` (reference and seat count) / `booking_created_consumed` with the `correlationId` (for `booking-expired`, the event's own id: no request is behind it), and acks/nacks manually. `booking-cancelled` got its contract and consumer on Day 50 (`booking_cancelled_consumed`: reference, seat count, the refund's payment id). Day 52 added an optional `reason` (`CUSTOMER` | `AIRLINE`), read as `CUSTOMER` when absent so messages already queued still parse, and logged by the consumer. There is no `flight-cancelled` event: each cancelled booking has its own.
 
 `flight-created` evolves additively (Day 46): the payload gained `originAirportId`, `destinationAirportId`, `aircraftId` and `status`, while `origin`/`destination` (IATA codes) and `availableSeats` stay. The new fields are optional in the parser, because old-shape messages may still sit in the outbox, queue or DLQ, and rejected only when present but empty. The producer maps the payload field by field, so a field added to `Flight` is never published by accident. Making them required, or dropping the old fields, is a later contract step. Day 49A added `fares` the same way and marked `priceInCents`/`currency` deprecated (still sent: the ECONOMY fare in whole VND, and `"VND"`).
 
@@ -530,6 +553,7 @@ The application runs TypeORM migrations (`api/src/postgres/migrations/`) on star
 | `CreateFlightFares` / `BackfillFlightFares` / `ContractFlightFares` | `flight_fares` (PK `flight_id, fare_class`, `amount_vnd bigint` between 1 and 2^53 − 1); a `VND` flight's `price_in_cents` becomes its ECONOMY fare unchanged; the contract refuses with a list while a class with seats has no fare (BUSINESS, `USD` flights) or a fare has no seats, else drops `price_in_cents` and `currency` |
 | `AddPassengerFareSnapshot` | `booking_passengers.fare_class`, `price_vnd`, priced from the seat's class at migration time; refuses with a list if a seated passenger cannot be priced; CHECK seat, class and price are NULL together |
 | `CreatePayments` / `CreateIdempotencyKeys` | `payments` (status CHECK, partial unique indexes: one `PROCESSING` and one `SUCCEEDED` per booking) and `idempotency_keys` (PK account, operation, key; response stored as `json`) — Day 49B |
+| `AddBookingCancellationReason` | `bookings.cancellation_reason` (`CUSTOMER` / `AIRLINE`), existing `CANCELLED` rows backfilled `CUSTOMER`, CHECK that it is set exactly when the status is `CANCELLED` — Day 52 |
 | `AddPaymentReconciliation` | `payments.payment_method_token` (only while `PROCESSING`), `attempts`, `next_attempt_at` (only while `PROCESSING`/`REFUND_PENDING`), status `REFUND_FAILED`, partial index `IDX_payments_due`, `UQ_idempotency_keys_payment_id`; refuses with a list while a `PROCESSING` payment exists (it has no token to charge again with) — Day 49C |
 
 Since Day 46 each migration runs in its own transaction (`migrationsTransactionMode: "each"`): a refused contract migration keeps the expand and backfill, so the missing data can be fixed by hand and the migrations re-run. The aircraft of an existing flight cannot be guessed, so it is assigned by hand, e.g. `UPDATE flights SET aircraft_id = (SELECT id FROM aircraft WHERE registration = 'VN-A321') WHERE flight_number = 'VN123';`. A fare cannot be guessed either (no exchange rate belongs in a migration): `INSERT INTO flight_fares (flight_id, fare_class, amount_vnd) VALUES ('<id>', 'BUSINESS', 4200000);`.
@@ -666,7 +690,11 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 ## Current limitations
 
 - `owner_account_id` has no foreign key to Identity's accounts (different database by design) — deleting an account does not touch its bookings
-- No route cancels a flight yet (phase D step 9); a status change other than the creation has no event
+- Only the creation of a flight has an event; opening and cancelling are audited only (each cancelled booking has its own `booking-cancelled`)
+- A flight's live bookings stay live for up to one cascade interval (~30 s) after the flight is cancelled; payment phase 1 does not check the flight, so a payment started in that gap is charged, then refunded (Day 52)
+- A cancel waits until no hold holds the flight's share lock, and a hold arriving meanwhile is granted the share lock ahead of it (Day 52 race test "A (queue)"); a steady stream of holds could delay a cancel, each hold being milliseconds
+- The cascade's claim reads every booking of every cancelled flight through `idx_bookings_flight_id` on each run; cancelled flights accumulate, so a partial index on live bookings would be the first lever if it grows
+- Flight number + departure stays unique for a cancelled flight: the same flight cannot be created again at the same time (`409 FLIGHT_ALREADY_EXISTS`)
 - `Flight` is both the write model and the read shape of `GET /api/flights`; search and flight details read through a separate `FlightSearch` port with its own shape (Day 51), the same database
 - Two overlapping flights of one aircraft inserted at the same instant can deadlock (`40P01`) instead of failing the exclusion constraint; the loser is answered `409 AIRCRAFT_UNAVAILABLE`, which is safe to retry if the winner also rolled back
 - `REFUND_FAILED` has no endpoint: a person settles it with the provider and psql, and the only alert is an error log line and an audit row until phase G

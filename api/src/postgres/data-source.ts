@@ -39,6 +39,7 @@ import { CreatePayments1790512000000 } from "./migrations/1790512000000-CreatePa
 import { CreateIdempotencyKeys1790515600000 } from "./migrations/1790515600000-CreateIdempotencyKeys.js";
 import { AddPaymentReconciliation1790519200000 } from "./migrations/1790519200000-AddPaymentReconciliation.js";
 import { AddFlightSearchIndex1790522800000 } from "./migrations/1790522800000-AddFlightSearchIndex.js";
+import { AddBookingCancellationReason1790526400000 } from "./migrations/1790526400000-AddBookingCancellationReason.js";
 
 /**
  * Day 36+ — dev-complete only. Entities/migrations are added per Strangler
@@ -100,6 +101,7 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
       CreateIdempotencyKeys1790515600000,
       AddPaymentReconciliation1790519200000,
       AddFlightSearchIndex1790522800000,
+      AddBookingCancellationReason1790526400000,
     ],
   });
 }

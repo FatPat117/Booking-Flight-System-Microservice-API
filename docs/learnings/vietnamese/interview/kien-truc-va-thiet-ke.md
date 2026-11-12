@@ -81,3 +81,14 @@ index trên ghế trống theo hạng còn nhanh gấp đôi nữa nhưng **khô
 và chưa có đau. Read model riêng sẽ thêm một đường ghi thứ hai vào mỗi lần giữ/huỷ/hết hạn — chưa có
 bằng chứng cần. Bước nhỏ đã làm: tìm kiếm có **port đọc riêng** (`FlightSearch`) với hình dạng dữ
 liệu của màn hình, không nhét vào `FlightRepository` — nếu giai đoạn E cần tách, ranh giới đã có.
+
+### 12. Quy trình nhiều bước không có transaction chung thì điều phối thế nào? (Day 52)
+
+**Trả lời:** Bằng **trạng thái lưu trong database**, không bằng message. Huỷ chuyến bay: bước 1 đổi
+chuyến sang `CANCELLED`; "chuyến `CANCELLED` còn booking sống" chính là việc còn lại. Job đọc trạng
+thái đó mỗi chu kỳ, không cần nhớ gì: crash thì lần chạy sau làm tiếp, hai instance thì `SKIP LOCKED`
+tách nhau. Kích hoạt bằng event `flight-cancelled` cũng được, nhưng phải xử lý mỗi event đúng một lần
+hiệu quả, mà consumer chưa dedupe theo `eventId`. Đây là bản trong-một-service của Saga: khi tách
+service ở giai đoạn F thì cùng hình dạng, nhưng giữa các service bằng message.
+**Lý do là dữ liệu:** `cancellation_reason` (`CUSTOMER`/`AIRLINE`) quyết định luật (mốc 24 h), nằm
+trong audit, event và báo cáo — không phải một cờ `force` ai cũng truyền được. ADR-011.

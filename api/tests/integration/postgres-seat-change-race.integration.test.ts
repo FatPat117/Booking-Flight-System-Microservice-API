@@ -381,7 +381,7 @@ test("C (forced) — a cancel that starts while a seat change holds the booking 
 function cancelInOneStatement(bookingId: string) {
   return dataSource.query(
     `WITH cancelled AS (
-       UPDATE "bookings" SET "status" = 'CANCELLED'
+       UPDATE "bookings" SET "status" = 'CANCELLED', "cancellation_reason" = 'CUSTOMER'
        WHERE "id" = $1 AND "status" = 'CONFIRMED'
        RETURNING "id"
      ), locked AS (

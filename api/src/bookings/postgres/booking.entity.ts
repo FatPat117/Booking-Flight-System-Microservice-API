@@ -35,4 +35,7 @@ export class BookingEntity {
 
   @Column({ type: "timestamptz", name: "hold_expires_at", nullable: true })
   holdExpiresAt!: Date | null;
+
+  @Column({ type: "varchar", name: "cancellation_reason", nullable: true })
+  cancellationReason!: string | null;
 }

@@ -48,6 +48,7 @@ export type AuditTarget =
 export type AuditAction =
   | "FLIGHT_CREATED"
   | "FLIGHT_OPENED"
+  | "FLIGHT_CANCELLED"
   | "BOOKING_CREATED"
   | "BOOKING_CANCELLED"
   | "BOOKING_EXPIRED"

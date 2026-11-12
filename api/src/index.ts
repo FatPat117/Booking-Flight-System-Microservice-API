@@ -10,6 +10,7 @@ const expressApp = createApp({
   getFlightSeatMap: runtime.getFlightSeatMap,
   createFlight: runtime.createFlight,
   openFlight: runtime.openFlight,
+  cancelFlight: runtime.cancelFlight,
   createBooking: runtime.createBooking,
   cancelBooking: runtime.cancelBooking,
   changeSeat: runtime.changeSeat,

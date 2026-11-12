@@ -12,8 +12,10 @@ import { makeBooking } from "../fixtures/bookings.js";
 import { FIXTURE_FARES, FIXTURE_TWO_CLASS_AIRCRAFT_ID, makeFlight } from "../fixtures/flights.js";
 import { insertFlightReferences } from "./flight-references.js";
 import {
+  assertCascadeComplete,
   assertGlobalInvariants,
   findInvariantViolations,
+  findLiveBookingsOfCancelledFlights,
   type ProviderLedger,
 } from "./invariants.js";
 
@@ -126,7 +128,7 @@ test("the starting world breaks no invariant, money included", async () => {
 
 test("a BOOKED seat of a CANCELLED booking is caught (cancel that forgot the seats)", async () => {
   const { ledger, paid } = await world();
-  await dataSource.query(`UPDATE "bookings" SET "status" = 'CANCELLED' WHERE "id" = $1`, [paid.bookingId]);
+  await dataSource.query(`UPDATE "bookings" SET "status" = 'CANCELLED', "cancellation_reason" = 'CUSTOMER' WHERE "id" = $1`, [paid.bookingId]);
   await dataSource.query(`UPDATE "payments" SET "status" = 'REFUND_PENDING', "next_attempt_at" = now() WHERE "id" = $1`, [paid.paymentId]);
 
   await expectViolation(ledger, /^seat status agrees with its booking/);
@@ -193,7 +195,7 @@ test("a cancelled paid booking whose payment stayed SUCCEEDED is caught (the Day
     `UPDATE "flight_seats" SET "status" = 'AVAILABLE', "booking_id" = NULL WHERE "booking_id" = $1`,
     [paid.bookingId],
   );
-  await dataSource.query(`UPDATE "bookings" SET "status" = 'CANCELLED' WHERE "id" = $1`, [paid.bookingId]);
+  await dataSource.query(`UPDATE "bookings" SET "status" = 'CANCELLED', "cancellation_reason" = 'CUSTOMER' WHERE "id" = $1`, [paid.bookingId]);
 
   await expectViolation(ledger, /^a SUCCEEDED payment belongs to a CONFIRMED booking/);
   await expectViolation(ledger, /^a cancelled booking's charged payment is on its way back/);
@@ -223,11 +225,66 @@ test("money: a cancelled booking still REFUND_PENDING is owed back, not kept —
     `UPDATE "flight_seats" SET "status" = 'AVAILABLE', "booking_id" = NULL WHERE "booking_id" = $1`,
     [paid.bookingId],
   );
-  await dataSource.query(`UPDATE "bookings" SET "status" = 'CANCELLED' WHERE "id" = $1`, [paid.bookingId]);
+  await dataSource.query(`UPDATE "bookings" SET "status" = 'CANCELLED', "cancellation_reason" = 'CUSTOMER' WHERE "id" = $1`, [paid.bookingId]);
   await dataSource.query(
     `UPDATE "payments" SET "status" = 'REFUND_PENDING', "next_attempt_at" = now() WHERE "id" = $1`,
     [paid.paymentId],
   );
 
   await assertGlobalInvariants(dataSource, ledger);
+});
+
+// ---- Day 52: the flight cancellation cascade (Decision 18) ----
+
+async function cancelFlightInPlace(flightId: string): Promise<void> {
+  await dataSource.query(`UPDATE "flights" SET "status" = 'CANCELLED' WHERE "id" = $1`, [flightId]);
+}
+
+async function audit(action: string, targetType: string, targetId: string, occurredAt: Date) {
+  await dataSource.query(
+    `INSERT INTO "audit_logs" ("id", "action", "actor_type", "actor_id", "target_type", "target_id", "occurred_at", "metadata")
+     VALUES ($1, $2, 'system', 'invariants-test', $3, $4, $5, '{}')`,
+    [crypto.randomUUID(), action, targetType, targetId, occurredAt],
+  );
+}
+
+test("an AIRLINE cancellation on a flight that is not CANCELLED is caught", async () => {
+  const { heldBookingId } = await world();
+  await dataSource.query(
+    `WITH released AS (
+       UPDATE "flight_seats" SET "status" = 'AVAILABLE', "booking_id" = NULL WHERE "booking_id" = $1
+     )
+     UPDATE "bookings" SET "status" = 'CANCELLED', "cancellation_reason" = 'AIRLINE' WHERE "id" = $1`,
+    [heldBookingId],
+  );
+
+  await expectViolation(undefined, /an AIRLINE cancellation is on a CANCELLED flight/);
+});
+
+test("a booking confirmed after its flight was cancelled is caught; confirmed before it is not", async () => {
+  const { flightId, paid } = await world();
+  await cancelFlightInPlace(flightId);
+  await audit("FLIGHT_CANCELLED", "flight", flightId, NOW);
+
+  await audit("BOOKING_CONFIRMED", "booking", paid.bookingId, new Date(NOW.getTime() - 1));
+  assert.deepEqual(
+    (await findInvariantViolations(dataSource)).filter((v) => v.startsWith("no booking is confirmed")),
+    [],
+  );
+
+  await audit("BOOKING_CONFIRMED", "booking", paid.bookingId, new Date(NOW.getTime() + 1));
+  await expectViolation(undefined, /no booking is confirmed after its flight was cancelled/);
+});
+
+test("the cascade is unfinished while a cancelled flight has a CONFIRMED or valid HELD booking, not for a lapsed hold", async () => {
+  const { flightId } = await world();
+  await cancelFlightInPlace(flightId);
+
+  assert.equal((await findLiveBookingsOfCancelledFlights(dataSource, NOW)).length, 2);
+  // 16 minutes later the hold has lapsed: only the CONFIRMED booking is left.
+  assert.equal(
+    (await findLiveBookingsOfCancelledFlights(dataSource, new Date(NOW.getTime() + 16 * 60_000))).length,
+    1,
+  );
+  await assert.rejects(assertCascadeComplete(dataSource, NOW));
 });

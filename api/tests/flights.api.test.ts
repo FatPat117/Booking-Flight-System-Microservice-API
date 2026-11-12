@@ -13,6 +13,7 @@ import type { FlightRepository } from "../src/flights/flight-repository.js";
 import { createGetFlight } from "../src/flights/get-flight.js";
 import { createGetFlightSeatMap } from "../src/flights/get-flight-seat-map.js";
 import { createListFlights } from "../src/flights/list-flights.js";
+import { createCancelFlight } from "../src/flights/cancel-flight.js";
 import { createOpenFlight } from "../src/flights/open-flight.js";
 import { createSearchFlights } from "../src/flights/search-flights.js";
 import type { HealthChecks } from "../src/health/health-checks.js";
@@ -168,6 +169,16 @@ function createAppWithRepository(
     getCurrentTime: () => NOW,
   });
 
+  const cancelFlight = createCancelFlight({
+    flightRepository,
+    bookingRepository,
+    auditRecorder,
+    transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => NOW,
+  });
+
   const createBooking = createCreateBooking({
     bookingRepository,
     auditRecorder,
@@ -193,6 +204,7 @@ function createAppWithRepository(
     getFlightSeatMap: createGetFlightSeatMap({ flightRepository }),
     createFlight,
     openFlight,
+    cancelFlight,
     createBooking,
     cancelBooking: async () => ({ outcome: "not-found" as const }),
     changeSeat: async () => ({ outcome: "not-found" as const }),
@@ -640,6 +652,90 @@ test("only an admin can open a flight: 401 without a token, 403 for a user", asy
   const anonymous = await request(app).post(`/api/flights/${flightId}/open`);
   const user = await request(app)
     .post(`/api/flights/${flightId}/open`)
+    .set("Authorization", `Bearer ${signAccessToken("user")}`);
+
+  assert.equal(anonymous.status, 401);
+  assert.equal(user.status, 403);
+  assert.equal((await request(app).get(`/api/flights/${flightId}`)).body.status, "SCHEDULED");
+});
+
+// ---------------------------------------------------------------------------
+// Cancelling a flight (US-OPS-01, Decision 18)
+// ---------------------------------------------------------------------------
+
+function postCancel(app: Express, flightId: string) {
+  return withAdminAuth(request(app).post(`/api/flights/${flightId}/cancel`));
+}
+
+test("POST /api/flights/:id/cancel answers 200 with the cancelled flight and its remaining bookings, audited once", async () => {
+  const { app, audit } = createTestContext();
+  const flightId = await createScheduledFlight(app);
+  assert.equal((await postOpen(app, flightId)).status, 200);
+
+  const response = await postCancel(app, flightId).set("x-request-id", "cancel-1");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.flight.id, flightId);
+  assert.equal(response.body.flight.status, "CANCELLED");
+  assert.equal(response.body.remainingBookings, 0);
+  assert.equal((await request(app).get(`/api/flights/${flightId}`)).body.status, "CANCELLED");
+
+  const cancelled = audit.records.filter((record) => record.action === "FLIGHT_CANCELLED");
+  assert.equal(cancelled.length, 1);
+  assert.deepEqual(cancelled[0]?.actor, { type: "account", id: "test-user-id" });
+  assert.equal(cancelled[0]?.requestId, "cancel-1");
+  assert.deepEqual(cancelled[0]?.metadata, { flightNumber: "VN123", previousStatus: "OPEN" });
+});
+
+test("cancelling a cancelled flight again is 200 with the same body shape and no second audit", async () => {
+  const { app, audit } = createTestContext();
+  const flightId = await createScheduledFlight(app);
+  const first = await postCancel(app, flightId);
+
+  const again = await postCancel(app, flightId);
+
+  assert.equal(again.status, 200);
+  assert.deepEqual(again.body, first.body);
+  assert.equal(audit.records.filter((record) => record.action === "FLIGHT_CANCELLED").length, 1);
+});
+
+test("cancelling a departed flight is 409 INVALID_FLIGHT_STATUS (NOT_ALLOWED) and it stays as it was", async () => {
+  const { app, audit } = createTestContext();
+  // Departed one second before NOW: it reads DEPARTED as soon as it exists.
+  const created = await postFlight(app).send(
+    makeValidFlight({ departureAt: "2026-06-30T23:59:59Z", arrivalAt: "2026-07-01T01:59:59Z" }),
+  );
+  assert.equal(created.status, 201);
+  assert.equal(created.body.status, "DEPARTED");
+  const flightId = created.body.id as string;
+
+  const response = await postCancel(app, flightId);
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error.code, "INVALID_FLIGHT_STATUS");
+  assert.equal(response.body.error.message, "Cannot cancel a flight that is DEPARTED");
+  assert.equal(response.body.error.details[0].code, "NOT_ALLOWED");
+  assert.equal((await request(app).get(`/api/flights/${flightId}`)).body.status, "DEPARTED");
+  assert.equal(audit.records.filter((record) => record.action === "FLIGHT_CANCELLED").length, 0);
+});
+
+test("cancelling an unknown or malformed flight id is 404 FLIGHT_NOT_FOUND", async () => {
+  const { app } = createTestContext();
+
+  for (const id of ["c0ffee00-0000-4000-8000-000000000000", "not-a-uuid"]) {
+    const response = await postCancel(app, id);
+    assert.equal(response.status, 404);
+    assert.equal(response.body.error.code, "FLIGHT_NOT_FOUND");
+  }
+});
+
+test("only an admin can cancel a flight: 401 without a token, 403 for a user", async () => {
+  const { app } = createTestContext();
+  const flightId = await createScheduledFlight(app);
+
+  const anonymous = await request(app).post(`/api/flights/${flightId}/cancel`);
+  const user = await request(app)
+    .post(`/api/flights/${flightId}/cancel`)
     .set("Authorization", `Bearer ${signAccessToken("user")}`);
 
   assert.equal(anonymous.status, 401);

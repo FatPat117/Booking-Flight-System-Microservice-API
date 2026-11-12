@@ -86,7 +86,11 @@
     { "key": "day51FlightC", "value": "" },
     { "key": "day51FlightD", "value": "" },
     { "key": "day51Cursor", "value": "" },
-    { "key": "day51FirstId", "value": "" }
+    { "key": "day51FirstId", "value": "" },
+    { "key": "day52FlightId", "value": "" },
+    { "key": "day52HeldBookingId", "value": "" },
+    { "key": "day52PaidBookingId", "value": "" },
+    { "key": "day52PayKey", "value": "" }
   ],
   "item": [
     {
@@ -4198,6 +4202,443 @@
                 "exec": [
                   "pm.test('201', () => pm.response.to.have.status(201));",
                   "pm.test('the lowest economy seats, 3A and 3B', () => pm.expect(pm.response.json().passengers.map((p) => [p.seat, p.fareClass])).to.eql([['3A', 'ECONOMY'], ['3B', 'ECONOMY']]));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Day 52 — Flight cancellation cascade",
+      "description": "Needs the dev seed (VN-A588, 180 economy seats), alice's accessToken (admin) and bob's userAccessToken.\nRun top to bottom; it waits 32 s once for the cascade job (every 30 s). Cancelling changes only the flight (Decision 18): the response says how many live bookings remain, the cascade cancels them with reason AIRLINE and starts the paid one's refund, which the reconciliation job (every 30 s) makes. Run on a database without VN522 on 2027-02-16: flight number + departure is unique, cancelled flights included (409 FLIGHT_ALREADY_EXISTS on a second run). To run it again, delete VN522 and its bookings first (postman/README.md).",
+      "item": [
+        {
+          "name": "POST /api/flights (VN522 on VN-A588, 180 seats → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN522\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A588\",\n  \"departureAt\": \"2027-02-16T08:00:00+07:00\",\n  \"arrivalAt\": \"2027-02-16T10:10:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day52FlightId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (→ 200 OPEN)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day52FlightId}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OPEN', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('OPEN'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST bookings, seat 11A, left HELD (→ 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day52FlightId}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    {\n      \"name\": \"Day52 Held\",\n      \"seat\": \"11A\"\n    }\n  ]\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 HELD', () => { pm.response.to.have.status(201); pm.expect(pm.response.json().status).to.eql('HELD'); });",
+                  "pm.collectionVariables.set('day52HeldBookingId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST bookings, seat 11B, to be paid (→ 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day52FlightId}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    {\n      \"name\": \"Day52 Paid\",\n      \"seat\": \"11B\"\n    }\n  ]\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day52PaidBookingId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments for 11B (tok_success → 201, CONFIRMED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day52PayKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day52PaidBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_success\",\n  \"amount\": {\n    \"amount\": 1500000,\n    \"currency\": \"VND\"\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// One key per run, so the folder can run again.",
+                  "pm.collectionVariables.set('day52PayKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/cancel as a user (→ 403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day52FlightId}}/cancel"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/cancel (→ 200, only the flight changes, 2 bookings remain)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day52FlightId}}/cancel"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('flight CANCELLED', () => pm.expect(body.flight.status).to.eql('CANCELLED'));",
+                  "pm.test('2 live bookings left for the cascade', () => pm.expect(body.remainingBookings).to.eql(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/cancel again (→ 200, idempotent)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day52FlightId}}/cancel"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 CANCELLED', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().flight.status).to.eql('CANCELLED'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id (→ CANCELLED)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day52FlightId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CANCELLED', () => pm.expect(pm.response.json().status).to.eql('CANCELLED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/search on 16 Feb (→ VN522 not listed)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-02-16&passengers=1"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('the cancelled flight is not on sale', () => pm.expect(pm.response.json().items.map((item) => item.id)).to.not.include(pm.collectionVariables.get('day52FlightId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST bookings on the cancelled flight (→ 409 SALES_CLOSED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day52FlightId}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    {\n      \"name\": \"Day52 Late\",\n      \"seat\": \"20A\"\n    }\n  ]\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 SALES_CLOSED', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().error.code).to.eql('SALES_CLOSED'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the paid booking after the cascade (waits 32 s → CANCELLED, AIRLINE)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day52PaidBookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The cascade job runs every 30 s (Decision 18).",
+                  "setTimeout(() => {}, 32000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CANCELLED by the airline', () => { const body = pm.response.json(); pm.expect(body.status).to.eql('CANCELLED'); pm.expect(body.cancellationReason).to.eql('AIRLINE'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the held booking (→ CANCELLED, AIRLINE)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day52HeldBookingId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CANCELLED by the airline', () => { const body = pm.response.json(); pm.expect(body.status).to.eql('CANCELLED'); pm.expect(body.cancellationReason).to.eql('AIRLINE'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/flights/:id/seats (→ no seat HELD or BOOKED)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{day52FlightId}}/seats"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('every seat released', () => pm.expect(JSON.stringify(pm.response.json())).to.not.match(/\"(HELD|BOOKED)\"/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/cancel once more (→ 200, 0 bookings remain)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day52FlightId}}/cancel"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('the cascade is done', () => pm.expect(pm.response.json().remainingBookings).to.eql(0));"
                 ]
               }
             }

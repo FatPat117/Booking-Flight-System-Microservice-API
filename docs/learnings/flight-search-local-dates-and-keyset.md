@@ -76,7 +76,9 @@ $last_id) ORDER BY departure_at, id LIMIT n + 1`. A row disappearing before that
 ### Counting availability: measure before inventing a read model
 
 `api/tests/perf/` seeds 20 400 flights and 3.9 M flight seats in `booking_test` and runs
-`EXPLAIN (ANALYZE, BUFFERS)` under several index choices. What it showed:
+`EXPLAIN (ANALYZE, BUFFERS)` under several index choices. Every time below is the median execution
+time of 7 sequential runs from one client with a warm cache, with nothing else running: it is the
+cost of one query, not a latency under load. What it showed:
 
 - **Seat counting, not flight lookup, is the cost.** ~90 % of the buffers were seat rows.
 - Counting **only `AVAILABLE` seats, starting from the flight's fares** (its exact classes,

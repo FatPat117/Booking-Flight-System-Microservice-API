@@ -134,6 +134,7 @@ test("creates a HELD booking for every passenger, with one audit row and one boo
     status: "HELD",
     // BR-BOOK-04: 15 minutes after FIXED_TIME.
     holdExpiresAt: "2026-07-20T00:15:00.000Z",
+    cancellationReason: null,
   });
   assert.equal(entries.length, 1);
   assert.equal(entries[0]?.eventType, "booking-held");
@@ -653,6 +654,14 @@ test("a malformed flight id is flight-not-found, never sent to the repository", 
     async confirmHold() {
       repositoryCalls += 1;
       return { outcome: "not-payable" };
+    },
+    async countLiveOnFlight() {
+      repositoryCalls += 1;
+      return 0;
+    },
+    async claimLiveBookingOfCancelledFlight() {
+      repositoryCalls += 1;
+      return undefined;
     },
   };
 

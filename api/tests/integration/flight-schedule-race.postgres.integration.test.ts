@@ -266,7 +266,7 @@ test("a CANCELLED flight does not hold its aircraft: a new flight in the same wi
   const flightRepository = createPostgresFlightRepository(dataSource);
   const cancelled = makeFlight({ aircraftId: FIXTURE_AIRCRAFT_ID, ...overlappingWindow(0) });
   assert.deepEqual(await flightRepository.create(cancelled), { outcome: "created" });
-  // No route cancels a flight before phase D step 9; set it directly.
+  // Set directly: this test is about the aircraft window, not the cancel route.
   await dataSource.query(`UPDATE "flights" SET status = 'CANCELLED' WHERE id = $1`, [
     cancelled.id,
   ]);

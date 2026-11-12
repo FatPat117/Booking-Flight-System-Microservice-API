@@ -147,7 +147,7 @@ test("cancel: cancelled with flightId, its seat row back to AVAILABLE with no bo
     await bookingRepository.create(booking);
   });
 
-  const first = await bookingRepository.cancel(booking.id, OWNER, CANCEL_AT);
+  const first = await bookingRepository.cancel(booking.id, OWNER, CANCEL_AT, "CUSTOMER");
   assert.deepEqual(first, {
     outcome: "cancelled",
     flightId: flight.id,
@@ -158,7 +158,7 @@ test("cancel: cancelled with flightId, its seat row back to AVAILABLE with no bo
     { seat: "1A", status: "AVAILABLE", booking_id: null },
   ]);
 
-  const second = await bookingRepository.cancel(booking.id, OWNER, CANCEL_AT);
+  const second = await bookingRepository.cancel(booking.id, OWNER, CANCEL_AT, "CUSTOMER");
   assert.deepEqual(second, { outcome: "already-cancelled" });
 });
 
@@ -214,7 +214,7 @@ test("findPage reads a page in the same number of queries whatever its size (no 
 test("cancel: not-found for an unknown booking id", async () => {
   const bookingRepository = createPostgresBookingRepository(dataSource);
 
-  const result = await bookingRepository.cancel(crypto.randomUUID(), OWNER, CANCEL_AT);
+  const result = await bookingRepository.cancel(crypto.randomUUID(), OWNER, CANCEL_AT, "CUSTOMER");
   assert.deepEqual(result, { outcome: "not-found" });
 });
 

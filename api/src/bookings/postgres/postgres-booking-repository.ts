@@ -28,6 +28,7 @@ import type {
   BookingRepository,
   BookingStatus,
   CancelBookingRepositoryResult,
+  CancellationReason,
   ChangeSeatResult,
   CreateBookingRepositoryResult,
   ExpiredHold,
@@ -65,6 +66,7 @@ function mapBooking(
     createdAt: entity.createdAt.toISOString(),
     status: entity.status as BookingStatus,
     holdExpiresAt: entity.holdExpiresAt?.toISOString() ?? null,
+    cancellationReason: entity.cancellationReason as CancellationReason | null,
   };
 }
 
@@ -596,11 +598,30 @@ async function changeSeatInTransaction(
  * own makes the cancel statement start after any change has committed, so
  * it sees the seats as they are.
  */
+/**
+ * Which bookings a cancel may take, by reason (Decision 18), as SQL over
+ * `booking` and `flight`, with `$2` the instant. Both reasons need a HELD
+ * booking's hold still valid (BR-BOOK-10: a lapsed one is the expiry
+ * job's). CUSTOMER applies BR-BOOK-06 to a CONFIRMED one; AIRLINE does not
+ * (BR-FLT-07) but needs the flight CANCELLED — the reason is a fact about
+ * the flight, not a switch that turns the window off.
+ */
+function cancellableSql(reason: CancellationReason): string {
+  const heldStillValid = `(booking."status" = 'HELD' AND booking."hold_expires_at" > $2)`;
+  return reason === "CUSTOMER"
+    ? `((booking."status" = 'CONFIRMED'
+         AND flight."departure_at" - interval '24 hours' > $2)
+        OR ${heldStillValid})`
+    : `(flight."status" = 'CANCELLED'
+        AND (booking."status" = 'CONFIRMED' OR ${heldStillValid}))`;
+}
+
 async function cancelInTransaction(
   manager: EntityManager,
   bookingId: string,
   scope: BookingAccessScope,
   now: Date,
+  reason: CancellationReason,
 ): Promise<CancelBookingRepositoryResult> {
   // Only a booking this call will cancel is locked: the same condition as
   // the UPDATE below. A lapsed hold is left unlocked, so the expiry job's
@@ -610,9 +631,7 @@ async function cancelInTransaction(
     `SELECT 1 FROM "bookings" booking
      JOIN "flights" flight ON flight."id" = booking."flight_id"
      WHERE booking."id" = $1
-       AND ((booking."status" = 'CONFIRMED'
-             AND flight."departure_at" - interval '24 hours' > $2)
-            OR (booking."status" = 'HELD' AND booking."hold_expires_at" > $2))
+       AND ${cancellableSql(reason)}
        ${scope.kind === "owner" ? `AND booking."owner_account_id" = $3` : ""}
      FOR UPDATE OF booking
      FOR SHARE OF flight`,
@@ -628,19 +647,18 @@ async function cancelInTransaction(
   // booking, as the hold does, so a departure change waits for this
   // cancel instead of slipping between its check and its write.
   const ownerCondition =
-    scope.kind === "owner" ? `AND booking."owner_account_id" = $3` : "";
+    scope.kind === "owner" ? `AND booking."owner_account_id" = $4` : "";
   const rows = (await manager.query(
     `WITH flight AS (
-       SELECT "id", "departure_at" FROM "flights"
+       SELECT "id", "departure_at", "status" FROM "flights"
        WHERE "id" = (SELECT "flight_id" FROM "bookings" WHERE "id" = $1)
        FOR SHARE
      ), cancelled AS (
-       UPDATE "bookings" booking SET "status" = 'CANCELLED'
+       UPDATE "bookings" booking
+       SET "status" = 'CANCELLED', "cancellation_reason" = $3
        FROM flight
        WHERE booking."id" = $1 AND booking."flight_id" = flight."id"
-         AND ((booking."status" = 'CONFIRMED'
-               AND flight."departure_at" - interval '24 hours' > $2)
-              OR (booking."status" = 'HELD' AND booking."hold_expires_at" > $2))
+         AND ${cancellableSql(reason)}
          ${ownerCondition}
        RETURNING booking."id", booking."flight_id", booking."reference"
      ), ${releaseSeatsOf("cancelled")}
@@ -654,8 +672,8 @@ async function cancelInTransaction(
      LEFT JOIN locked ON locked."booking_id" = cancelled."id"
      GROUP BY cancelled."flight_id", cancelled."reference"`,
     scope.kind === "owner"
-      ? [bookingId, now, scope.accountId]
-      : [bookingId, now],
+      ? [bookingId, now, reason, scope.accountId]
+      : [bookingId, now, reason],
   )) as Array<{ flight_id: string; reference: string; seats: string[] }>;
 
   const [cancelled] = rows;
@@ -670,13 +688,19 @@ async function cancelInTransaction(
 
   // Only picks the error outcome; scoped like every read (BR-AUTH-02).
   const [booking] = (await manager.query(
-    `SELECT booking."status", booking."hold_expires_at", flight."departure_at"
+    `SELECT booking."status", booking."hold_expires_at", flight."departure_at",
+            flight."status" AS "flight_status"
      FROM "bookings" booking
      JOIN "flights" flight ON flight."id" = booking."flight_id"
      WHERE booking."id" = $1
        ${scope.kind === "owner" ? `AND booking."owner_account_id" = $2` : ""}`,
     scope.kind === "owner" ? [bookingId, scope.accountId] : [bookingId],
-  )) as Array<{ status: string; hold_expires_at: Date | null; departure_at: Date }>;
+  )) as Array<{
+    status: string;
+    hold_expires_at: Date | null;
+    departure_at: Date;
+    flight_status: string;
+  }>;
 
   if (booking === undefined) {
     return { outcome: "not-found" };
@@ -687,6 +711,8 @@ async function cancelInTransaction(
     booking.hold_expires_at?.toISOString() ?? null,
     booking.departure_at.toISOString(),
     now,
+    reason,
+    booking.flight_status === "CANCELLED",
   );
 }
 
@@ -791,13 +817,14 @@ export function createPostgresBookingRepository(
       bookingId: string,
       scope: BookingAccessScope,
       now: Date,
+      reason: CancellationReason,
     ): Promise<CancelBookingRepositoryResult> {
       if (isInTransaction()) {
-        return cancelInTransaction(resolveEntityManager(dataSource), bookingId, scope, now);
+        return cancelInTransaction(resolveEntityManager(dataSource), bookingId, scope, now, reason);
       }
 
       return dataSource.transaction((manager) =>
-        cancelInTransaction(manager, bookingId, scope, now),
+        cancelInTransaction(manager, bookingId, scope, now, reason),
       );
     },
 
@@ -811,8 +838,8 @@ export function createPostgresBookingRepository(
      * - `expired` flips only the rows `due` locked.
      * - `locked` / `released` free their seats in lock order (releaseSeatsOf).
      *   They find seats by booking_id in the statement's snapshot, which is
-     *   safe because a HELD booking's seats never change (Day 51 audit, see
-     *   confirmHold).
+     *   safe because a HELD booking's seats never change: BR-BOOK-07 makes
+     *   seat change CONFIRMED-only (Day 51 audit, see confirmHold).
      */
     async expireDueHolds(now: Date, limit: number): Promise<ExpiredHold[]> {
       const manager = resolveEntityManager(dataSource);
@@ -869,19 +896,33 @@ export function createPostgresBookingRepository(
     // side, at phase 3's own instant.
     // No pre-lock, unlike cancel(): after waiting for the booking lock the
     // seat CTE still finds seats by booking_id in its old snapshot. That is
-    // correct only while a HELD booking's seats never change (seat change is
-    // CONFIRMED-only). The control in postgres-snapshot-audit.integration.test.ts
+    // correct only while a HELD booking's seats never change (BR-BOOK-07:
+    // seat change is CONFIRMED-only; the rule names this dependency). The control in postgres-snapshot-audit.integration.test.ts
     // shows what breaks if that ever changes (Day 51).
+    // Day 52 (Decision 18): `flight` share-locks the flight row and requires
+    // it not CANCELLED, as cancel's `flight` CTE does. A confirm queued
+    // behind the cancel-flight UPDATE re-reads the committed row, finds it
+    // CANCELLED and matches nothing — the payment is refunded, the booking
+    // never becomes CONFIRMED on a cancelled flight. CLOSED still matches
+    // (BR-PAY-06). The share lock conflicts only with writes to the flight
+    // row, which lock nothing else, so it cannot close a cycle.
     async confirmHold(bookingId, scope, now) {
       const manager = resolveEntityManager(dataSource);
       const ownerCondition =
-        scope.kind === "owner" ? `AND "owner_account_id" = $3` : "";
+        scope.kind === "owner" ? `AND booking."owner_account_id" = $3` : "";
       const rows = (await manager.query(
-        `WITH confirmed AS (
-           UPDATE "bookings" SET "status" = 'CONFIRMED'
-           WHERE "id" = $1 AND "status" = 'HELD' AND "hold_expires_at" > $2
+        `WITH flight AS (
+           SELECT "id" FROM "flights"
+           WHERE "id" = (SELECT "flight_id" FROM "bookings" WHERE "id" = $1)
+             AND "status" <> 'CANCELLED'
+           FOR SHARE
+         ), confirmed AS (
+           UPDATE "bookings" booking SET "status" = 'CONFIRMED'
+           FROM flight
+           WHERE booking."id" = $1 AND booking."flight_id" = flight."id"
+             AND booking."status" = 'HELD' AND booking."hold_expires_at" > $2
              ${ownerCondition}
-           RETURNING "id"
+           RETURNING booking."id"
          ), ${updateSeatsOf("confirmed", `"status" = 'BOOKED'`)}
          SELECT "id" FROM confirmed`,
         scope.kind === "owner"
@@ -898,6 +939,39 @@ export function createPostgresBookingRepository(
         .findOneByOrFail({ id: bookingId });
       const [booking] = await mapBookings(manager, [entity]);
       return { outcome: "confirmed", booking: booking as Booking };
+    },
+
+    async countLiveOnFlight(flightId, now) {
+      const manager = resolveEntityManager(dataSource);
+      const [row] = (await manager.query(
+        `SELECT count(*)::int AS "live" FROM "bookings"
+         WHERE "flight_id" = $1
+           AND ("status" = 'CONFIRMED'
+                OR ("status" = 'HELD' AND "hold_expires_at" > $2))`,
+        [flightId, now],
+      )) as Array<{ live: number }>;
+      return row?.live ?? 0;
+    },
+
+    // Starts from the CANCELLED flights (few) and reaches their bookings
+    // through idx_bookings_flight_id. The same live condition as the AIRLINE
+    // cancel, so a claimed booking is one that cancel will take.
+    async claimLiveBookingOfCancelledFlight(now) {
+      if (!isInTransaction()) {
+        throw new Error("claimLiveBookingOfCancelledFlight must run inside a transaction");
+      }
+      const [row] = (await resolveEntityManager(dataSource).query(
+        `SELECT booking."id" FROM "flights" flight
+         JOIN "bookings" booking ON booking."flight_id" = flight."id"
+         WHERE flight."status" = 'CANCELLED'
+           AND (booking."status" = 'CONFIRMED'
+                OR (booking."status" = 'HELD' AND booking."hold_expires_at" > $1))
+         ORDER BY booking."id"
+         LIMIT 1
+         FOR UPDATE OF booking SKIP LOCKED`,
+        [now],
+      )) as Array<{ id: string }>;
+      return row?.id;
     },
   };
 }

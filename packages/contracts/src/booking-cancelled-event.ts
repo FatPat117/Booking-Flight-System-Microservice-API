@@ -1,13 +1,19 @@
 /**
- * Its owner cancelled a booking: it is CANCELLED and its seats are free
- * again (Day 28 in the outbox; a contract since Day 50, domain-model
- * Decision 16). `refund` is set when the booking had been paid: its payment
- * is now REFUND_PENDING and the reconciliation job refunds it — this event
- * says a refund was started, not that it finished. No passenger names.
+ * A booking was cancelled: it is CANCELLED and its seats are free again
+ * (Day 28 in the outbox; a contract since Day 50, domain-model Decision 16).
+ * `reason` says by whom (Day 52, Decision 18): CUSTOMER, its owner; AIRLINE,
+ * the flight was cancelled. `refund` is set when the booking had been paid:
+ * its payment is now REFUND_PENDING and the reconciliation job refunds it —
+ * this event says a refund was started, not that it finished. No passenger
+ * names.
  *
  * Messages sent before Day 50 carried only `booking.id` and
- * `booking.flightId`; they fail this schema and go to the DLQ.
+ * `booking.flightId`; they fail this schema and go to the DLQ. Messages
+ * sent before Day 52 have no `reason`: an additive, optional field, read as
+ * CUSTOMER — only owners could cancel then — so none of them break.
  */
+export type BookingCancellationReason = "CUSTOMER" | "AIRLINE";
+
 export type BookingCancelledMoney = {
   /** Integer in the currency's smallest unit — whole đồng for VND. */
   amount: number;
@@ -26,6 +32,11 @@ export type BookingCancelledEvent = {
     /** Seat codes released, (row, letter) order; 1 to 9. */
     seats: string[];
   };
+  /**
+   * Optional on the wire (absent before Day 52); always set on an event
+   * returned by parseBookingCancelledEvent, absent read as CUSTOMER.
+   */
+  reason?: BookingCancellationReason;
   refund: {
     paymentId: string;
     /** The full amount paid: there are no partial refunds (Day 43 Won't). */
@@ -94,6 +105,16 @@ export function parseBookingCancelledEvent(
     };
   }
 
+  // Absent is the pre-Day 52 shape and means CUSTOMER; present but unknown
+  // is a broken producer.
+  let reason: BookingCancellationReason = "CUSTOMER";
+  if ("reason" in record) {
+    if (record.reason !== "CUSTOMER" && record.reason !== "AIRLINE") {
+      return { ok: false, reason: 'reason must be "CUSTOMER" or "AIRLINE" when present' };
+    }
+    reason = record.reason;
+  }
+
   // Required, possibly null: a missing key is a producer bug, not "unpaid".
   if (!("refund" in record)) {
     return { ok: false, reason: "refund must be present (an object or null)" };
@@ -132,6 +153,7 @@ export function parseBookingCancelledEvent(
         flightId: booking.flightId as string,
         seats: [...(booking.seats as string[])],
       },
+      reason,
       refund,
     },
   };

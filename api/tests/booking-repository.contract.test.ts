@@ -20,6 +20,11 @@ runBookingRepositoryContract("in-memory", async () => {
     async insertFlight(flight) {
       assert.deepEqual(await flightRepository.create(flight), { outcome: "created" });
     },
+    async cancelFlight(flightId) {
+      assert.deepEqual(await flightRepository.changeStatus(flightId, "OPEN", "CANCELLED"), {
+        outcome: "changed",
+      });
+    },
     async seats(flightId) {
       return (flights.seats.get(flightId) ?? []).map((seat) => ({
         seat: formatSeatPosition(seat.position),

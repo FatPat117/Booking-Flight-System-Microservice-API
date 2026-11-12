@@ -143,7 +143,7 @@ after(async () => {
 test("confirm queued behind a cancel of the same HELD booking matches nothing after the wait and books no seat", async () => {
   const { flightId, bookingId } = await heldBooking("12A");
 
-  const cancel = await openTransaction(() => repository().cancel(bookingId, OWNER_SCOPE, NOW));
+  const cancel = await openTransaction(() => repository().cancel(bookingId, OWNER_SCOPE, NOW, "CUSTOMER"));
   assert.equal(cancel.value.outcome, "cancelled");
 
   const confirm = repository().confirmHold(bookingId, OWNER_SCOPE, NOW);

@@ -169,8 +169,13 @@ As a user, I want to pay for my held booking so it becomes confirmed.
 
 **US-OPS-01 (Must): Cancel a flight**
 As an admin, I want to cancel a flight and have every booking on it cancelled.
-- Given `VN123` is `OPEN` with 3 active bookings, when I cancel it, then the flight is `CANCELLED`, all 3 bookings become `CANCELLED`, and one `booking-cancelled` event per booking is emitted with reason `FLIGHT_CANCELLED`. The 24-hour cancellation window does not apply (BR-FLT-07).
+- Given `VN123` is `OPEN` with 3 active bookings, when I cancel it, then the response is immediate, the flight is `CANCELLED`, and it says 3 bookings remain. Within one run of the cascade job all 3 bookings are `CANCELLED` with reason `AIRLINE`, and one `booking-cancelled` event per booking is emitted with `reason: "AIRLINE"`. The 24-hour cancellation window does not apply (BR-FLT-07). *(Changed Day 52, Decision 18: the cascade runs after the response; the reason is `AIRLINE`, not `FLIGHT_CANCELLED`.)*
+- Given a paid booking on `VN123`, then after the cascade its payment is `REFUND_PENDING`, and the reconciliation job refunds it.
+- Given a customer is paying for a held booking on `VN123` when it is cancelled, then the booking never becomes `CONFIRMED` and the payment is refunded.
+- Given `VN123` is `CLOSED` (sales closed, not departed), then it can be cancelled.
+- Given `VN123` is already `CANCELLED`, then cancelling again answers `200` and changes nothing.
 - Given `VN123` is `DEPARTED`, then `409 INVALID_FLIGHT_STATUS`.
+- Given `VN123` is `CANCELLED`, then a hold on it answers `409 SALES_CLOSED` and search no longer returns it.
 
 **US-OPS-02 (Should): Close sales and depart automatically**
 As the system, I want flights to stop selling 1 hour before departure and to be marked departed at departure time.

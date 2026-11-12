@@ -16,6 +16,7 @@ import { createPostgresAuditRecorder } from "../audit/postgres/postgres-audit-re
 import type { AppConfig } from "../config.js";
 import {
   createCancelBooking,
+  createCancelBookingInTransaction,
   type CancelBooking,
 } from "../bookings/cancel-booking.js";
 import {
@@ -26,6 +27,7 @@ import {
   createCreateBooking,
   type CreateBooking,
 } from "../bookings/create-booking.js";
+import { createCascadeFlightCancellations } from "../bookings/cascade-flight-cancellations.js";
 import { createExpireHolds } from "../bookings/expire-holds.js";
 import {
   createGetBooking,
@@ -56,6 +58,7 @@ import {
   createListFlights,
   type ListFlights,
 } from "../flights/list-flights.js";
+import { createCancelFlight, type CancelFlight } from "../flights/cancel-flight.js";
 import { createOpenFlight, type OpenFlight } from "../flights/open-flight.js";
 import { createPostgresFlightRepository } from "../flights/postgres/postgres-flight-repository.js";
 import { createPostgresFlightSearch } from "../flights/postgres/postgres-flight-search.js";
@@ -63,6 +66,7 @@ import { createSearchFlights, type SearchFlights } from "../flights/search-fligh
 import type { HealthChecks } from "../health/health-checks.js";
 import { createPostgresHealthChecks } from "../health/postgres/postgres-health-checks.js";
 import { createBookingHoldExpiryJob } from "../jobs/booking-hold-expiry-job.js";
+import { createFlightCancellationCascadeJob } from "../jobs/flight-cancellation-cascade-job.js";
 import { createPaymentReconciliationJob } from "../jobs/payment-reconciliation-job.js";
 import { createIdempotencyKeyCleanupJob } from "../jobs/idempotency-key-cleanup-job.js";
 import { createFlightsSummaryJob } from "../jobs/flights-summary-job.js";
@@ -109,6 +113,13 @@ const PAYMENT_RECONCILIATION_MAX_BATCHES = 5;
 const DEFAULT_IDEMPOTENCY_KEY_CLEANUP_INTERVAL_MS = 60 * 60_000;
 const IDEMPOTENCY_KEY_CLEANUP_BATCH_SIZE = 500;
 const IDEMPOTENCY_KEY_CLEANUP_MAX_BATCHES = 20;
+/**
+ * Decision 18: a cancelled flight's live bookings are cancelled within
+ * ~30 s, one booking per transaction; 500 per run covers two full
+ * wide-body flights before the backlog warning.
+ */
+const DEFAULT_FLIGHT_CANCELLATION_INTERVAL_MS = 30_000;
+const FLIGHT_CANCELLATION_MAX_PER_RUN = 500;
 
 /**
  * Fully wired application graph.
@@ -123,6 +134,7 @@ export type Application = Readonly<{
   bookingRepository: BookingRepository;
   createFlight: CreateFlight;
   openFlight: OpenFlight;
+  cancelFlight: CancelFlight;
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
   changeSeat: ChangeSeat;
@@ -154,6 +166,8 @@ export type CreateApplicationOptions = {
   paymentReconciliationIntervalMs?: number;
   /** Override for tests; production default is 1h */
   idempotencyKeyCleanupIntervalMs?: number;
+  /** Override for tests; production default is 30s */
+  flightCancellationIntervalMs?: number;
   /**
    * Tests inject a noop publisher so the suite does not need RabbitMQ.
    * Production omits this and connects via config.rabbitmqUrl.
@@ -179,6 +193,8 @@ export async function createApplication(
     options.paymentReconciliationIntervalMs ?? DEFAULT_PAYMENT_RECONCILIATION_INTERVAL_MS;
   const idempotencyKeyCleanupIntervalMs =
     options.idempotencyKeyCleanupIntervalMs ?? DEFAULT_IDEMPOTENCY_KEY_CLEANUP_INTERVAL_MS;
+  const flightCancellationIntervalMs =
+    options.flightCancellationIntervalMs ?? DEFAULT_FLIGHT_CANCELLATION_INTERVAL_MS;
   /** How long after phase 1 a PROCESSING payment is reconciliation's; also the job's lease. */
   const reconcileAfterMs =
     config.paymentGatewayTimeoutMs + config.paymentReconciliationMarginMs;
@@ -229,6 +245,16 @@ export async function createApplication(
 
   const openFlight = createOpenFlight({
     flightRepository,
+    auditRecorder,
+    transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
+  });
+
+  const cancelFlight = createCancelFlight({
+    flightRepository,
+    bookingRepository,
     auditRecorder,
     transactionRunner,
     generateAuditId: () => crypto.randomUUID(),
@@ -311,6 +337,22 @@ export async function createApplication(
     getCurrentTime: () => new Date(),
     batchSize: IDEMPOTENCY_KEY_CLEANUP_BATCH_SIZE,
     maxBatches: IDEMPOTENCY_KEY_CLEANUP_MAX_BATCHES,
+  });
+
+  const cascadeFlightCancellations = createCascadeFlightCancellations({
+    bookingRepository,
+    transactionRunner,
+    cancelBookingInTransaction: createCancelBookingInTransaction({
+      bookingRepository,
+      paymentRepository,
+      auditRecorder,
+      outboxRepository,
+      generateAuditId: () => crypto.randomUUID(),
+      generateOutboxId: () => crypto.randomUUID(),
+      getRequestId: () => undefined,
+    }),
+    getCurrentTime: () => new Date(),
+    maxPerRun: FLIGHT_CANCELLATION_MAX_PER_RUN,
   });
 
   const expireHolds = createExpireHolds({
@@ -398,6 +440,13 @@ export async function createApplication(
     }),
   );
   jobScheduler.register(
+    createFlightCancellationCascadeJob({
+      cascadeFlightCancellations,
+      logger,
+      intervalMs: flightCancellationIntervalMs,
+    }),
+  );
+  jobScheduler.register(
     createPaymentReconciliationJob({
       reconcilePayments,
       logger,
@@ -420,6 +469,7 @@ export async function createApplication(
     bookingRepository,
     createFlight,
     openFlight,
+    cancelFlight,
     createBooking,
     cancelBooking,
     changeSeat,

@@ -21,6 +21,7 @@ validate input (ngoài transaction)  →  transactionRunner.run(
 | `GET /ready` | public | HealthChecks | 200 | 503 | [background](./background-jobs-va-consumer.md) |
 | `POST /api/flights` | admin | CreateFlight | 201 + Location | 422, 409 `FLIGHT_ALREADY_EXISTS` / `AIRCRAFT_UNAVAILABLE` | [flights](./flights.md) |
 | `POST /api/flights/:id/open` | admin | OpenFlight | 200 | 404, 409 `INVALID_FLIGHT_STATUS` / `FLIGHT_STATUS_CHANGED` | [flights](./flights.md) |
+| `POST /api/flights/:id/cancel` | admin | CancelFlight (Day 52) | 200 `{ flight, remainingBookings }` (gọi lại vẫn 200) | 404, 403 user, 409 `INVALID_FLIGHT_STATUS` (`DEPARTED`) / `FLIGHT_STATUS_CHANGED` | [flights](./flights.md) |
 | `GET /api/flights` | public | ListFlights | 200 | 422 | [flights](./flights.md) |
 | `GET /api/flights/search` | public | SearchFlights (Day 51) | 200 `{ items, page }` | 422, 400 `INVALID_CURSOR` | [flights](./flights.md) |
 | `GET /api/flights/:id` | public | GetFlight (Day 51: + availability theo hạng, giờ địa phương) | 200 | 404 | [flights](./flights.md) |
@@ -33,6 +34,7 @@ validate input (ngoài transaction)  →  transactionRunner.run(
 | `PUT /api/bookings/:id/passengers/:position/seat` | user (chủ) | ChangeSeat | 200 | 404, 409 `SEAT_UNAVAILABLE` / `FARE_CLASS_MISMATCH` / `BOOKING_NOT_CHANGEABLE` / `SALES_CLOSED`, 422 | [bookings](./bookings.md) |
 | `POST /api/bookings/:id/payments` | user (chủ) | PayForBooking | 201 (phát lại: + `Idempotent-Replayed`) | 402 `PAYMENT_DECLINED`; 409 `BOOKING_NOT_PAYABLE` / `IDEMPOTENCY_KEY_IN_PROGRESS` / `PAYMENT_IN_PROGRESS`; 422 `IDEMPOTENCY_KEY_REQUIRED` / `IDEMPOTENCY_KEY_REUSED` / `PAYMENT_AMOUNT_MISMATCH`; 404; 403 admin | [bookings](./bookings.md) |
 | (job 60 s, không route) | system | ExpireHolds | — | lô lỗi → rollback, log `job_failed` | [bookings](./bookings.md), [background](./background-jobs-va-consumer.md) |
+| (job 30 s, không route) | system | CascadeFlightCancellations (Day 52) | — | booking claim được mà không huỷ được → throw (bug) | [bookings](./bookings.md), [background](./background-jobs-va-consumer.md) |
 | `POST /api/airports` | admin | RegisterAirport | 201 | 422, 409 `AIRPORT_ALREADY_EXISTS` | [reference-data](./reference-data.md) |
 | `GET /api/airports` | public | ListAirports | 200 | 422 | [reference-data](./reference-data.md) |
 | `POST /api/aircraft` | admin | RegisterAircraft | 201 | 422, 409 `AIRCRAFT_ALREADY_EXISTS` | [reference-data](./reference-data.md) |
@@ -51,8 +53,10 @@ Lỗi chung cho mọi route: `400 MALFORMED_JSON`, `401` (thiếu/sai/hết hạ
 |---|---|---|
 | CreateFlight | `FLIGHT_CREATED` (có `fares`, Day 49A) | `flight-created` (có `fares`; `priceInCents` deprecated) |
 | OpenFlight | `FLIGHT_OPENED` | — |
+| CancelFlight (Day 52) | `FLIGHT_CANCELLED` (metadata `previousStatus` hiệu lực, vd `CLOSED`); gọi lại không ghi thêm | — (không có `flight-cancelled`; mỗi booking có event riêng) |
+| CascadeFlightCancellations (job, Day 52) | `BOOKING_CANCELLED` + `PAYMENT_REFUND_PENDING` nếu đã trả, actor `system/flight-cancellation`, `reason: AIRLINE` | `booking-cancelled` với `reason: "AIRLINE"` |
 | CreateBooking | `BOOKING_CREATED` (có `totalVnd`, Day 49A) | `booking-held` (trước Day 48A: `booking-created`; Day 49A thêm giá + `total`) |
-| CancelBooking | `BOOKING_CANCELLED` | `booking-cancelled` (chưa có consumer) |
+| CancelBooking | `BOOKING_CANCELLED` (`reason: CUSTOMER` từ Day 52) | `booking-cancelled` (consumer từ Day 50; `reason` tuỳ chọn từ Day 52) |
 | ExpireHolds (job) | `BOOKING_EXPIRED`, actor `system/booking-hold-expiry` | `booking-expired` |
 | PayForBooking | `BOOKING_CONFIRMED` (target booking); `PAYMENT_FAILED`, `PAYMENT_REFUND_PENDING` (target payment); `PAYMENT_REFUNDED` actor `system/payment-refund` | `booking-confirmed` (chỉ khi thành công) |
 | RegisterAirport | `AIRPORT_REGISTERED` | — |

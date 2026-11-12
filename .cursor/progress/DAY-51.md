@@ -129,7 +129,7 @@ What it says:
   visibility map, which those same writes keep clearing. 4.8 ms for the busiest route is not a pain.
   It is the first lever to pull if search becomes hot — before any separate read model.
 - **Against a read model today:** the search counts availability live from `flight_seats` in under
-  10 ms on 3.9 M seats. A precomputed availability table would add a second write path to every
+  10 ms on 3.9 M seats (one client, sequential runs, median of 7 with a warm cache, `EXPLAIN ANALYZE` execution time; no concurrent load). A precomputed availability table would add a second write path to every
   hold/expiry/cancel for no measured need. Phase E should start from these numbers, not from "CQRS
   is standard".
 
@@ -281,7 +281,7 @@ which is why the system-picked hold now names a class too. Pages are keyset page
 that sells out under the reader makes `OFFSET` skip a flight, which a control test showed. A
 differential test against a naive filter over 50 seeded worlds keeps the SQL honest, and it was
 shown to fail on a UTC-date mutation. Measured on 3.9 M seats, counting availability live costs under
-10 ms, so phase E starts with evidence against a read model, not for one. The day began by auditing
+10 ms (one client, sequential runs, median of 7 with a warm cache, `EXPLAIN ANALYZE` execution time; no concurrent load), so phase E starts with evidence against a read model, not for one. The day began by auditing
 every statement for Day 50's snapshot trap: two rely on an invariant, now named and guarded by a
 control test.
 

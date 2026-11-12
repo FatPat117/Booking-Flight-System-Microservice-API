@@ -343,6 +343,31 @@ test("a charge that lands after the owner cancelled is left for refund too", asy
   );
 });
 
+test("a charge that lands after the flight was cancelled is refunded: the booking is never CONFIRMED (Decision 18)", async () => {
+  const runtime = await createRuntime({
+    onCharge: () => {
+      // The admin cancels the flight while the gateway is answering.
+      const flight = runtime.flights.flights.get(runtime.booking.flightId);
+      assert.ok(flight);
+      flight.status = "CANCELLED";
+    },
+  });
+
+  const result = await runtime.payForBooking(runtime.booking.id, SCOPE_A, ACTOR_A, request());
+
+  assert.equal(result.outcome === "answered" && result.response.status, 409);
+  assert.equal(runtime.bookingRepository.peek(runtime.booking.id)?.status, "HELD");
+  assert.equal(
+    (await runtime.paymentRepository.findById(FIRST_PAYMENT_ID))?.status,
+    "REFUND_PENDING",
+  );
+  assert.deepEqual(seatStatuses(runtime), ["1A:HELD", "1B:HELD", "1C:AVAILABLE"]);
+  assert.equal(
+    runtime.auditRecorder.records.filter((record) => record.action === "BOOKING_CONFIRMED").length,
+    0,
+  );
+});
+
 test("an amount other than the booking total is amount-mismatch, charges nothing, and frees the key (BR-PAY-03)", async () => {
   const runtime = await createRuntime();
   const { booking } = runtime;

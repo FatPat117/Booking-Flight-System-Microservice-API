@@ -16,6 +16,7 @@ import { createCreateFlight } from "../src/flights/create-flight.js";
 import { createGetFlight } from "../src/flights/get-flight.js";
 import { createGetFlightSeatMap } from "../src/flights/get-flight-seat-map.js";
 import { createListFlights } from "../src/flights/list-flights.js";
+import { createCancelFlight } from "../src/flights/cancel-flight.js";
 import { createOpenFlight } from "../src/flights/open-flight.js";
 import { createNoopOutboxRepository } from "../src/outbox/noop-outbox-repository.js";
 import type { Logger } from "../src/observability/logger.js";
@@ -121,6 +122,7 @@ function createContext(): {
       generateId: () => crypto.randomUUID(),
     }),
     openFlight: createOpenFlight({ ...common, flightRepository }),
+    cancelFlight: createCancelFlight({ ...common, flightRepository, bookingRepository }),
     createBooking: createCreateBooking({
       ...common,
       bookingRepository,

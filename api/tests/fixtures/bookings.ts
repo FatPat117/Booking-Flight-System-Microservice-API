@@ -59,6 +59,7 @@ export function makeBooking(
     createdAt: "2026-07-20T00:00:00.000Z",
     status: "HELD" as const,
     holdExpiresAt: "2026-07-20T00:15:00.000Z",
+    cancellationReason: null,
     ...overrides,
   };
   return { ...booking, total: bookingTotal(booking.passengers) };

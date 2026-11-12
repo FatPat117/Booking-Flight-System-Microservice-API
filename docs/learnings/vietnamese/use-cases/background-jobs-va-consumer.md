@@ -12,9 +12,10 @@
 | `booking-hold-expiry-job` (60 giây, Day 48B) | Gọi `ExpireHolds`: lô 50, tối đa 20 lô, `SKIP LOCKED`, mỗi lô một transaction | Im lặng khi không có gì; log `booking_holds_expired`; warn `booking_hold_expiry_backlog` khi chạm 20 lô |
 | `payment-reconciliation-job` (30 giây, Day 49C) | Gọi `ReconcilePayments`: claim lô 20 (`SKIP LOCKED` + lease `next_attempt_at`), commit, gọi gateway **song song**, ghi từng kết quả trong transaction ngắn; tối đa 5 lô | Log `payments_reconciled`; warn `payment_reconciliation_backlog`; error `payment_refund_needs_attention` từ use case |
 | `idempotency-key-cleanup-job` (1 giờ, Day 49C) | Gọi `CleanupIdempotencyKeys`: xoá key `COMPLETED` > 24 h, lô 500, tối đa 20 lô | Log `idempotency_keys_deleted`; warn `idempotency_key_cleanup_backlog` |
+| `flight-cancellation-cascade-job` (30 giây, Day 52) | Gọi `CascadeFlightCancellations`: mỗi transaction claim một booking sống của chuyến `CANCELLED` (`SKIP LOCKED`) rồi huỷ với `AIRLINE`; tối đa 500 mỗi lượt | Log `flight_cancellation_cascaded`; warn `flight_cancellation_cascade_backlog`. Hai instance: mỗi booking huỷ đúng một lần (race test E) |
 
 **Vì sao không dùng RabbitMQ để lên lịch:** một process, không có bài toán liên service. Đánh đổi
-đã biết: chạy nhiều instance thì job chạy trùng — job hết hạn, đối soát và dọn key an toàn nhờ
+đã biết: chạy nhiều instance thì job chạy trùng — job hết hạn, đối soát, dọn key và dây chuyền huỷ chuyến an toàn nhờ
 `SKIP LOCKED` (đối soát thêm **lease**, vì nó gọi gateway sau khi đã commit), outbox relay thì chưa.
 
 **Thứ tự tắt:** dừng job → đóng publisher → đóng DB. Từ Day 48B `stop()` trả `Promise` và **chờ
@@ -33,6 +34,7 @@ relay. Message không mất vì dòng outbox vẫn chưa publish.
 | `booking-held` | `createBookingHeldConsumer` | `booking_held_consumed` (reference, số khách, hạn giữ — **không tên**) |
 | `booking-expired` (Day 48B) | `createBookingExpiredConsumer` | `booking_expired_consumed` (reference, số ghế, hạn; `correlationId` = `eventId` vì không có request) |
 | `booking-confirmed` (Day 49B) | `createBookingConfirmedConsumer` | `booking_confirmed_consumed` (reference, số khách, `paymentId`, số tiền — không tên) |
+| `booking-cancelled` (Day 50) | `createBookingCancelledConsumer` | `booking_cancelled_consumed` (reference, số ghế, `reason` `CUSTOMER`/`AIRLINE` từ Day 52 — thiếu thì là `CUSTOMER`, refund đã bắt đầu) |
 | `booking-created` | `createBookingCreatedConsumer` | chỉ còn để đọc message cũ trước Day 48A |
 
 - `prefetch(1)`, ack tay; parse bằng `packages/contracts` → sai shape thì `rejected` → `nack(requeue:false)` → `<queue>.dlx` → `<queue>.dlq`.

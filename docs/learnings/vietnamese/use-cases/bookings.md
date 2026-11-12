@@ -81,6 +81,7 @@ mang giá **lúc chạy migration**.
   3. Payment `SUCCEEDED → REFUND_PENDING` (`next_attempt_at = now`) nếu có — job đối soát hoàn tiền.
 - 0 dòng → câu đọc phụ (**có scope**) qua `classifyNotCancelled`.
 - Audit `BOOKING_CANCELLED` (+ `refundPaymentId`), `PAYMENT_REFUND_PENDING` nếu đã trả; outbox `booking-cancelled` (contract + consumer từ Day 50, có `refund`).
+- **Day 52:** phần trong transaction là **lõi huỷ dùng chung** `createCancelBookingInTransaction` (`cancel-booking.ts`); request của khách gọi nó với lý do `CUSTOMER`, job dây chuyền với `AIRLINE`. Booking lưu `cancellationReason`; audit và event mang `reason`.
 
 | Outcome | HTTP |
 |---|---|
@@ -143,9 +144,31 @@ Admin huỷ → 403. Sau huỷ, hành khách vẫn giữ bản sao mã ghế là
 ```text
 — → HELD (đặt)        HELD → CANCELLED (huỷ, khi hold > now)       CONFIRMED → CANCELLED (huỷ, booking cũ)
 HELD → EXPIRED (job, khi hold <= now; đọc thì thấy EXPIRED ngay từ lúc hạn)
-HELD → CONFIRMED (thanh toán thành công, Day 49B; khi hold > now ở pha 3)
+HELD → CONFIRMED (thanh toán thành công, Day 49B; khi hold > now ở pha 3; từ Day 52 chuyến chưa CANCELLED)
+HELD / CONFIRMED → CANCELLED (AIRLINE): job dây chuyền khi chuyến bị huỷ (Day 52), bỏ mốc 24 h
 ```
+Từ Day 52 mọi booking `CANCELLED` có `cancellationReason` (`CUSTOMER` / `AIRLINE`); booking huỷ trước đó được gán `CUSTOMER`.
 Booking cũ được migrate `active → CONFIRMED`, `cancelled → CANCELLED`.
+
+## CascadeFlightCancellations — job, không có route (Day 52)
+
+**Code:** `api/src/bookings/cascade-flight-cancellations.ts`, job `api/src/jobs/flight-cancellation-cascade-job.ts`,
+claim `claimLiveBookingOfCancelledFlight` trong repository.
+
+- Mỗi 30 s, tối đa 500 booking mỗi lượt; `now` đọc một lần mỗi lượt.
+- Vòng lặp, **mỗi booking một transaction**: claim một booking sống của chuyến `CANCELLED`
+  (`FOR UPDATE SKIP LOCKED`, id nhỏ nhất) → lõi huỷ với `reason: AIRLINE`, scope `admin`, actor
+  `system/flight-cancellation` → commit. Claim rỗng thì dừng.
+- `AIRLINE`: không có mốc 24 h, nhưng **bắt buộc** chuyến `CANCELLED` (huỷ `AIRLINE` trên chuyến chưa
+  huỷ → throw). Hold đã quá hạn để job hết hạn xử lý.
+- Không gọi gateway: payment `SUCCEEDED → REFUND_PENDING`, job đối soát hoàn tiền. Payment đang
+  `PROCESSING` để nguyên: nếu tiền về, pha 3 thấy chuyến/booking đã huỷ → hoàn.
+- Claim được mà lõi không huỷ được → throw (hai điều kiện lệch nhau là bug, không bỏ qua im lặng).
+- Kết quả `{ cancelled, refundsStarted, exhausted }`; log `flight_cancellation_cascaded`, warn
+  `flight_cancellation_cascade_backlog`.
+
+**Vì sao điều khiển bởi trạng thái:** "chuyến `CANCELLED` còn booking sống" chính là việc còn lại →
+crash thì lần sau làm tiếp, hai instance thì `SKIP LOCKED` tách nhau, không cần dedupe event.
 
 ## ExpireHolds — job, không có route (Day 48B)
 

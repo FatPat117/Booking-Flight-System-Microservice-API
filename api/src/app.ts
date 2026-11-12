@@ -22,6 +22,7 @@ import type { GetFlight } from "./flights/get-flight.js";
 import type { GetFlightSeatMap } from "./flights/get-flight-seat-map.js";
 import type { ListFlights } from "./flights/list-flights.js";
 import type { SearchFlights } from "./flights/search-flights.js";
+import type { CancelFlight } from "./flights/cancel-flight.js";
 import type { OpenFlight } from "./flights/open-flight.js";
 import type { HealthChecks } from "./health/health-checks.js";
 import { requestFingerprint } from "./idempotency/request-fingerprint.js";
@@ -48,6 +49,7 @@ export type AppDependencies = {
   getFlightSeatMap: GetFlightSeatMap;
   createFlight: CreateFlight;
   openFlight: OpenFlight;
+  cancelFlight: CancelFlight;
   createBooking: CreateBooking;
   cancelBooking: CancelBooking;
   changeSeat: ChangeSeat;
@@ -96,6 +98,7 @@ export function createApp(dependencies: AppDependencies) {
     getFlightSeatMap,
     createFlight,
     openFlight,
+    cancelFlight,
     createBooking,
     cancelBooking,
     changeSeat,
@@ -303,6 +306,52 @@ export function createApp(dependencies: AppDependencies) {
       }
 
       return res.status(200).json(result.flight);
+    },
+  );
+
+  // US-OPS-01 (Decision 18): changes only the flight; the cascade job cancels
+  // its bookings afterwards. Already cancelled answers 200 like the first
+  // call, so a retry after a timeout is not an error.
+  app.post(
+    "/api/flights/:id/cancel",
+    requireJwt,
+    requireRole("admin"),
+    async (req: Request<{ id: string }>, res) => {
+      const result = await cancelFlight(req.params.id, toActor(currentUser()));
+
+      if (result.outcome === "not-found") {
+        return sendApiError(res, 404, {
+          code: "FLIGHT_NOT_FOUND",
+          message: "Flight was not found",
+        });
+      }
+
+      if (result.outcome === "invalid-status") {
+        return sendApiError(res, 409, {
+          code: "INVALID_FLIGHT_STATUS",
+          message: `Cannot cancel a flight that is ${result.currentStatus}`,
+          details: [
+            {
+              field: "status",
+              code: result.reason,
+              message: `${result.currentStatus} → CANCELLED is not allowed`,
+            },
+          ],
+        });
+      }
+
+      // Lost the compare-and-set to a concurrent open.
+      if (result.outcome === "status-changed") {
+        return sendApiError(res, 409, {
+          code: "FLIGHT_STATUS_CHANGED",
+          message: `The flight was changed meanwhile and is now ${result.currentStatus}`,
+        });
+      }
+
+      return res.status(200).json({
+        flight: result.flight,
+        remainingBookings: result.remainingBookings,
+      });
     },
   );
 

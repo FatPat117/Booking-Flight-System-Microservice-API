@@ -116,8 +116,8 @@ const departsMoreThanAnHourAhead: TransitionGuard = ({ departureAt, now }) =>
  * person can open or cancel a flight, never "close" or "depart" it. A pair
  * missing here is forbidden — so the terminal statuses have empty rows.
  *
- * → CANCELLED is legal here but not offered by any route until phase D step
- * 9 adds the booking cascade (domain-model, "Not yet reachable").
+ * → CANCELLED is offered by POST /api/flights/:id/cancel since Day 52, with
+ * the booking cascade that follows it (Decision 18).
  */
 const FLIGHT_TRANSITIONS: Readonly<
   Record<FlightStatus, Readonly<Partial<Record<FlightStatus, TransitionGuard>>>>

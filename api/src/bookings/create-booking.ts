@@ -177,6 +177,7 @@ export function createCreateBooking(
         createdAt: occurredAt,
         status: "HELD",
         holdExpiresAt,
+        cancellationReason: null,
       };
 
       const booking = await createWithFreeReference(held);

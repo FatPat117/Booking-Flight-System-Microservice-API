@@ -79,6 +79,29 @@ const CHECKS: readonly Check[] = [
           WHERE b."status" = 'CANCELLED' AND p."provider_reference" IS NOT NULL
             AND p."status" NOT IN ('REFUND_PENDING', 'REFUNDED', 'REFUND_FAILED')`,
   },
+  {
+    // Decision 18: AIRLINE is a fact about the flight. (A reason exactly
+    // when CANCELLED is a CHECK in the schema, so it needs no query here.)
+    name: "an AIRLINE cancellation is on a CANCELLED flight",
+    sql: `SELECT b."reference", f."status" AS "flight"
+          FROM "bookings" b JOIN "flights" f ON f."id" = b."flight_id"
+          WHERE b."cancellation_reason" = 'AIRLINE' AND f."status" <> 'CANCELLED'`,
+  },
+  {
+    // Decision 18: once a flight is cancelled, no booking on it is confirmed.
+    // Ordered by the audit's occurred_at, so a test relying on it must use a
+    // clock that moves: two events at one fixed instant cannot be ordered.
+    name: "no booking is confirmed after its flight was cancelled",
+    sql: `SELECT b."reference", confirmed."occurred_at" AS "confirmedAt",
+                 cancelled."occurred_at" AS "flightCancelledAt"
+          FROM "audit_logs" confirmed
+          JOIN "bookings" b ON b."id"::text = confirmed."target_id"
+          JOIN "audit_logs" cancelled
+            ON cancelled."action" = 'FLIGHT_CANCELLED'
+           AND cancelled."target_id" = b."flight_id"::text
+          WHERE confirmed."action" = 'BOOKING_CONFIRMED'
+            AND confirmed."occurred_at" > cancelled."occurred_at"`,
+  },
 ];
 
 /**
@@ -164,6 +187,31 @@ async function findMoneyViolations(
   }
 
   return violations;
+}
+
+/**
+ * Not a global invariant — between the cancel and the job's next run it is
+ * expected to fail — but what "the cascade has finished" means (Decision
+ * 18): no CANCELLED flight has a live booking at `now`. A HELD booking whose
+ * hold lapsed is the expiry job's, so it does not count.
+ */
+export async function findLiveBookingsOfCancelledFlights(
+  dataSource: DataSource,
+  now: Date,
+): Promise<string[]> {
+  const rows = (await dataSource.query(
+    `SELECT b."reference" FROM "bookings" b
+     JOIN "flights" f ON f."id" = b."flight_id"
+     WHERE f."status" = 'CANCELLED'
+       AND (b."status" = 'CONFIRMED' OR (b."status" = 'HELD' AND b."hold_expires_at" > $1))
+     ORDER BY b."reference"`,
+    [now],
+  )) as Array<{ reference: string }>;
+  return rows.map((row) => row.reference);
+}
+
+export async function assertCascadeComplete(dataSource: DataSource, now: Date): Promise<void> {
+  assert.deepEqual(await findLiveBookingsOfCancelledFlights(dataSource, now), []);
 }
 
 /** Fails with every broken invariant at once, not just the first. */

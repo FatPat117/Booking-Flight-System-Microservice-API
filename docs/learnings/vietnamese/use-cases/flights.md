@@ -63,6 +63,32 @@ Response trả dạng `Money`: `"fares": { "ECONOMY": { "amount": 1500000, "curr
 → không cần job, không race với job. Mở bán là **command** (`POST …/open`), không phải PATCH
 `status`, vì người dùng chỉ được đặt đúng một trạng thái.
 
+## CancelFlight — `POST /api/flights/:id/cancel` (admin, Day 52)
+
+**Code:** `api/src/flights/cancel-flight.ts`; route trong `api/src/app.ts`. Quyết định: Decision 18, ADR-011.
+
+**Luồng:**
+1. id sai định dạng / không có → `not-found` (404).
+2. Đã `CANCELLED` → `already-cancelled` (200, không ghi audit lần hai).
+3. Trạng thái hiệu lực + `transitionFlight(current, "CANCELLED")`: `SCHEDULED`, `OPEN`, `CLOSED` được;
+   `DEPARTED` → 409 `INVALID_FLIGHT_STATUS` (`NOT_ALLOWED`).
+4. Transaction **chỉ chạm dòng chuyến bay**: `changeStatus(id, expected, "CANCELLED")` + audit
+   `FLIGHT_CANCELLED`. Thua compare-and-set trước một lệnh huỷ khác → `already-cancelled`; trước một
+   lệnh mở bán → 409 `FLIGHT_STATUS_CHANGED`.
+5. Sau commit: đếm booking sống (`CONFIRMED`, hoặc `HELD` còn hạn) → `remainingBookings`.
+
+| Outcome | HTTP |
+|---|---|
+| `cancelled`, `already-cancelled` | 200 `{ flight, remainingBookings }` |
+| `invalid-status` | 409 `INVALID_FLIGHT_STATUS` |
+| `status-changed` | 409 `FLIGHT_STATUS_CHANGED` |
+| `not-found` | 404 `FLIGHT_NOT_FOUND` |
+
+**Xử lý hay:** request **không** huỷ booking nào (nếu diff có vòng lặp qua booking ở đây thì là phương
+án A trá hình). Từ lúc commit, `onSaleSql` từ chối mọi câu giữ ghế (409 `SALES_CLOSED`), tìm kiếm bỏ
+chuyến này. Job dây chuyền làm phần còn lại (xem [bookings](./bookings.md)). Tiến độ = gọi lại lệnh
+huỷ (idempotent) và đọc `remainingBookings` — suy ra từ booking, không lưu cột.
+
 ## ListFlights — `GET /api/flights?page=&pageSize=` (public)
 
 **Code:** `api/src/flights/list-flights.ts`, `api/src/pagination.ts`

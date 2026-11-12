@@ -5,6 +5,13 @@ import type { Money } from "../money/money.js";
 /** domain-model "Lifecycles → Booking" (Decision 11). */
 export type BookingStatus = "HELD" | "CONFIRMED" | "CANCELLED" | "EXPIRED";
 
+/**
+ * Who cancelled, which decides the rule (Decision 18): CUSTOMER — the owner,
+ * within BR-BOOK-06's window; AIRLINE — the flight cancellation cascade,
+ * whatever the window (BR-FLT-07), and only on a CANCELLED flight.
+ */
+export type CancellationReason = "CUSTOMER" | "AIRLINE";
+
 export type BookingPassenger = Readonly<{
   name: string;
   /**
@@ -41,6 +48,8 @@ export type Booking = Readonly<{
   status: BookingStatus;
   /** Required while HELD; kept afterwards as history; null for legacy bookings. */
   holdExpiresAt: string | null;
+  /** Set exactly when `status` is CANCELLED (a CHECK says so). */
+  cancellationReason: CancellationReason | null;
 }>;
 
 /**
@@ -243,24 +252,31 @@ export type BookingRepository = Readonly<{
     request: BookingPageRequest,
   ): Promise<BookingPage>;
   /**
-   * CONFIRMED with departure more than 24 h away at `now` (BR-BOOK-06), or
-   * HELD with a hold still valid at `now` (`holdExpiresAt > now`,
-   * BR-BOOK-10) → CANCELLED, only inside the scope (OCC), and release every
-   * seat of the booking (AVAILABLE, no booking) in the same statement — so
-   * only the call that wins the transition releases them. Both deadlines are
-   * checked in the statement itself, never by a read before it or by
-   * trusting that the expiry job has run; departure is read under a share
-   * lock on the flight, so it cannot change between the check and the write.
+   * → CANCELLED with `reason` stored, only inside the scope (OCC), and
+   * release every seat of the booking (AVAILABLE, no booking) in the same
+   * statement — so only the call that wins the transition releases them.
+   * Which bookings qualify depends on the reason (Decision 18):
+   * - both: HELD with a hold still valid at `now` (`holdExpiresAt > now`,
+   *   BR-BOOK-10);
+   * - CUSTOMER: CONFIRMED with departure more than 24 h away (BR-BOOK-06);
+   * - AIRLINE: CONFIRMED whatever the departure (BR-FLT-07), and either kind
+   *   only while the flight is CANCELLED.
+   * Every condition is checked in the statement itself, never by a read
+   * before it or by trusting that the expiry job has run; the flight is
+   * read under a share lock, so it cannot change between check and write.
    *
    * CANCELLED answers already-cancelled; EXPIRED or a lapsed HELD answers
-   * expired; a CONFIRMED one inside 24 h, cancellation-window-closed. Seats
-   * are locked in (row, letter) order, like expireDueHolds. The payment is
-   * not this port's: CancelBooking moves it in the same transaction.
+   * expired; a CUSTOMER cancel of a CONFIRMED one inside 24 h,
+   * cancellation-window-closed. An AIRLINE cancel on a flight that is not
+   * CANCELLED throws: only the cascade asks for one. Seats are locked in
+   * (row, letter) order, like expireDueHolds. The payment is not this
+   * port's: the cancel core moves it in the same transaction.
    */
   cancel(
     bookingId: string,
     scope: BookingAccessScope,
     now: Date,
+    reason: CancellationReason,
   ): Promise<CancelBookingRepositoryResult>;
   /**
    * Move the passenger at `position` (1-based) to `seat`, inside the scope:
@@ -303,17 +319,47 @@ export type BookingRepository = Readonly<{
   expireDueHolds(now: Date, limit: number): Promise<ExpiredHold[]>;
   /**
    * Payment phase 3 (Decision 14): HELD with a hold still valid at `now`
-   * (`holdExpiresAt > now`, BR-BOOK-10 — the same side as cancel) →
-   * CONFIRMED, only inside the scope (OCC), and every seat of the booking
-   * HELD → BOOKED in the same statement. Returns the booking as confirmed.
+   * (`holdExpiresAt > now`, BR-BOOK-10 — the same side as cancel), on a
+   * flight that is not CANCELLED (Day 52, Decision 18) → CONFIRMED, only
+   * inside the scope (OCC), and every seat of the booking HELD → BOOKED in
+   * the same statement. Returns the booking as confirmed. A CLOSED flight
+   * still confirms (BR-PAY-06).
    *
    * Races with cancel and expiry are decided by the booking row: whoever
    * updates it first wins, the other re-checks its condition and matches
-   * nothing. Seats are locked in (row, letter) order, like cancel.
+   * nothing. The race with a flight cancellation is decided by the flight
+   * row, read under a share lock: a cancel committed first makes this match
+   * nothing; a confirm first makes the cancel wait, and the cascade then
+   * cancels the booking and refunds it. Seats are locked in (row, letter)
+   * order, like cancel.
    */
   confirmHold(
     bookingId: string,
     scope: BookingAccessScope,
     now: Date,
   ): Promise<ConfirmHoldResult>;
+  /**
+   * How many bookings of the flight are still live at `now`: CONFIRMED, or
+   * HELD with a hold still valid (`holdExpiresAt > now`, BR-BOOK-10). A
+   * lapsed HELD booking is the expiry job's and does not count. For a
+   * cancelled flight this is the work the cascade has left (Decision 18).
+   * A snapshot: a booking may change right after it is counted.
+   *
+   * No scope: an admin or the system asks about the whole flight.
+   */
+  countLiveOnFlight(flightId: string, now: Date): Promise<number>;
+  /**
+   * The cascade's next booking (Decision 18): one live booking — CONFIRMED,
+   * or HELD with a hold still valid at `now` — of any CANCELLED flight,
+   * locked for the rest of the caller's transaction, or undefined when none
+   * is left. Must run inside a transaction (throws otherwise): the lock is
+   * what makes it this caller's.
+   *
+   * Concurrency: a booking another transaction has locked (a customer's
+   * cancel, a second cascade instance) is skipped, not waited for, like
+   * expireDueHolds. Lowest id first, so runs are deterministic.
+   *
+   * No scope: the system acts on every account's bookings.
+   */
+  claimLiveBookingOfCancelledFlight(now: Date): Promise<string | undefined>;
 }>;

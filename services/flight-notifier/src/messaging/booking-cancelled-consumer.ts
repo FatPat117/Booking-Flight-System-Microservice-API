@@ -6,9 +6,9 @@ import type {
 } from "./message-consumer.js";
 
 /**
- * Logs the reference, the released seat count and whether a refund was
- * started (Day 50); the event has no names. A refund here means "started":
- * the api's reconciliation job makes it.
+ * Logs the reference, the released seat count, who cancelled (Day 52) and
+ * whether a refund was started (Day 50); the event has no names. A refund
+ * here means "started": the api's reconciliation job makes it.
  */
 export function createBookingCancelledConsumer(deps: {
   logger: Logger;
@@ -29,6 +29,7 @@ export function createBookingCancelledConsumer(deps: {
       reference: event.booking.reference,
       flightId: event.booking.flightId,
       seatCount: event.booking.seats.length,
+      reason: event.reason ?? "CUSTOMER",
       refundPaymentId: event.refund?.paymentId ?? null,
       refundAmount: event.refund?.amount.amount ?? null,
       occurredAt: event.occurredAt,

@@ -77,6 +77,8 @@ test("bookingCancelledConsumer processes a paid cancel and logs the reference, s
         reference: "K7Q4PZ",
         flightId: "flight-1",
         seatCount: 2,
+        // validPayload has no reason, as before Day 52: read as CUSTOMER.
+        reason: "CUSTOMER",
         refundPaymentId: "payment-1",
         refundAmount: 3_000_000,
         occurredAt: "2026-10-16T00:05:00.000Z",
@@ -96,6 +98,16 @@ test("bookingCancelledConsumer processes an unpaid cancel: refund null", async (
   assert.equal(entries[0]?.fields?.refundAmount, null);
 });
 
+test("bookingCancelledConsumer processes an airline cancellation and logs reason AIRLINE (Day 52)", async () => {
+  const { logger, entries } = createMemoryLogger();
+  const handler = createBookingCancelledConsumer({ logger });
+
+  const result = await handler({ ...validPayload, reason: "AIRLINE" });
+
+  assert.deepEqual(result, { outcome: "processed" });
+  assert.equal(entries[0]?.fields?.reason, "AIRLINE");
+});
+
 test("bookingCancelledConsumer rejects invalid payloads, including the pre-Day 50 shape, without throwing", async () => {
   const { logger, entries } = createMemoryLogger();
   const handler = createBookingCancelledConsumer({ logger });
@@ -113,6 +125,9 @@ test("bookingCancelledConsumer rejects invalid payloads, including the pre-Day 5
     withoutRefund,
     { ...validPayload, refund: { paymentId: "payment-1" } },
     { ...validPayload, refund: { ...validRefund, amount: { amount: 1.5, currency: "VND" } } },
+    // Present but not one of the two reasons: a broken producer.
+    { ...validPayload, reason: "FLIGHT_CANCELLED" },
+    { ...validPayload, reason: null },
     // What the outbox sent from Day 28 to Day 49C.
     {
       eventId: "old-1",

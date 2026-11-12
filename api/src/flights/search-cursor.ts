@@ -22,13 +22,16 @@ function sortKey(key: FlightSearchKey, sort: SearchCursorScope["sort"]): CursorK
 
 /**
  * Binds the key to the query that produced it: a SHA-256 over the version,
- * the key and the normalised search. Not a secret signature — anyone can
- * compute it — so it does not stop a deliberate forgery; it does not need
- * to: a forged key for the same query is only another starting point of
- * that query's own order. What it stops is a cursor reused for another
- * search, or one damaged in transit, from being read as a wrong page.
+ * the key and the normalised search. A binding, not a signature: anyone can
+ * compute it, so it does not stop a deliberate forgery, and it does not need
+ * to. Every field is public and the client already chooses all of them: a
+ * forged key for the same query is only another starting point of that
+ * query's own order. What it stops is a cursor reused for another search, or
+ * one damaged in transit, from being read as a wrong page. A cursor that ever
+ * carries something the client must not choose needs an HMAC with a server
+ * secret instead.
  */
-function seal(key: CursorKey, scope: SearchCursorScope): string {
+function bindToQuery(key: CursorKey, scope: SearchCursorScope): string {
   const material = JSON.stringify([
     VERSION,
     key,
@@ -44,7 +47,7 @@ function seal(key: CursorKey, scope: SearchCursorScope): string {
 
 export function encodeSearchCursor(key: FlightSearchKey, scope: SearchCursorScope): string {
   const k = sortKey(key, scope.sort);
-  return Buffer.from(JSON.stringify({ v: VERSION, k, s: seal(k, scope) })).toString("base64url");
+  return Buffer.from(JSON.stringify({ v: VERSION, k, s: bindToQuery(k, scope) })).toString("base64url");
 }
 
 export type DecodeSearchCursorResult =
@@ -77,7 +80,7 @@ export function decodeSearchCursor(cursor: string, scope: SearchCursorScope): De
   }
 
   const key = readKey(k, scope.sort);
-  if (key === undefined || s !== seal(k as CursorKey, scope)) {
+  if (key === undefined || s !== bindToQuery(k as CursorKey, scope)) {
     return { success: false };
   }
   return { success: true, key };

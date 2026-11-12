@@ -1,8 +1,8 @@
-# Ôn tập nhanh: Day 1 → Day 51
+# Ôn tập nhanh: Day 1 → Day 52
 
 > Sổ tay tiếng Việt để đọc lại nhanh. Mỗi mục gồm: **vấn đề → cách xử lý → vì sao**, kèm đường dẫn tới code thật.
 > Các note tiếng Anh khác trong `docs/learnings/` đi sâu từng chủ đề; file này là bản đồ tổng.
-> Cập nhật đến: **Day 51** (2026-11-04). Số test hiện tại: api unit 580, integration 260 (trên `booking_test`), notifier 19, identity 12 + integration 7 (trên `identity_test`).
+> Cập nhật đến: **Day 52** (2026-11-12). Số test hiện tại: api unit 614, integration 292 (trên `booking_test`), notifier 20, identity 12 + integration 7 (trên `identity_test`).
 
 ---
 
@@ -11,7 +11,7 @@
 ```text
 npm workspaces
 ├── packages/contracts      kiểu event dùng chung + parser (flight-created, booking-held, booking-expired, booking-confirmed, booking-created cũ)
-├── api                     Express: flights (có giá theo hạng; tìm kiếm keyset + chi tiết theo hạng qua port đọc FlightSearch), airports, aircraft, bookings (chụp giá, huỷ + đổi ghế), thanh toán (3 pha + Idempotency-Key, đối soát); outbox relay; job hết hạn giữ ghế; Postgres booking_db
+├── api                     Express: flights (có giá theo hạng; tìm kiếm keyset + chi tiết theo hạng qua port đọc FlightSearch; huỷ chuyến), airports, aircraft, bookings (chụp giá, huỷ + đổi ghế, lý do huỷ), thanh toán (3 pha + Idempotency-Key, đối soát); outbox relay; job hết hạn giữ ghế, job dây chuyền huỷ chuyến; Postgres booking_db
 ├── services/identity       register/login, phát JWT (Postgres identity_db)
 └── services/flight-notifier  consumer RabbitMQ (log event, DLQ)
 
@@ -102,6 +102,7 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 | 49C | Lỗi thanh toán: kết quả không rõ, đối soát, dọn key; DB test riêng | Ba kết quả: thành công / từ chối / **không rõ** — không rõ thì **không bao giờ** `FAILED`, trả `202`; job đối soát **charge lại cùng `paymentId`**; `next_attempt_at` = ngưỡng tuổi + lease + backoff; một pha 3 dùng chung; refund chỉ ở job, 5 lần rồi `REFUND_FAILED`; test chạy trên `booking_test` có hàng rào |
 | 50 | Huỷ trong 24 h + hoàn tiền; đổi ghế | Mốc `departure_at − 24h > now` trong câu huỷ (đúng 24 h là đóng); huỷ đã trả tiền → `SUCCEEDED → REFUND_PENDING` **cùng transaction**, job đối soát hoàn; đổi ghế `PUT` "đặt thành X" (idempotent tự nhiên), khoá **hai ghế theo (row, letter)**; race test lộ lỗi **snapshot của câu lệnh** trong câu huỷ cũ; hàm bất biến toàn cục được chứng minh bắt dữ liệu hỏng |
 | 51 | Tìm chuyến bay + chi tiết theo hạng | "Ngày bay" là **ngày địa phương của sân bay đi**, đổi thành khoảng UTC **từ tham số** (cột để trần → dùng được index); "còn N chỗ" = N ghế **trong một hạng**, giữ ghế tự động phải có `fareClass`; **keyset** thay OFFSET (OFFSET bỏ sót một chuyến khi dữ liệu đổi giữa hai trang — đo được); đo trên 20 400 chuyến / 3,9 triệu ghế: đếm trực tiếp 4,8 ms, **chưa cần read model**; **differential test** với bộ lọc ngây thơ, 50 seed |
+| 52 | Huỷ chuyến bay dây chuyền | Request admin **chỉ đổi dòng chuyến bay** (vài ms); job điều khiển bởi **trạng thái** huỷ từng booking một transaction, `SKIP LOCKED`, dùng lại **lõi huỷ** với lý do `AIRLINE` (lý do là **dữ liệu**, không phải cờ `force`); `confirmHold` khoá chia sẻ chuyến, thua khi chuyến đã huỷ; **giả thuyết deadlock Day 47 đúng với phương án A** (đối chứng 3/3 `40P01`), phương án B 0; đo: giữ dòng chuyến 3–8 ms vs 536–601 ms; phát hiện câu giữ ghế mới **chen trước** `UPDATE` đang chờ |
 
 ---
 
@@ -199,6 +200,16 @@ Lỗi thanh toán và đối soát (Day 49C, Decision 15, ADR-010):
 - **Key hết hạn, bất biến thì không**: xoá key `COMPLETED` sau 24 h; gửi lại → booking `CONFIRMED` trả `409`, `UQ_payments_booking_succeeded` chặn trừ lần hai.
 - Đo (e2e, timeout 4 s, delay 2 s): `tok_lost_response` → `202` sau 4,0 s; cùng key `409` trong 7 ms; sau job → `201` phát lại. Huỷ lúc đang trừ tiền → `409` sau **2,0 s** (Day 49B: 16 s vì chờ refund).
 
+Huỷ chuyến bay dây chuyền (Day 52, Decision 18, ADR-011):
+
+- **Phương án B**: một transaction ngắn đổi chuyến sang `CANCELLED` (compare-and-set + audit), **không** chạm ghế/booking/thanh toán; từ lúc commit `onSaleSql` từ chối mọi câu giữ ghế. Job 30 s huỷ từng booking sống, mỗi booking một transaction, claim `FOR UPDATE SKIP LOCKED`.
+- **Điều khiển bởi trạng thái** (tiền thân Saga): "chuyến `CANCELLED` còn booking sống" chính là việc còn lại → crash thì chạy lại là tiếp, hai instance không giẫm nhau, không cần dedupe event.
+- **Lõi huỷ dùng chung** (`createCancelBookingInTransaction`), lý do là tham số: `CUSTOMER` giữ mốc 24 h; `AIRLINE` bỏ mốc nhưng **đòi** chuyến `CANCELLED`. Lưu ở `cancellation_reason` (CHECK có ⇔ `CANCELLED`).
+- **Thanh toán thua chuyến đã huỷ**: `confirmHold` thêm CTE `flight` `FOR SHARE` + `status <> 'CANCELLED'`. Pha 3 chờ sau `UPDATE` chưa commit của lệnh huỷ → đọc lại bản mới → 0 dòng → hoàn tiền. Đối chứng B': câu cũ xác nhận được trên chuyến đã huỷ.
+- **Thí nghiệm deadlock**: phương án A (chỉ trong test) ép thứ tự với câu giữ ghế 12A → `40P01` **3/3**; lệnh huỷ thật cùng xen kẽ → 0. Không ép: 0 deadlock nhưng **không câu giữ ghế nào bị từ chối** — vì câu giữ ghế tới sau được `FOR SHARE` ngay, chen trước `UPDATE` đang chờ (đã ép thành test "A (queue)").
+- Đo (100 booking đã trả): B giữ dòng chuyến 3–8 ms, mỗi transaction job median 5–9 ms; A giữ 536–601 ms và người giữ ghế cùng chuyến chờ đúng chừng đó. **Tổng thời gian như nhau** — B mua được khoá ngắn, không mua tốc độ.
+- Bất biến mới: `AIRLINE` chỉ trên chuyến `CANCELLED`; không `BOOKING_CONFIRMED` sau `FLIGHT_CANCELLED` (so `occurred_at` → test phải dùng **đồng hồ tăng dần**); hàm riêng "dây chuyền xong" (không phải bất biến toàn cục — trong khoảng trung gian nó sai là đúng).
+
 ### 2.5 Migration an toàn
 
 - **Expand → backfill → contract** (Day 44, 46, 47, 48A): thêm cột nullable → điền dữ liệu → khối `DO` **đối soát và từ chối kèm danh sách + HINT** thay vì xoá dữ liệu, rồi mới `NOT NULL`/drop.
@@ -294,6 +305,11 @@ Lỗi thanh toán và đối soát (Day 49C, Decision 15, ADR-010):
 28. Fixture "chuyến 0 ghế" từng nghĩa là "hết chỗ"; khi thêm kiểm tra hạng nó thành "không có hạng này". Hết chỗ thật = có ghế nhưng đã bị giữ (Day 51).
 29. Ghi file JSON bằng `json.dumps` định dạng lại cả file Postman (352 dòng diff cho 11 thay đổi) → sửa theo **chuỗi văn bản** để diff đúng chỗ (Day 51).
 30. Route `/api/flights/search` phải khai báo **trước** `/api/flights/:id`, không thì `search` bị hiểu là id (Day 51).
+31. `dataSource.query("UPDATE … RETURNING …")` của TypeORM trả `[rows, count]`, không phải `rows` → bọc trong CTE `WITH x AS (UPDATE …) SELECT … FROM x` (Day 52).
+32. Gọi một use case **bên trong** callback của transaction khác (kể cả "chỉ để bắt đầu") → nó thừa hưởng ngữ cảnh `AsyncLocalStorage` → `NestedTransactionError`. Bắt đầu từ bên ngoài, dùng cổng để chờ (Day 52).
+33. Bất biến so thời gian trong audit vô dụng khi test dùng **một mốc giờ cố định** cho mọi sự kiện — hai mốc bằng nhau không phân thứ tự được (Day 52).
+34. Số hiệu chuyến + giờ bay vẫn unique khi chuyến đã huỷ → chạy lại folder Postman bị `409 FLIGHT_ALREADY_EXISTS`; máy bay thì được giải phóng (Day 52).
+35. Test race "không ép thứ tự" pass mà chưa chạm tới vế cần kiểm: 50 vòng không câu giữ ghế nào bị từ chối. Đếm kết quả từng loại, và ép thứ tự cho vế còn thiếu (Day 52).
 
 ---
 
@@ -329,11 +345,15 @@ Lỗi thanh toán và đối soát (Day 49C, Decision 15, ADR-010):
 28. Vì sao tìm kiếm dùng keyset mà danh sách admin vẫn OFFSET? Cursor chứa gì, vì sao cần hash, vì sao không cần khoá bí mật?
 29. Vì sao "còn 2 chỗ" phải trong **một hạng**, và vì sao câu giữ ghế tự động cũng phải đổi theo?
 30. Differential test bắt được gì mà contract test dễ bỏ sót? Vì sao bộ lọc ngây thơ không được dùng chung hàm với code production?
+31. Vì sao request huỷ chuyến không huỷ luôn các booking? Ba lý do (khoá, thứ tự khoá, phục hồi) và cái giá phải trả là gì?
+32. Job dây chuyền an toàn khi chạy hai instance, hoặc chạy lại sau crash, nhờ những gì?
+33. Vì sao bỏ mốc 24 h bằng **lý do huỷ** chứ không bằng cờ `force`? `AIRLINE` còn đòi thêm điều kiện gì?
+34. Pha 3 thanh toán chạy đúng lúc chuyến bị huỷ: ba thứ tự có thể xảy ra, mỗi cái kết thúc thế nào? Vì sao phải `FOR SHARE` mà không chỉ JOIN?
 
 ---
 
 ## 5. Tiếp theo
 
-**Day 52** (phase D bước 9): huỷ chuyến bay dây chuyền — huỷ mọi booking, giải phóng ghế, hoàn tiền qua đối soát, thông báo; nơi giả thuyết deadlock từ review Day 47 được kiểm chứng.
+**Day 53**: retrospective giai đoạn D, chuẩn bị giai đoạn E (không code): nhìn lại bằng chứng (số đo tìm kiếm, mức lặp giữa các use case, số job/pipeline chung) để đánh giá CQRS + Mediator trung thực. Câu hỏi đầu tiên: bước 10 của phase D (báo cáo admin chỉ đọc) làm trước retrospective hay chuyển sang E?
 
-Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [flight-search-local-dates-and-keyset.md](../flight-search-local-dates-and-keyset.md), [payments-and-idempotency-keys.md](../payments-and-idempotency-keys.md) (có mục Day 49C), [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008/009/010, domain-model Decision 16–17, `.cursor/progress/DAY-*.md`.
+Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [flight-cancellation-cascade.md](../flight-cancellation-cascade.md), [flight-search-local-dates-and-keyset.md](../flight-search-local-dates-and-keyset.md), [payments-and-idempotency-keys.md](../payments-and-idempotency-keys.md) (có mục Day 49C), [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008/009/010/011, domain-model Decision 16–18, `.cursor/progress/DAY-*.md`.

@@ -4,7 +4,7 @@ Thư mục riêng cho ghi chú **bằng tiếng Việt**, dùng để ôn lại 
 Các note tiếng Anh ở thư mục cha (`docs/learnings/*.md`) vẫn là bản gốc đi sâu từng kỹ thuật;
 ở đây là bản tóm lược, theo kiểu "hỏi gì → trả lời gì → code ở đâu".
 
-Cập nhật đến **Day 51** (2026-11-04).
+Cập nhật đến **Day 52** (2026-11-12).
 
 **Quy tắc:** cứ xong một ngày implement là cập nhật thư mục này (ghi trong `CLAUDE.md`, mục
 "After a day is completed"): thêm dòng vào dòng thời gian, file race condition / phỏng vấn / use case
@@ -14,7 +14,7 @@ Cập nhật đến **Day 51** (2026-11-04).
 
 ```text
 vietnamese/
-├── on-tap-nhanh-day-01-51.md       bản đồ tổng: dòng thời gian Day 1 → 51, bẫy đã gặp
+├── on-tap-nhanh-day-01-52.md       bản đồ tổng: dòng thời gian Day 1 → 52, bẫy đã gặp
 ├── race-conditions/                từng cách chống race condition trong project
 │   ├── README.md                   bảng chọn kỹ thuật theo tình huống
 │   ├── 01-occ-conditional-update.md
@@ -29,7 +29,8 @@ vietnamese/
 │   ├── 10-thanh-toan-ba-pha-va-idempotency-key.md
 │   ├── 11-doi-soat-thanh-toan-va-lease.md
 │   ├── 12-doi-ghe-va-huy-booking-da-tra-tien.md
-│   └── 13-ra-soat-snapshot-cau-lenh-cho-khoa.md
+│   ├── 13-ra-soat-snapshot-cau-lenh-cho-khoa.md
+│   └── 14-huy-chuyen-bay-day-chuyen-va-thi-nghiem-deadlock.md
 ├── interview/                      câu hỏi phỏng vấn + câu trả lời dựa trên project
 │   ├── README.md                   cách dùng + "câu chuyện 2 phút" về project
 │   ├── kien-truc-va-thiet-ke.md
@@ -41,7 +42,7 @@ vietnamese/
 │   └── van-hanh-docker-va-observability.md
 ├── migrations/                     thay đổi schema an toàn
 │   ├── README.md                   nguyên tắc: expand → backfill → contract, từ chối không xoá
-│   └── danh-sach.md                28 migration: làm gì, vì sao
+│   └── danh-sach.md                29 migration: làm gì, vì sao
 └── use-cases/                      từng use case: input → luồng → outcome → HTTP
     ├── README.md                   bảng tất cả endpoint
     ├── flights.md
@@ -55,7 +56,7 @@ vietnamese/
 
 | Muốn | Đọc |
 |---|---|
-| Nhớ lại cả project trong 10 phút | [on-tap-nhanh-day-01-51.md](./on-tap-nhanh-day-01-51.md) |
+| Nhớ lại cả project trong 10 phút | [on-tap-nhanh-day-01-52.md](./on-tap-nhanh-day-01-52.md) |
 | Ôn race condition | [race-conditions/README.md](./race-conditions/README.md) |
 | Chuẩn bị phỏng vấn | [interview/README.md](./interview/README.md) |
 | Trả lời "endpoint X làm gì, lỗi gì" | [use-cases/README.md](./use-cases/README.md) |
