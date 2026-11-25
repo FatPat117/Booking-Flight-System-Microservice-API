@@ -143,7 +143,7 @@ test("the cascade cancels a HELD, a paid CONFIRMED and a CONFIRMED with a PROCES
 
   const result = await r.cascade();
 
-  assert.deepEqual(result, { cancelled: 3, refundsStarted: 1, exhausted: false });
+  assert.deepEqual(result, { cancelled: 3, refundsStarted: 1, flightsCompleted: 1, exhausted: false });
   for (const id of [held, paid, pending]) {
     const booking = r.inner.peek(id);
     assert.equal(booking?.status, "CANCELLED");
@@ -230,7 +230,7 @@ test("the cascade leaves alone a lapsed hold, an already cancelled booking and e
   const onOpenFlight = await r.confirmed(openFlight);
   await r.cancelFlight(cancelledFlight);
 
-  assert.deepEqual(await r.cascade(), { cancelled: 0, refundsStarted: 0, exhausted: false });
+  assert.deepEqual(await r.cascade(), { cancelled: 0, refundsStarted: 0, flightsCompleted: 1, exhausted: false });
   assert.equal(r.inner.peek(lapsed)?.status, "HELD");
   assert.equal(r.inner.peek(byOwner)?.cancellationReason, "CUSTOMER");
   assert.equal(r.inner.peek(onOpenFlight)?.status, "CONFIRMED");
@@ -245,9 +245,9 @@ test("a run stops at maxPerRun and says so; the next run cancels the rest; a run
   }
   await r.cancelFlight(flight);
 
-  assert.deepEqual(await r.cascade(), { cancelled: 2, refundsStarted: 0, exhausted: true });
-  assert.deepEqual(await r.cascade(), { cancelled: 1, refundsStarted: 0, exhausted: false });
-  assert.deepEqual(await r.cascade(), { cancelled: 0, refundsStarted: 0, exhausted: false });
+  assert.deepEqual(await r.cascade(), { cancelled: 2, refundsStarted: 0, flightsCompleted: 0, exhausted: true });
+  assert.deepEqual(await r.cascade(), { cancelled: 1, refundsStarted: 0, flightsCompleted: 1, exhausted: false });
+  assert.deepEqual(await r.cascade(), { cancelled: 0, refundsStarted: 0, flightsCompleted: 0, exhausted: false });
   assert.equal(r.events.length, 3);
 });
 
@@ -258,4 +258,25 @@ test("a claimed booking the AIRLINE cancel does not take is a bug: the run throw
   });
 
   await assert.rejects(r.cascade(), /was not cancelled: not-found/);
+});
+
+test("a flight is marked complete only once nothing live is left on it, and a completed flight is never claimed again (Day 53)", async () => {
+  const r = runtime({ maxPerRun: 1 });
+  const flight = await r.newFlight();
+  const first = await r.hold(flight);
+  const second = await r.confirmed(flight);
+  await r.cancelFlight(flight);
+
+  // Stopped at the limit with one booking left: nothing is marked.
+  assert.deepEqual(await r.cascade(), { cancelled: 1, refundsStarted: 0, flightsCompleted: 0, exhausted: true });
+  assert.equal(await r.inner.countLiveOnFlight(flight.id, NOW), 1);
+  // The last booking goes, then the empty claim marks the flight.
+  assert.deepEqual(await r.cascade(), { cancelled: 1, refundsStarted: 0, flightsCompleted: 0, exhausted: true });
+  assert.deepEqual(await r.cascade(), { cancelled: 0, refundsStarted: 0, flightsCompleted: 1, exhausted: false });
+  assert.equal(await r.inner.countLiveOnFlight(flight.id, NOW), 0);
+  for (const id of [first, second]) {
+    assert.equal(r.inner.peek(id)?.status, "CANCELLED");
+  }
+  // Marked once: the next run finds nothing to mark.
+  assert.deepEqual(await r.cascade(), { cancelled: 0, refundsStarted: 0, flightsCompleted: 0, exhausted: false });
 });

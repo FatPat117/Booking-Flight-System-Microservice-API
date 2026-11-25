@@ -10,6 +10,7 @@ import {
   type IdempotencyScope,
   type StoredResponse,
 } from "../idempotency/idempotency-repository.js";
+import type { FlightRepository } from "../flights/flight-repository.js";
 import type { Money } from "../money/money.js";
 import type { Logger } from "../observability/logger.js";
 import type { OutboxRepository } from "../outbox/outbox-repository.js";
@@ -72,6 +73,7 @@ export type PayForBooking = (
 
 type PayForBookingDependencies = {
   bookingRepository: BookingRepository;
+  flightRepository: FlightRepository;
   paymentRepository: PaymentRepository;
   idempotencyRepository: IdempotencyRepository;
   paymentGateway: PaymentGateway;
@@ -106,8 +108,8 @@ function isSameMoney(left: Money, right: Money): boolean {
  * US-PAY-01 in three phases around the gateway (Decision 14, ADR-009):
  *
  * 1. Transaction: claim the key; check the booking (scope, HELD, BR-PAY-07
- *    margin, BR-PAY-03 amount); record a PROCESSING payment and link it to
- *    the key.
+ *    margin, its flight not CANCELLED, BR-PAY-03 amount); record a
+ *    PROCESSING payment and link it to the key.
  * 2. No transaction: charge. Nothing is locked while the gateway works.
  * 3. Transaction: record the outcome and complete the key with its
  *    response — SettlePayment, the same code reconciliation runs
@@ -125,6 +127,7 @@ export function createPayForBooking(
 ): PayForBooking {
   const {
     bookingRepository,
+    flightRepository,
     paymentRepository,
     idempotencyRepository,
     paymentGateway,
@@ -189,6 +192,23 @@ export function createPayForBooking(
           ? "under-margin"
           : "not-held";
       return answer(keyScope, key, { outcome: "not-payable", reason }, now);
+    }
+
+    // Not "on sale": a CLOSED flight's valid hold stays payable (BR-PAY-06).
+    // Read without a lock, so a cancel committing after this read is caught
+    // by phase 3, which shares the flight row (Decision 18) — this check only
+    // spares the gateway call when the cancel is already visible.
+    const flight = await flightRepository.findById(booking.flightId);
+    if (flight === undefined) {
+      throw new Error(`Booking ${booking.id} has no flight ${booking.flightId}`);
+    }
+    if (flight.status === "CANCELLED") {
+      return answer(
+        keyScope,
+        key,
+        { outcome: "not-payable", reason: "flight-cancelled" },
+        now,
+      );
     }
 
     if (!isSameMoney(request.amount, booking.total)) {

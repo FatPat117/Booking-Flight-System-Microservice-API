@@ -25,7 +25,7 @@ function jobReturning(result: CascadeFlightCancellationsResult) {
 }
 
 test("flight cancellation cascade job logs nothing when no cancelled flight has a live booking", async () => {
-  const { job, entries } = jobReturning({ cancelled: 0, refundsStarted: 0, exhausted: false });
+  const { job, entries } = jobReturning({ cancelled: 0, refundsStarted: 0, flightsCompleted: 0, exhausted: false });
 
   await job.handler();
 
@@ -35,16 +35,30 @@ test("flight cancellation cascade job logs nothing when no cancelled flight has 
 });
 
 test("flight cancellation cascade job logs what it cancelled, and warns when a run hit its limit", async () => {
-  const done = jobReturning({ cancelled: 3, refundsStarted: 2, exhausted: false });
+  const done = jobReturning({ cancelled: 3, refundsStarted: 2, flightsCompleted: 1, exhausted: false });
   await done.job.handler();
   assert.deepEqual(done.entries, [
-    { level: "info", message: "flight_cancellation_cascaded", fields: { cancelled: 3, refundsStarted: 2 } },
+    { level: "info", message: "flight_cancellation_cascaded", fields: { cancelled: 3, refundsStarted: 2, flightsCompleted: 1 } },
   ]);
 
-  const backlog = jobReturning({ cancelled: 500, refundsStarted: 410, exhausted: true });
+  const backlog = jobReturning({ cancelled: 500, refundsStarted: 410, flightsCompleted: 0, exhausted: true });
   await backlog.job.handler();
   assert.deepEqual(backlog.entries, [
-    { level: "info", message: "flight_cancellation_cascaded", fields: { cancelled: 500, refundsStarted: 410 } },
+    { level: "info", message: "flight_cancellation_cascaded", fields: { cancelled: 500, refundsStarted: 410, flightsCompleted: 0 } },
     { level: "warn", message: "flight_cancellation_cascade_backlog", fields: { cancelled: 500 } },
+  ]);
+});
+
+test("flight cancellation cascade job logs a run that only marked flights complete", async () => {
+  const { job, entries } = jobReturning({ cancelled: 0, refundsStarted: 0, flightsCompleted: 2, exhausted: false });
+
+  await job.handler();
+
+  assert.deepEqual(entries, [
+    {
+      level: "info",
+      message: "flight_cancellation_cascaded",
+      fields: { cancelled: 0, refundsStarted: 0, flightsCompleted: 2 },
+    },
   ]);
 });

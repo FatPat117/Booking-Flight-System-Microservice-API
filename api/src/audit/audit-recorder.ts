@@ -59,7 +59,9 @@ export type AuditAction =
   | "PAYMENT_REFUNDED"
   | "PAYMENT_REFUND_FAILED"
   | "AIRPORT_REGISTERED"
-  | "AIRCRAFT_REGISTERED";
+  | "AIRCRAFT_REGISTERED"
+  /** Day 53: an admin read a flight's manifest (personal data, Decision 19). */
+  | "FLIGHT_MANIFEST_VIEWED";
 
 export type AuditMetadata = Record<
   string,

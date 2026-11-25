@@ -62,3 +62,27 @@ nào, không nói ai giữ.
 **Trả lời:** Một claim role duy nhất, chưa có refresh token; đổi role chỉ có hiệu lực ở lần login
 sau (token cũ giữ role cũ tới khi hết hạn); secret dùng chung qua `.env`, chưa có vault/rotation;
 chưa rate limit (phase H).
+
+### 10. API admin vẫn trả dữ liệu cá nhân — bạn giới hạn thế nào? (Day 53)
+
+**Trả lời:** Manifest chỉ trả 4 trường mà việc lên máy bay cần: mã đặt chỗ, tên, ghế, hạng. Không
+trả giá, owner, email hay id booking. Booking đang giữ chỉ được đếm, không ghi tên.
+
+**Việc xem** cũng được ghi audit (`FLIGHT_MANIFEST_VIEWED`, chỉ có số lượng, không có tên) trong một
+transaction riêng. Nếu ghi audit lỗi thì không gửi manifest, nên không có lần xem nào lọt khỏi audit.
+
+Log request không bao giờ chứa body.
+
+**Bằng chứng:**
+- API test kiểm tra đúng tập key của mỗi hành khách.
+- Một test đọc toàn bộ dòng log của request manifest và không thấy tên nào.
+- Trên stack docker, log của app và notifier sau e2e có 0 lần xuất hiện tên hành khách.
+
+### 11. Cursor chỉ là SHA-256, không có khoá bí mật — dùng cho dữ liệu riêng tư có ổn không? (Day 53)
+
+**Trả lời:** Ổn trong trường hợp này. Cursor chỉ mang **vị trí**, còn bộ lọc luôn lấy từ request.
+Người gọi là admin, vốn chạy được mọi bộ lọc, nên cursor giả chỉ nhảy tới một vị trí trong truy vấn
+mà họ đã có quyền chạy. Hash có tác dụng chặn việc dùng nhầm cursor của bộ lọc khác (`400`).
+
+Quy tắc phải giữ: nếu có role hẹp hơn, giới hạn của role đó nằm trong `WHERE`, **không bao giờ**
+nằm trong cursor.

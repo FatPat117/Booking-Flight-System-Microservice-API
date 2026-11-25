@@ -1,8 +1,8 @@
-# Ôn tập nhanh: Day 1 → Day 52
+# Ôn tập nhanh: Day 1 → Day 53
 
 > Sổ tay tiếng Việt để đọc lại nhanh. Mỗi mục gồm: **vấn đề → cách xử lý → vì sao**, kèm đường dẫn tới code thật.
 > Các note tiếng Anh khác trong `docs/learnings/` đi sâu từng chủ đề; file này là bản đồ tổng.
-> Cập nhật đến: **Day 52** (2026-11-12). Số test hiện tại: api unit 614, integration 292 (trên `booking_test`), notifier 20, identity 12 + integration 7 (trên `identity_test`).
+> Cập nhật đến: **Day 53** (2026-11-25). Số test hiện tại: api unit 640, integration 309 (trên `booking_test`), notifier 20, identity 12 + integration 7 (trên `identity_test`). Postman: cả collection (206 request) chạy lại được bằng `./postman/run-all.sh`.
 
 ---
 
@@ -103,6 +103,7 @@ Quy ước code cốt lõi (nhớ để đọc code nhanh):
 | 50 | Huỷ trong 24 h + hoàn tiền; đổi ghế | Mốc `departure_at − 24h > now` trong câu huỷ (đúng 24 h là đóng); huỷ đã trả tiền → `SUCCEEDED → REFUND_PENDING` **cùng transaction**, job đối soát hoàn; đổi ghế `PUT` "đặt thành X" (idempotent tự nhiên), khoá **hai ghế theo (row, letter)**; race test lộ lỗi **snapshot của câu lệnh** trong câu huỷ cũ; hàm bất biến toàn cục được chứng minh bắt dữ liệu hỏng |
 | 51 | Tìm chuyến bay + chi tiết theo hạng | "Ngày bay" là **ngày địa phương của sân bay đi**, đổi thành khoảng UTC **từ tham số** (cột để trần → dùng được index); "còn N chỗ" = N ghế **trong một hạng**, giữ ghế tự động phải có `fareClass`; **keyset** thay OFFSET (OFFSET bỏ sót một chuyến khi dữ liệu đổi giữa hai trang — đo được); đo trên 20 400 chuyến / 3,9 triệu ghế: đếm trực tiếp 4,8 ms, **chưa cần read model**; **differential test** với bộ lọc ngây thơ, 50 seed |
 | 52 | Huỷ chuyến bay dây chuyền | Request admin **chỉ đổi dòng chuyến bay** (vài ms); job điều khiển bởi **trạng thái** huỷ từng booking một transaction, `SKIP LOCKED`, dùng lại **lõi huỷ** với lý do `AIRLINE` (lý do là **dữ liệu**, không phải cờ `force`); `confirmHold` khoá chia sẻ chuyến, thua khi chuyến đã huỷ; **giả thuyết deadlock Day 47 đúng với phương án A** (đối chứng 3/3 `40P01`), phương án B 0; đo: giữ dòng chuyến 3–8 ms vs 536–601 ms; phát hiện câu giữ ghế mới **chen trước** `UPDATE` đang chờ |
+| 53 | Báo cáo admin chỉ đọc (bước 10, **giai đoạn D xong**) | Port đọc thứ hai `AdminReports`: manifest (chỉ `CONFIRMED`, 4 trường, **xem là ghi audit**), tỷ lệ lấp đầy theo ngày địa phương, audit log có lọc bắt buộc. Báo cáo nhiều câu chạy trong **`REPEATABLE READ READ ONLY`** (race test: READ COMMITTED cho "3 ghế bán / 1 hành khách"). Index audit **sinh ra cùng truy vấn**, tạo `CONCURRENTLY`. Bảng bằng chứng phía đọc cho Day 54: mọi truy vấn < 12 ms, chỗ lặp nằm ở phía ghi. |
 
 ---
 
@@ -210,6 +211,14 @@ Huỷ chuyến bay dây chuyền (Day 52, Decision 18, ADR-011):
 - Đo (100 booking đã trả): B giữ dòng chuyến 3–8 ms, mỗi transaction job median 5–9 ms; A giữ 536–601 ms và người giữ ghế cùng chuyến chờ đúng chừng đó. **Tổng thời gian như nhau** — B mua được khoá ngắn, không mua tốc độ.
 - Bất biến mới: `AIRLINE` chỉ trên chuyến `CANCELLED`; không `BOOKING_CONFIRMED` sau `FLIGHT_CANCELLED` (so `occurred_at` → test phải dùng **đồng hồ tăng dần**); hàm riêng "dây chuyền xong" (không phải bất biến toàn cục — trong khoảng trung gian nó sai là đúng).
 
+Báo cáo admin (Day 53, Decision 19):
+
+- **Một báo cáo, một snapshot**: ở READ COMMITTED mỗi **câu lệnh** có snapshot riêng → huỷ booking giữa hai câu của manifest cho "3 ghế bán" trên danh sách 1 người. Cách chữa: một câu duy nhất (tỷ lệ lấp đầy, audit) hoặc transaction **`REPEATABLE READ READ ONLY`** (manifest) — transaction chỉ đọc ở mức này **không bao giờ** lỗi serialization nên không cần thử lại. Race test có cổng chặn giữa hai câu + đối chứng READ COMMITTED + mutation.
+- **Snapshot dài cản vacuum** → mọi báo cáo có trần (một chuyến; 31 ngày và 50 chuyến/trang; 31 ngày hoặc một đối tượng và 100 dòng/trang), không chỉ vì độ trễ.
+- **Index theo truy vấn**: `audit_logs` không có index từ Day 38 vì chưa ai đọc. Truy vấn đầu tiên quyết định hình dạng: `(target_type, target_id, occurred_at DESC, id DESC)` và `(occurred_at DESC, id DESC)`; không có target/khoảng → `422 FILTER_REQUIRED`. Đo 300 000 dòng: 48,8 ms → **0,08 ms** (6 538 → 19 buffer). Actor không có index → lọc 31 ngày + một actor vẫn đọc ~51 000 dòng (giá phải trả, ghi rõ).
+- **Index không chữa được việc đếm**: load factor chọn chuyến qua index trong 5 buffer, rồi đếm ~9 400 ghế nằm trên **8 963 block** heap. Chữa thật = covering index hoặc bộ đếm theo hạng (một read model nhỏ) — chưa cần ở 50 chuyến/trang.
+- **Cột hoàn tất dây chuyền** `cascade_completed_at`: chỉ thêm cột chưa đủ — câu claim `ORDER BY booking.id` vẫn đi hết booking theo PK; đổi sang **`ORDER BY flight.id, booking.id`** thì planner đi từ partial index chuyến đang chờ: 39 213 → **1 buffer** khi không còn việc.
+
 ### 2.5 Migration an toàn
 
 - **Expand → backfill → contract** (Day 44, 46, 47, 48A): thêm cột nullable → điền dữ liệu → khối `DO` **đối soát và từ chối kèm danh sách + HINT** thay vì xoá dữ liệu, rồi mới `NOT NULL`/drop.
@@ -311,6 +320,11 @@ Huỷ chuyến bay dây chuyền (Day 52, Decision 18, ADR-011):
 34. Số hiệu chuyến + giờ bay vẫn unique khi chuyến đã huỷ → chạy lại folder Postman bị `409 FLIGHT_ALREADY_EXISTS`; máy bay thì được giải phóng (Day 52).
 35. Test race "không ép thứ tự" pass mà chưa chạm tới vế cần kiểm: 50 vòng không câu giữ ghế nào bị từ chối. Đếm kết quả từng loại, và ép thứ tự cho vế còn thiếu (Day 52).
 
+36. Race test có cổng chặn fail giữa chừng → transaction của cổng **còn mở** → `TRUNCATE` của test sau chờ mãi, cả bộ treo im lặng. Thêm `--test-timeout` + `--test-force-exit` để treo thành lỗi có tên (Day 53).
+37. newman `--export-collection` **không** xuất collection variable đặt lúc chạy, chỉ xuất environment → dữ liệu chia giữa hai lần newman phải để ở environment (Day 53).
+38. Thêm cột "đã xong" mà câu claim vẫn `ORDER BY booking.id LIMIT 1` → planner đi từ phía booking, đọc mọi booking sống; phải xem `EXPLAIN` chứ không đoán (Day 53).
+39. Thêm một ký tự vào cuối chuỗi base64 không làm hỏng nội dung (6 bit lẻ bị bỏ) → test "cursor hỏng" phải sửa ký tự **giữa** chuỗi (Day 53).
+
 ---
 
 ## 4. Câu hỏi tự kiểm tra
@@ -350,10 +364,15 @@ Huỷ chuyến bay dây chuyền (Day 52, Decision 18, ADR-011):
 33. Vì sao bỏ mốc 24 h bằng **lý do huỷ** chứ không bằng cờ `force`? `AIRLINE` còn đòi thêm điều kiện gì?
 34. Pha 3 thanh toán chạy đúng lúc chuyến bị huỷ: ba thứ tự có thể xảy ra, mỗi cái kết thúc thế nào? Vì sao phải `FOR SHARE` mà không chỉ JOIN?
 
+35. Báo cáo hai câu SQL tự mâu thuẫn thế nào ở READ COMMITTED? Vì sao `REPEATABLE READ READ ONLY` không cần thử lại, và vì sao báo cáo vẫn phải có trần?
+36. Khi nào nên tạo index cho bảng audit chỉ tăng? Hình dạng index lấy từ đâu, vì sao tạo `CONCURRENTLY`?
+37. Cursor của audit log chỉ là SHA-256, không có khoá bí mật — có an toàn cho dữ liệu riêng tư không? Điều kiện nào làm nó an toàn?
+38. Manifest là dữ liệu cá nhân dù chỉ admin xem: trả trường nào, ghi audit gì, và nếu ghi audit thất bại thì sao?
+
 ---
 
 ## 5. Tiếp theo
 
-**Day 53**: retrospective giai đoạn D, chuẩn bị giai đoạn E (không code): nhìn lại bằng chứng (số đo tìm kiếm, mức lặp giữa các use case, số job/pipeline chung) để đánh giá CQRS + Mediator trung thực. Câu hỏi đầu tiên: bước 10 của phase D (báo cáo admin chỉ đọc) làm trước retrospective hay chuyển sang E?
+**Day 54**: retrospective giai đoạn D, chuẩn bị giai đoạn E (không code): dùng bảng bằng chứng phía đọc của Day 53 (`.cursor/progress/DAY-53.md`) để đánh giá CQRS + Mediator trung thực và quyết định giai đoạn E bắt đầu từ đâu.
 
 Liên quan: [race-conditions/](./race-conditions/README.md), [interview/](./interview/README.md), [use-cases/](./use-cases/README.md); note tiếng Anh [flight-cancellation-cascade.md](../flight-cancellation-cascade.md), [flight-search-local-dates-and-keyset.md](../flight-search-local-dates-and-keyset.md), [payments-and-idempotency-keys.md](../payments-and-idempotency-keys.md) (có mục Day 49C), [money-and-price-snapshots.md](../money-and-price-snapshots.md), [hold-expiry-and-time-boundaries.md](../hold-expiry-and-time-boundaries.md), [all-or-nothing-holds-and-lock-ordering.md](../all-or-nothing-holds-and-lock-ordering.md), [object-level-authorization.md](../object-level-authorization.md), [exclusion-constraints.md](../exclusion-constraints.md), [outbox-and-relay.md](../outbox-and-relay.md); ADR-004/005/007/008/009/010/011, domain-model Decision 16–18, `.cursor/progress/DAY-*.md`.

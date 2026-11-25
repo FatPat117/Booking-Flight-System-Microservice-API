@@ -476,7 +476,7 @@ test("Test B1 — flight cancelled and cascaded while the gateway charges: phase
   const app = runtime({ gateway });
 
   assert.equal((await app.cancelFlight(flightId)).outcome, "cancelled");
-  assert.deepEqual(await app.cascade(), { cancelled: 1, refundsStarted: 0, exhausted: false });
+  assert.deepEqual(await app.cascade(), { cancelled: 1, refundsStarted: 0, flightsCompleted: 1, exhausted: false });
   // Still PROCESSING: the cascade moves only SUCCEEDED payments.
   assert.deepEqual(await paymentsFor(bookingId), ["PROCESSING"]);
 
@@ -503,7 +503,7 @@ test("Test B2 — flight cancelled while the gateway charges, cascade not yet ru
   assert.equal((await bookingOf(bookingId))?.status, "HELD");
   assert.deepEqual(await paymentsFor(bookingId), ["REFUND_PENDING"]);
 
-  assert.deepEqual(await app.cascade(), { cancelled: 1, refundsStarted: 0, exhausted: false });
+  assert.deepEqual(await app.cascade(), { cancelled: 1, refundsStarted: 0, flightsCompleted: 1, exhausted: false });
   assert.equal((await app.reconcile()).refunded, 1);
 
   assert.deepEqual(await bookingOf(bookingId), { status: "CANCELLED", cancellation_reason: "AIRLINE" });
@@ -568,7 +568,7 @@ test("Test B4 — phase 3 first: its flight share lock makes the cancel wait; th
   assert.ok(cancelled.outcome === "cancelled");
   assert.equal(cancelled.remainingBookings, 1);
 
-  assert.deepEqual(await app.cascade(), { cancelled: 1, refundsStarted: 1, exhausted: false });
+  assert.deepEqual(await app.cascade(), { cancelled: 1, refundsStarted: 1, flightsCompleted: 1, exhausted: false });
   assert.equal((await app.reconcile()).refunded, 1);
   assert.deepEqual(await bookingOf(bookingId), { status: "CANCELLED", cancellation_reason: "AIRLINE" });
   assert.deepEqual(await paymentsFor(bookingId), ["REFUNDED"]);
@@ -611,11 +611,12 @@ test("Test C1 — the owner's cancel holds the booking: the cascade skips it wit
   const owner = runtime({ gateway, transactionRunner: pausing.runner }).cancelBooking(bookingId);
   await pausing.workDone;
 
-  // SKIP LOCKED: the cascade does not queue behind the owner.
-  assert.deepEqual(await app.cascade(), { cancelled: 0, refundsStarted: 0, exhausted: false });
+  // SKIP LOCKED: the cascade does not queue behind the owner. The booking
+  // is still live in its snapshot, so the flight is not marked complete.
+  assert.deepEqual(await app.cascade(), { cancelled: 0, refundsStarted: 0, flightsCompleted: 0, exhausted: false });
   pausing.commit();
   assert.equal((await owner).outcome, "cancelled");
-  assert.deepEqual(await app.cascade(), { cancelled: 0, refundsStarted: 0, exhausted: false });
+  assert.deepEqual(await app.cascade(), { cancelled: 0, refundsStarted: 0, flightsCompleted: 1, exhausted: false });
 
   assert.equal((await app.reconcile()).refunded, 1);
   assert.deepEqual(await bookingOf(bookingId), { status: "CANCELLED", cancellation_reason: "CUSTOMER" });
@@ -802,6 +803,7 @@ test("Test F — the cascade stops after 4 of 10 bookings (fault injected); the 
   assert.deepEqual(await app.cascade(), {
     cancelled: 6,
     refundsStarted: 4 - refundsBeforeCrash,
+    flightsCompleted: 1,
     exhausted: false,
   });
   assert.equal(await auditCount("BOOKING_CANCELLED"), 10);

@@ -164,8 +164,11 @@ claim `claimLiveBookingOfCancelledFlight` trong repository.
 - Không gọi gateway: payment `SUCCEEDED → REFUND_PENDING`, job đối soát hoàn tiền. Payment đang
   `PROCESSING` để nguyên: nếu tiền về, pha 3 thấy chuyến/booking đã huỷ → hoàn.
 - Claim được mà lõi không huỷ được → throw (hai điều kiện lệch nhau là bug, không bỏ qua im lặng).
-- Kết quả `{ cancelled, refundsStarted, exhausted }`; log `flight_cancellation_cascaded`, warn
+- Kết quả `{ cancelled, refundsStarted, flightsCompleted, exhausted }`; log `flight_cancellation_cascaded`, warn
   `flight_cancellation_cascade_backlog`.
+- Day 53: claim rỗng → đánh dấu `cascade_completed_at` cho chuyến đã huỷ không còn booking sống (vĩnh
+  viễn, vì chuyến `CANCELLED` không thể có booking sống mới). Claim chỉ đọc chuyến chưa xong, `ORDER BY
+  flight.id, booking.id` để planner đi từ partial index: 39 213 → 1 buffer khi hết việc.
 
 **Vì sao điều khiển bởi trạng thái:** "chuyến `CANCELLED` còn booking sống" chính là việc còn lại →
 crash thì lần sau làm tiếp, hai instance thì `SKIP LOCKED` tách nhau, không cần dedupe event.
@@ -201,6 +204,7 @@ Pha 1 (tx)   claim key ─┬─ đã COMPLETED, cùng fingerprint → phát l�
                         └─ IN_PROGRESS                      → 409 IDEMPOTENCY_KEY_IN_PROGRESS
              đọc booking (scope chủ)  không thấy            → lưu 404
              không HELD / còn ≤ 60 s                         → lưu 409 BOOKING_NOT_PAYABLE
+             chuyến CANCELLED (Day 53, không phải CLOSED)    → lưu 409 BOOKING_NOT_PAYABLE, không gọi gateway
              amount ≠ total                                  → 422 PAYMENT_AMOUNT_MISMATCH (release key)
              INSERT payment PROCESSING ─ đã có PROCESSING    → 409 PAYMENT_IN_PROGRESS (release key)
              gắn payment vào key

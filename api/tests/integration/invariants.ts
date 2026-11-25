@@ -88,6 +88,17 @@ const CHECKS: readonly Check[] = [
           WHERE b."cancellation_reason" = 'AIRLINE' AND f."status" <> 'CANCELLED'`,
   },
   {
+    // Day 53: a flight marked complete has nothing left for the cascade —
+    // no CONFIRMED booking, no hold still valid when it was marked. Without
+    // a clock: a lapsed hold left for the expiry job is allowed.
+    name: "a flight whose cascade is complete has no live booking",
+    sql: `SELECT f."flight_number", b."reference", b."status"
+          FROM "flights" f JOIN "bookings" b ON b."flight_id" = f."id"
+          WHERE f."cascade_completed_at" IS NOT NULL
+            AND (b."status" = 'CONFIRMED'
+                 OR (b."status" = 'HELD' AND b."hold_expires_at" > f."cascade_completed_at"))`,
+  },
+  {
     // Decision 18: once a flight is cancelled, no booking on it is confirmed.
     // Ordered by the audit's occurred_at, so a test relying on it must use a
     // clock that moves: two events at one fixed instant cannot be ordered.

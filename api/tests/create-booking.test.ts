@@ -663,6 +663,10 @@ test("a malformed flight id is flight-not-found, never sent to the repository", 
       repositoryCalls += 1;
       return undefined;
     },
+    async completeFlightCancellations() {
+      repositoryCalls += 1;
+      return 0;
+    },
   };
 
   const createBooking = createCreateBooking({

@@ -11,14 +11,17 @@
     "build": "tsc",
     "start": "node --env-file-if-exists=../.env --env-file-if-exists=.env dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test --test-reporter=spec tests/*.test.ts",
+    "test": "node --import tsx --test --test-reporter=spec --test-timeout=60000 tests/*.test.ts",
     "test:watch": "node --import tsx --test --watch tests/*.test.ts",
     "typecheck:test": "tsc -p tsconfig.test.json",
     "postgres:migration:run": "node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx ./src/postgres/run-migrations.ts",
     "seed:reference": "node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx ./src/postgres/seed-reference-data.ts",
     "perf:search:seed": "BOOKING_POSTGRES_DB=booking_test node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --import ./tests/integration/require-test-database.ts ./tests/perf/generate-search-volume.ts",
     "perf:search:explain": "BOOKING_POSTGRES_DB=booking_test node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --import ./tests/integration/require-test-database.ts ./tests/perf/explain-search.ts",
-    "test:integration": "BOOKING_POSTGRES_DB=booking_test node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --import ./tests/integration/require-test-database.ts --test --test-reporter=spec --test-concurrency=1 tests/integration/*.test.ts"
+    "perf:reports:seed": "BOOKING_POSTGRES_DB=booking_test node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --import ./tests/integration/require-test-database.ts ./tests/perf/generate-audit-volume.ts",
+    "perf:reports:explain": "BOOKING_POSTGRES_DB=booking_test node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --import ./tests/integration/require-test-database.ts ./tests/perf/explain-reports.ts",
+    "perf:reads:measure": "BOOKING_POSTGRES_DB=booking_test node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --import ./tests/integration/require-test-database.ts ./tests/perf/measure-reads.ts",
+    "test:integration": "BOOKING_POSTGRES_DB=booking_test node --env-file-if-exists=../.env --env-file-if-exists=.env --import tsx --import ./tests/integration/require-test-database.ts --test --test-reporter=spec --test-concurrency=1 --test-timeout=120000 --test-force-exit tests/integration/*.test.ts"
   },
   "dependencies": {
     "@booking-flight-system/contracts": "*",

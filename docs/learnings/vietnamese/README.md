@@ -4,7 +4,7 @@ Thư mục riêng cho ghi chú **bằng tiếng Việt**, dùng để ôn lại 
 Các note tiếng Anh ở thư mục cha (`docs/learnings/*.md`) vẫn là bản gốc đi sâu từng kỹ thuật;
 ở đây là bản tóm lược, theo kiểu "hỏi gì → trả lời gì → code ở đâu".
 
-Cập nhật đến **Day 52** (2026-11-12).
+Cập nhật đến **Day 53** (2026-11-25).
 
 **Quy tắc:** cứ xong một ngày implement là cập nhật thư mục này (ghi trong `CLAUDE.md`, mục
 "After a day is completed"): thêm dòng vào dòng thời gian, file race condition / phỏng vấn / use case
@@ -14,7 +14,7 @@ Cập nhật đến **Day 52** (2026-11-12).
 
 ```text
 vietnamese/
-├── on-tap-nhanh-day-01-52.md       bản đồ tổng: dòng thời gian Day 1 → 52, bẫy đã gặp
+├── on-tap-nhanh-day-01-53.md       bản đồ tổng: dòng thời gian Day 1 → 52, bẫy đã gặp
 ├── race-conditions/                từng cách chống race condition trong project
 │   ├── README.md                   bảng chọn kỹ thuật theo tình huống
 │   ├── 01-occ-conditional-update.md
@@ -56,7 +56,7 @@ vietnamese/
 
 | Muốn | Đọc |
 |---|---|
-| Nhớ lại cả project trong 10 phút | [on-tap-nhanh-day-01-52.md](./on-tap-nhanh-day-01-52.md) |
+| Nhớ lại cả project trong 10 phút | [on-tap-nhanh-day-01-53.md](./on-tap-nhanh-day-01-53.md) |
 | Ôn race condition | [race-conditions/README.md](./race-conditions/README.md) |
 | Chuẩn bị phỏng vấn | [interview/README.md](./interview/README.md) |
 | Trả lời "endpoint X làm gì, lỗi gì" | [use-cases/README.md](./use-cases/README.md) |

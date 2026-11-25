@@ -30,7 +30,7 @@ const SORTS: readonly FlightSearchSort[] = ["departure", "price"];
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** A calendar date that exists (`2026-02-30` does not), as days since the epoch. */
-function parseLocalDate(value: string): number | undefined {
+export function parseLocalDate(value: string): number | undefined {
   const match = LOCAL_DATE.exec(value);
   if (match === null) return undefined;
   const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];

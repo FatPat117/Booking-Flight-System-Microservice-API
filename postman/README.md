@@ -7,6 +7,37 @@ Import these files into Postman (or re-import if you already had an older collec
 
 Select the **Booking Microservices — Local** environment before sending requests.
 
+## Run the whole collection (Day 53)
+
+```bash
+docker compose up -d                                         # postgres, rabbitmq, app, flight-notifier
+npm run seed:reference --workspace=@booking-flight-system/api  # once per database
+./postman/run-all.sh                                         # any number of times, on any booking_db
+```
+
+The script starts identity on `:3001` if nothing answers there (and stops it afterwards), registers and
+promotes `alice@example.com`, then runs the collection with newman in two parts. Between them it moves
+the Day 48B hold past its deadline with psql (a hold lasts 15 minutes and that is not configurable).
+Expect about 4 minutes: the expiry, reconciliation and cascade jobs are waited for.
+
+**Why it runs again on the same database.** The first folder, **Setup — run data (Day 53)**, draws a
+run code (4 characters) and stores in the environment:
+
+| Variable | Value | Used for |
+|----------|-------|----------|
+| `run` | e.g. `K7QM` | suffix of every flight number (`VN461` → `{{fn_VN461}}` = `VN461K7QM`) |
+| `reg_A321`, `reg_A323`, `reg_A632`, `reg_A588`, `reg_B210` | `VN-A` + run, `VN-B` + run, … | a copy of each seeded aircraft's layout, registered by Setup, so no earlier run's flight makes the aircraft unavailable |
+| `origin`, `destination` | two unused airport codes | every flight that was SGN → HAN; the Day 51 and Day 52 searches see this run's flights only |
+| `day45Airport`, `day45AirportLower`, `reg_A322`, `reg_A322_lower` | unused codes | what Day 45 registers (201) and then registers again (409) |
+| `date_2026_11_20` … `date_2027_02_16` | the written date + a whole-day shift | the first date lands 30 days after today in Vietnam; times of day and the UTC/local pairs Day 51 checks are unchanged |
+
+Environment scope, not collection: newman exports the environment between the two parts, but not
+variables a script set on the collection. In Postman's app the same Setup folder works by hand: run it
+first, then any folder.
+
+alice must be `admin` (Setup checks with `GET /api/whoami`); `run-all.sh` promotes her, or once by hand:
+`npm run promote-to-admin --workspace=@booking-flight-system/identity -- alice@example.com`.
+
 ## Variables
 
 | Variable | Default | Notes |
@@ -43,6 +74,8 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 
 ## Suggested flow
 
+*Since Day 53:* run the **Setup** folder first (or `run-all.sh`). The flight numbers, dates and aircraft named below are what the requests were written with; each run now sends `<number><run>` on this run's aircraft copies and shifted dates, so the conditions "on a database without VNxxx on <date>" no longer apply, and neither does the cleanup SQL of earlier versions.
+
 1. **Identity** → `POST /api/identity/register` then promote:
    `npm run promote-to-admin --workspace=@booking-flight-system/identity -- your@email.com`
 2. **Identity** → `POST /api/identity/login` (saves `accessToken`)
@@ -69,21 +102,9 @@ npm run dev --workspace=@booking-flight-system/flight-notifier
 18. Folder **Day 49C — Payment failures** → the seed, alice's `accessToken`, bob's `userAccessToken`, and the app's reconciliation job running (docker compose `app` or `npm run dev`); run top to bottom on a database without VN496 on 2026-12-11. `tok_lost_response` answers `202` after the gateway timeout (`PAYMENT_GATEWAY_TIMEOUT_MS`, default 10 s); request 7 waits 75 s for the job, so the folder takes about 1.5 min. Headless like step 13
 19. Folder **Day 50 — Cancellation and seat change** → the seed (VN-A321, rows 1–2 BUSINESS), alice's `accessToken`, bob's `userAccessToken` and carol's `userBAccessToken`; run top to bottom on a database without VN501 on 2026-12-14. It pays, changes bob's seat 10A → 10C, repeats the change (the same `200`, nothing written), tries a BUSINESS seat (`409 FARE_CLASS_MISMATCH`) and carol's access (`404`), then cancels the paid booking (`200`, refund `REFUND_PENDING`). The 24 h window needs `departure_at` moved with psql: see README, Day 50. Headless like step 13. Since Day 50 a first cancel answers `200` with `{ booking, refund }`, not `204` (the Bookings, Day 47 and Day 48A requests were updated)
 20. Folder **Day 51 — Flight search and details** → the seed (VN-A321/A632/A323 with business rows 1–2, VN-A588 economy only), alice's `accessToken` and bob's `userAccessToken`; run top to bottom on a database without VN511–VN514 on 12–13 January 2027. It searches 12–13 January SGN→HAN for 2 passengers without a token (VN511 at 06:00 local is 23:00 UTC the day before and is still on the 12th; the `SCHEDULED` VN514 is left out; VN513 lands `+1`), sorts by price, follows a `nextCursor`, refuses the cursor with 3 passengers (`400 INVALID_CURSOR`) and an 8-day range with 10 passengers (`422`), reads VN511's details per class, and shows the auto hold's `fareClass` (`422 MISSING_FIELD`, `422 FARE_CLASS_NOT_ON_AIRCRAFT`, `201` on 3A + 3B). Headless like step 13. Since Day 51 every booking body without seats names `fareClass` (the older folders were updated: `BUSINESS` where they expected row 1, `ECONOMY` on VN-B210)
-21. Folder **Day 52 — Flight cancellation cascade** → the seed (VN-A588, 180 economy seats), alice's `accessToken` and bob's `userAccessToken`; run top to bottom on a database without VN522 on 2027-02-16 (flight number + departure stays unique for a cancelled flight: a second run gets `409 FLIGHT_ALREADY_EXISTS`). It holds 11A, holds and pays 11B, refuses the cancel to a user (`403`), cancels the flight (`200`, `remainingBookings: 2`) and cancels again (`200`), shows the flight `CANCELLED` and out of search, refuses a new hold (`409 SALES_CLOSED`), waits 32 s once for the cascade job, then finds both bookings `CANCELLED` with `cancellationReason: "AIRLINE"`, the seat map empty and `remainingBookings: 0`. The refund of 11B is made by the reconciliation job about 30 s later (check `payments` with psql). Headless like step 13. To run it again, delete VN522 first:
+21. Folder **Day 52 — Flight cancellation cascade** → the seed (VN-A588, 180 economy seats), alice's `accessToken` and bob's `userAccessToken`; run top to bottom on a database without VN522 on 2027-02-16 (flight number + departure stays unique for a cancelled flight: a second run gets `409 FLIGHT_ALREADY_EXISTS`). It holds 11A, holds and pays 11B, refuses the cancel to a user (`403`), cancels the flight (`200`, `remainingBookings: 2`) and cancels again (`200`), shows the flight `CANCELLED` and out of search, refuses a new hold (`409 SALES_CLOSED`), waits 32 s once for the cascade job, then finds both bookings `CANCELLED` with `cancellationReason: "AIRLINE"`, the seat map empty and `remainingBookings: 0`. The refund of 11B is made by the reconciliation job about 30 s later (check `payments` with psql). Headless like step 13.
 
-   ```sql
-   WITH f AS (SELECT "id" FROM "flights" WHERE "flight_number" = 'VN522' AND "departure_at" = '2027-02-16T01:00:00Z'),
-        b AS (SELECT "id" FROM "bookings" WHERE "flight_id" IN (SELECT "id" FROM f)),
-        p AS (SELECT "id" FROM "payments" WHERE "booking_id" IN (SELECT "id" FROM b)),
-        keys AS (DELETE FROM "idempotency_keys" WHERE "payment_id" IN (SELECT "id" FROM p)),
-        pay AS (DELETE FROM "payments" WHERE "id" IN (SELECT "id" FROM p)),
-        pas AS (DELETE FROM "booking_passengers" WHERE "booking_id" IN (SELECT "id" FROM b)),
-        seats AS (DELETE FROM "flight_seats" WHERE "flight_id" IN (SELECT "id" FROM f)),
-        fares AS (DELETE FROM "flight_fares" WHERE "flight_id" IN (SELECT "id" FROM f)),
-        bk AS (DELETE FROM "bookings" WHERE "id" IN (SELECT "id" FROM b))
-   SELECT count(*) AS "bookings" FROM b;
-   DELETE FROM "flights" WHERE "flight_number" = 'VN522' AND "departure_at" = '2027-02-16T01:00:00Z';
-   ```
+22. Folder **Day 53 — Admin reports** → after Setup (it builds its own flight on this run's A588 copy, on the shifted `date_2027_02_16` at 14:00 local), alice's `accessToken` and bob's `userAccessToken`. It books 5A + 5B (paid) and 6C (held), then: manifest `403` for bob, `200` for alice with only 5A and 5B (four fields each, the hold counted as `heldBookings: 1`, never named), `404` for an unknown flight; load factor for the flight's local date (`sold 2, held 1, available 177` of 180, `loadFactor 0.0111`) and `422` over 31 days; audit log `422 FILTER_REQUIRED` without a target or range, the manifest view audited with `{ passengerCount: 2 }` only, the paid booking's entries one per page through a `nextCursor`, `400 INVALID_CURSOR` for that cursor with another filter, `401` without a token. Part of `run-all.sh`.
 
 **Booking body since Day 48A:** `{ "passengers": [{ "name": "…", "seat": "12A" }] }` — 1 to 9 passengers, `seat` on every passenger or on none; without seats, `"fareClass": "ECONOMY"` or `"BUSINESS"` as well (Day 51). The old `{ "passengerName": … }` answers `422 UNSUPPORTED_FIELD`. A new booking is `HELD` (seats `HELD` on the map) and the notifier logs `booking_held_consumed`.
 

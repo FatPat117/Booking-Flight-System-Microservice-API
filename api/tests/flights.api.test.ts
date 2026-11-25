@@ -39,6 +39,7 @@ import {
   createInMemoryTransactionRunner,
   createUnusedBookingReads,
   createUnusedPayForBooking,
+  createUnusedAdminReports,
   createUnusedReferenceData,
   type InMemoryAuditRecorder,
   type InMemoryFlightStore,
@@ -211,6 +212,7 @@ function createAppWithRepository(
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
+    ...createUnusedAdminReports(),
     listFlights,
     searchFlights: createSearchFlights({
       flightSearch: createInMemoryFlightSearch(flights, TEST_AIRPORTS),

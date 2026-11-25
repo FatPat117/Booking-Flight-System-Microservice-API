@@ -74,6 +74,7 @@ const silentLogger: Logger = { info() {}, warn() {}, error() {} };
 function payForBookingWith(gateway: PaymentGateway, clock: { now: Date }) {
   return createPayForBooking({
     bookingRepository: createPostgresBookingRepository(dataSource),
+    flightRepository: createPostgresFlightRepository(dataSource),
     paymentRepository: createPostgresPaymentRepository(dataSource),
     idempotencyRepository: createPostgresIdempotencyRepository(dataSource),
     paymentGateway: gateway,

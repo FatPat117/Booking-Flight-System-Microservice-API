@@ -74,6 +74,15 @@ import type {
 import type { TransactionRunner } from "../../src/transactions/transaction-runner.js";
 import type { Flight } from "../../src/types.js";
 import { makeSeats, TEST_AIRCRAFT } from "../fixtures/flights.js";
+import type {
+  AdminReports,
+  AuditLogEntry,
+  ClassSeats,
+  ReportFlight,
+} from "../../src/reports/admin-reports.js";
+import type { GetFlightManifest } from "../../src/reports/get-flight-manifest.js";
+import type { GetLoadFactor } from "../../src/reports/get-load-factor.js";
+import type { QueryAuditLog } from "../../src/reports/query-audit-log.js";
 
 /**
  * In-memory fakes for the unit/HTTP test tier (Day 41).
@@ -252,6 +261,8 @@ export type InMemoryBookingRepository = BookingRepository &
   Readonly<{
     /** Test-only read that bypasses scopes — for asserting stored state. */
     peek(id: string): Booking | undefined;
+    /** Test-only: every booking as stored (the AdminReports fake reads them). */
+    all(): Booking[];
   }>;
 
 function isInScope(booking: Booking, scope: BookingAccessScope): boolean {
@@ -263,6 +274,17 @@ export function createInMemoryBookingRepository(deps: {
 }): InMemoryBookingRepository {
   const { flights, seats } = deps.flights;
   const bookings = new Map<string, Booking>();
+  /** Cancelled flights whose cascade is complete (flights.cascade_completed_at). */
+  const completedCancellations = new Set<string>();
+  const countLive = (flightId: string, now: Date) =>
+    [...bookings.values()].filter(
+      (booking) =>
+        booking.flightId === flightId &&
+        (booking.status === "CONFIRMED" ||
+          (booking.status === "HELD" &&
+            booking.holdExpiresAt !== null &&
+            !isHoldLapsed(booking.holdExpiresAt, now))),
+    ).length;
 
   const read = (booking: Booking): Booking => structuredClone(booking);
 
@@ -559,36 +581,53 @@ export function createInMemoryBookingRepository(deps: {
     },
 
     // No locks here: the fake is single-threaded, so "skip what another
-    // transaction holds" never applies. Lowest id first, like Postgres.
+    // transaction holds" never applies. Flight id, then booking id, like Postgres.
     async claimLiveBookingOfCancelledFlight(now) {
       const live = [...bookings.values()]
         .filter(
           (booking) =>
             flights.get(booking.flightId)?.status === "CANCELLED" &&
+            !completedCancellations.has(booking.flightId) &&
             (booking.status === "CONFIRMED" ||
               (booking.status === "HELD" &&
                 booking.holdExpiresAt !== null &&
                 !isHoldLapsed(booking.holdExpiresAt, now))),
         )
-        .map((booking) => booking.id)
-        .sort();
+        .sort((a, b) => {
+          const left = `${a.flightId}/${a.id}`;
+          const right = `${b.flightId}/${b.id}`;
+          return left < right ? -1 : left > right ? 1 : 0;
+        })
+        .map((booking) => booking.id);
       return live[0];
     },
 
+    async completeFlightCancellations(now) {
+      let completed = 0;
+      for (const [flightId, flight] of flights) {
+        if (
+          flight.status === "CANCELLED" &&
+          !completedCancellations.has(flightId) &&
+          countLive(flightId, now) === 0
+        ) {
+          completedCancellations.add(flightId);
+          completed += 1;
+        }
+      }
+      return completed;
+    },
+
     async countLiveOnFlight(flightId, now) {
-      return [...bookings.values()].filter(
-        (booking) =>
-          booking.flightId === flightId &&
-          (booking.status === "CONFIRMED" ||
-            (booking.status === "HELD" &&
-              booking.holdExpiresAt !== null &&
-              !isHoldLapsed(booking.holdExpiresAt, now))),
-      ).length;
+      return countLive(flightId, now);
     },
 
     peek(id) {
       const booking = bookings.get(id);
       return booking === undefined ? undefined : read(booking);
+    },
+
+    all() {
+      return [...bookings.values()].map(read);
     },
   };
 }
@@ -707,6 +746,156 @@ export function createInMemoryFlightSearch(
         items: ordered.slice(0, query.limit),
         hasNextPage: ordered.length > query.limit,
       };
+    },
+  };
+}
+
+/**
+ * The AdminReports fake (Day 53): the same answers as Postgres, reached
+ * another way — local dates through Intl like the FlightSearch fake, counts
+ * by walking the seats. tests/contracts/admin-reports.contract.ts holds the
+ * two together. One "snapshot" for free: the fake is single-threaded.
+ */
+export function createInMemoryAdminReports(deps: {
+  flights: InMemoryFlightStore;
+  bookings: InMemoryBookingRepository;
+  audit: InMemoryAuditRecorder;
+  airports: readonly Airport[];
+}): AdminReports {
+  const zoneOf = new Map(deps.airports.map((airport) => [airport.code, airport.timeZone]));
+
+  function localDate(instant: string, timeZone: string): string {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date(instant));
+  }
+
+  function reportFlight(flight: Omit<Flight, "availableSeats">): ReportFlight {
+    return {
+      id: flight.id,
+      flightNumber: flight.flightNumber,
+      origin: flight.origin,
+      originTimeZone: zoneOf.get(flight.origin) ?? "UTC",
+      destination: flight.destination,
+      departureAt: new Date(flight.departureAt).toISOString(),
+      status: flight.status,
+    };
+  }
+
+  function classesOf(flightId: string, now: Date): ClassSeats[] {
+    const byClass = new Map<FareClass, { total: number; booked: number; held: number; available: number }>();
+    for (const seat of deps.flights.seats.get(flightId) ?? []) {
+      const counts = byClass.get(seat.fareClass) ?? { total: 0, booked: 0, held: 0, available: 0 };
+      counts.total += 1;
+      const holder = seat.bookingId === null ? undefined : deps.bookings.peek(seat.bookingId);
+      const holdValid =
+        holder?.holdExpiresAt !== null &&
+        holder?.holdExpiresAt !== undefined &&
+        !isHoldLapsed(holder.holdExpiresAt, now);
+      if (seat.status === "BOOKED") counts.booked += 1;
+      else if (seat.status === "HELD" && holdValid) counts.held += 1;
+      else counts.available += 1;
+      byClass.set(seat.fareClass, counts);
+    }
+    return [...byClass.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([fareClass, counts]) => ({ fareClass, ...counts }));
+  }
+
+  const seatOrder = (seat: string | null): [number, string] => {
+    const match = seat === null ? null : /^(\d+)([A-Z])$/.exec(seat);
+    return match === null ? [Number.MAX_SAFE_INTEGER, ""] : [Number(match[1]), match[2] ?? ""];
+  };
+
+  return {
+    async findManifest(flightId, now) {
+      const flight = deps.flights.flights.get(flightId);
+      if (flight === undefined) return undefined;
+      const onFlight = deps.bookings.all().filter((booking) => booking.flightId === flightId);
+      const passengers = onFlight
+        .filter((booking) => booking.status === "CONFIRMED")
+        .flatMap((booking) =>
+          booking.passengers.map((passenger) => ({
+            reference: booking.reference,
+            name: passenger.name,
+            seat: passenger.seat,
+            fareClass: passenger.fareClass,
+          })),
+        )
+        .sort((a, b) => {
+          const [rowA, letterA] = seatOrder(a.seat);
+          const [rowB, letterB] = seatOrder(b.seat);
+          return rowA - rowB || (letterA < letterB ? -1 : letterA > letterB ? 1 : 0) || (a.reference < b.reference ? -1 : 1);
+        });
+      return {
+        flight: reportFlight(flight),
+        classes: classesOf(flightId, now),
+        heldBookings: onFlight.filter(
+          (booking) =>
+            booking.status === "HELD" &&
+            booking.holdExpiresAt !== null &&
+            !isHoldLapsed(booking.holdExpiresAt, now),
+        ).length,
+        passengers,
+      };
+    },
+
+    async loadFactor(query, now) {
+      const matches = [...deps.flights.flights.values()]
+        .filter((flight) => {
+          const zone = zoneOf.get(flight.origin);
+          if (zone === undefined) return false;
+          const date = localDate(flight.departureAt, zone);
+          return (
+            date >= query.dateFrom &&
+            date <= query.dateTo &&
+            (query.origin === undefined || flight.origin === query.origin)
+          );
+        })
+        .map((flight) => ({ ...reportFlight(flight), classes: classesOf(flight.id, now) }))
+        .filter(
+          (flight) =>
+            query.after === undefined ||
+            toInstant(flight.departureAt) > toInstant(query.after.at) ||
+            (toInstant(flight.departureAt) === toInstant(query.after.at) && flight.id > query.after.id),
+        )
+        .sort((a, b) => toInstant(a.departureAt) - toInstant(b.departureAt) || (a.id < b.id ? -1 : 1));
+      return { items: matches.slice(0, query.limit), hasNextPage: matches.length > query.limit };
+    },
+
+    async auditLog(query) {
+      const entries: AuditLogEntry[] = deps.audit.records
+        .filter(
+          (record) =>
+            (query.target === undefined ||
+              (record.target.type === query.target.type && record.target.id === query.target.id)) &&
+            (query.range === undefined ||
+              (toInstant(record.occurredAt) >= toInstant(query.range.from) &&
+                toInstant(record.occurredAt) < toInstant(query.range.to))) &&
+            (query.actorType === undefined || record.actor.type === query.actorType) &&
+            (query.actorId === undefined || record.actor.id === query.actorId) &&
+            (query.action === undefined || record.action === query.action),
+        )
+        .map((record) => ({
+          id: record.id,
+          action: record.action,
+          actor: { type: record.actor.type, id: record.actor.id },
+          target: { type: record.target.type, id: record.target.id },
+          requestId: record.requestId ?? null,
+          occurredAt: new Date(record.occurredAt).toISOString(),
+          metadata: record.metadata,
+        }))
+        .filter(
+          (entry) =>
+            query.after === undefined ||
+            toInstant(entry.occurredAt) < toInstant(query.after.at) ||
+            (toInstant(entry.occurredAt) === toInstant(query.after.at) && entry.id < query.after.id),
+        )
+        .sort((a, b) => toInstant(b.occurredAt) - toInstant(a.occurredAt) || (a.id < b.id ? 1 : -1));
+      return { items: entries.slice(0, query.limit), hasNextPage: entries.length > query.limit };
     },
   };
 }
@@ -1266,6 +1455,23 @@ export function createUnusedReferenceData(): {
       pagination: { page: 1, pageSize: 20, totalItems: 0, totalPages: 0 },
     }),
     registerAircraft: async () => ({ outcome: "duplicate" }),
+  };
+}
+
+/**
+ * For HTTP tests that build createApp() but never read an admin report.
+ * The reports are tested in admin-reports.api.test.ts with the real use cases.
+ */
+export function createUnusedAdminReports(): {
+  getFlightManifest: GetFlightManifest;
+  getLoadFactor: GetLoadFactor;
+  queryAuditLog: QueryAuditLog;
+} {
+  const empty = { outcome: "success" as const, items: [], page: { hasNextPage: false, nextCursor: null } };
+  return {
+    getFlightManifest: async () => ({ outcome: "not-found" }),
+    getLoadFactor: async () => empty,
+    queryAuditLog: async () => empty,
   };
 }
 

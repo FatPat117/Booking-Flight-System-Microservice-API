@@ -3,7 +3,7 @@
 Thư mục: `api/src/postgres/migrations/` (database `booking_db`) và
 `services/identity/src/migrations/` (database `identity_db`). Tên file = timestamp + tên lớp.
 
-## `booking_db` — 29 migration
+## `booking_db` — 31 migration
 
 | # | Migration | Day | Làm gì | Điểm hay / lý do |
 |---|---|---|---|---|
@@ -36,6 +36,8 @@ Thư mục: `api/src/postgres/migrations/` (database `booking_db`) và
 | 27 | `AddPaymentReconciliation` | 49C | `payments`: `payment_method_token`, `attempts`, `next_attempt_at`; trạng thái `REFUND_FAILED`; CHECK token có **đúng khi** `PROCESSING`, `next_attempt_at` có **đúng khi** `PROCESSING`/`REFUND_PENDING`; partial index `IDX_payments_due (next_attempt_at, id)`; `UQ_idempotency_keys_payment_id` | Token chỉ giữ khi cần charge lại, rời `PROCESSING` là xoá (CHECK bắt buộc). Một cột `next_attempt_at` = ngưỡng tuổi + lease + backoff. Unique theo `payment_id` để pha 3 (cả job) tìm key theo payment. **Từ chối kèm danh sách** nếu còn payment `PROCESSING` cũ — không có token để charge lại, bịa token là trừ tiền bằng phương thức không ai chọn |
 | 28 | `AddFlightSearchIndex` | 51 | Index `idx_flights_route_departure (origin_airport_id, destination_airport_id, departure_at)` | Phục vụ tìm kiếm: hai cột so bằng đứng trước, cột khoảng thời gian đứng cuối. Đo trên 20 400 chuyến / 3,9 triệu ghế: SGN→HAN 3 ngày 10,7 ms (quét cả bảng) → 4,8 ms; index chỉ `(departure_at)` nhanh ngang trên dữ liệu này nhưng đọc mọi tuyến trong khoảng giờ rồi bỏ 211–561 dòng, tệ dần khi nhiều tuyến. Kèm index cho FK `origin_airport_id` (trước đó không có). `CREATE INDEX` thường — bảng lớn đang chạy thì `CONCURRENTLY` |
 | 29 | `AddBookingCancellationReason` | 52 | Cột `bookings.cancellation_reason` (`CUSTOMER` / `AIRLINE`); booking `CANCELLED` có sẵn được gán `CUSTOMER`; CHECK giá trị hợp lệ và CHECK `(status = 'CANCELLED') = (cancellation_reason IS NOT NULL)` | Lý do huỷ là **dữ liệu** quyết định luật (mốc 24 h chỉ cho khách), nằm trong audit, event, báo cáo. Backfill suy ra chắc chắn: trước Day 52 chỉ chủ booking huỷ được. **Một** migration chứ không expand/contract: api chạy một instance và tự chạy migration lúc khởi động; deploy cuốn chiếu thì instance cũ (không ghi cột) sẽ vỡ ở CHECK thứ hai → khi đó phải tách CHECK sang migration sau |
+| 30 | `AddFlightCascadeCompletedAt` | 53 | Cột `flights.cascade_completed_at`; CHECK chỉ chuyến `CANCELLED` mới được đánh dấu; backfill chuyến đã huỷ không còn booking sống; partial index `idx_flights_cascade_pending` trên chuyến đã huỷ **chưa** xong | Câu claim của job dây chuyền từng đọc booking của **mọi** chuyến đã huỷ mỗi lượt, mà chuyến đã huỷ chỉ tăng. Đánh dấu "xong" là vĩnh viễn vì chuyến huỷ không có booking sống mới. |
+| 31 | `AddReportIndexes` | 53 | `idx_audit_logs_target_occurred (target_type, target_id, occurred_at DESC, id DESC)`, `idx_audit_logs_occurred (occurred_at DESC, id DESC)`, `idx_flights_departure (departure_at, id)`; tạo `CONCURRENTLY` với `transaction = false` | Món nợ Day 38: index sinh ra **cùng truy vấn đầu tiên** đọc `audit_logs`, hình dạng lấy từ truy vấn. `CONCURRENTLY` để không chặn ghi audit; lỗi giữa chừng để lại index `INVALID` → drop rồi chạy lại. Đo: 48,8 ms → 0,08 ms. |
 
 ## `identity_db` — 2 migration
 

@@ -8,8 +8,11 @@ import type { Payment } from "./payment-repository.js";
  * - not-held: not HELD, or its hold has lapsed (BR-PAY-04, BR-BOOK-10).
  * - under-margin: 60 s or less left, too little to start (BR-PAY-07).
  * - refunded: charged, but cancelled or expired before phase 3 confirmed it.
+ * - flight-cancelled: the booking's flight is CANCELLED (Decision 18); its
+ *   cascade will cancel the booking. Only CANCELLED: a CLOSED flight's
+ *   valid hold stays payable (BR-PAY-06).
  */
-export type NotPayableReason = "not-held" | "under-margin" | "refunded";
+export type NotPayableReason = "not-held" | "under-margin" | "refunded" | "flight-cancelled";
 
 /** A final outcome of paying for a booking: stored with the key and replayed. */
 export type PaymentDecision =
@@ -22,6 +25,7 @@ const NOT_PAYABLE_MESSAGES: Record<NotPayableReason, string> = {
   "not-held": "Booking is not held or its hold has expired",
   "under-margin": "Booking hold expires in 60 seconds or less; it can no longer be paid",
   refunded: "Booking was cancelled or expired while the payment was processed; the payment is being refunded",
+  "flight-cancelled": "The booking's flight was cancelled; it can no longer be paid",
 };
 
 /**

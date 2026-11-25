@@ -19,10 +19,11 @@ export function createFlightCancellationCascadeJob(deps: {
     handler: async () => {
       const result = await deps.cascadeFlightCancellations();
 
-      if (result.cancelled > 0) {
+      if (result.cancelled > 0 || result.flightsCompleted > 0) {
         deps.logger.info("flight_cancellation_cascaded", {
           cancelled: result.cancelled,
           refundsStarted: result.refundsStarted,
+          flightsCompleted: result.flightsCompleted,
         });
       }
 

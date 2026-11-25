@@ -953,8 +953,11 @@ export function createPostgresBookingRepository(
       return row?.live ?? 0;
     },
 
-    // Starts from the CANCELLED flights (few) and reaches their bookings
-    // through idx_bookings_flight_id. The same live condition as the AIRLINE
+    // Ordered by flight first, so the plan starts from the pending flights
+    // (idx_flights_cascade_pending, in id order) and reaches their bookings
+    // through idx_bookings_flight_id. Ordered by booking id alone, it walked
+    // every live booking of every flight by primary key (Day 53 EXPLAIN:
+    // 39 213 buffers with nothing to claim, against 1). The same live condition as the AIRLINE
     // cancel, so a claimed booking is one that cancel will take.
     async claimLiveBookingOfCancelledFlight(now) {
       if (!isInTransaction()) {
@@ -963,15 +966,33 @@ export function createPostgresBookingRepository(
       const [row] = (await resolveEntityManager(dataSource).query(
         `SELECT booking."id" FROM "flights" flight
          JOIN "bookings" booking ON booking."flight_id" = flight."id"
-         WHERE flight."status" = 'CANCELLED'
+         WHERE flight."status" = 'CANCELLED' AND flight."cascade_completed_at" IS NULL
            AND (booking."status" = 'CONFIRMED'
                 OR (booking."status" = 'HELD' AND booking."hold_expires_at" > $1))
-         ORDER BY booking."id"
+         ORDER BY flight."id", booking."id"
          LIMIT 1
          FOR UPDATE OF booking SKIP LOCKED`,
         [now],
       )) as Array<{ id: string }>;
       return row?.id;
+    },
+
+    // The pending flights come from idx_flights_cascade_pending. A booking
+    // another cascade transaction is cancelling right now is still live in
+    // this statement's snapshot, so its flight waits for the next run.
+    async completeFlightCancellations(now) {
+      const [rows] = (await resolveEntityManager(dataSource).query(
+        `UPDATE "flights" flight SET "cascade_completed_at" = $1
+         WHERE flight."status" = 'CANCELLED' AND flight."cascade_completed_at" IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM "bookings" booking
+             WHERE booking."flight_id" = flight."id"
+               AND (booking."status" = 'CONFIRMED'
+                    OR (booking."status" = 'HELD' AND booking."hold_expires_at" > $1)))
+         RETURNING flight."id"`,
+        [now],
+      )) as [Array<{ id: string }>, number];
+      return rows.length;
     },
   };
 }

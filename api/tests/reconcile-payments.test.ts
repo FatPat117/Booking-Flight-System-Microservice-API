@@ -94,6 +94,7 @@ async function createRuntime(
 
   const shared = {
     bookingRepository,
+    flightRepository,
     paymentRepository,
     idempotencyRepository,
     paymentGateway: gateway,

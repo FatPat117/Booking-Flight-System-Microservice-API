@@ -41,6 +41,7 @@ Postgres thật** chứng minh nó.
 | Câu chờ khoá rồi tìm ghế theo `booking_id`, **không** có khoá trước | Một bất biến giữ tập dòng không đổi (ghế của `HELD` không đổi) + test đối chứng phá bất biến | `confirmHold`, `expireDueHolds` (Day 51) | [13](./13-ra-soat-snapshot-cau-lenh-cho-khoa.md) |
 | Thao tác lớn trên hàng trăm dòng mà người khác vẫn dùng | Một transaction ngắn đổi trạng thái cha + job dây chuyền điều khiển bởi trạng thái, mỗi transaction một dòng con, `SKIP LOCKED` | Huỷ chuyến bay (Day 52) | [14](./14-huy-chuyen-bay-day-chuyen-va-thi-nghiem-deadlock.md) |
 | Xác nhận đua với lệnh huỷ cha chưa commit | Điều kiện về cha nằm **trong** câu xác nhận, dưới `FOR SHARE` (đọc lại dòng sau khi chờ) | Thanh toán vs huỷ chuyến (Day 52) | [14](./14-huy-chuyen-bay-day-chuyen-va-thi-nghiem-deadlock.md) |
+| Báo cáo đọc **nhiều câu** trong lúc dữ liệu đổi | Một câu SQL, hoặc transaction `REPEATABLE READ READ ONLY` (một snapshot); có trần vì snapshot dài cản vacuum | Manifest vs huỷ booking (Day 53) | [15](./15-bao-cao-nhieu-cau-va-snapshot.md) |
 
 Cách test tất cả những thứ trên: [06-cach-test-race-condition.md](./06-cach-test-race-condition.md).
 

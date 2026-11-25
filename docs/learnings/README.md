@@ -33,6 +33,7 @@ Personal notes on techniques and mechanisms this project actually uses — writt
 | [payments-and-idempotency-keys.md](./payments-and-idempotency-keys.md) | Gateway outside the transaction (three phases), compensation by refund, record-before-act, Idempotency-Key claim + fingerprint, `json` vs `jsonb` for replays |
 | [flight-search-local-dates-and-keyset.md](./flight-search-local-dates-and-keyset.md) | Local dates as a sargable UTC window, seats in one class, keyset cursors vs `OFFSET`, measuring before a read model, differential testing |
 | [flight-cancellation-cascade.md](./flight-cancellation-cascade.md) | One short status change + a state-driven cascade job, the reason as data, the Day 47 deadlock hypothesis tested with a gated control, a confirm losing to a concurrent cancel |
+| [report-snapshots-and-query-shaped-indexes.md](./report-snapshots-and-query-shaped-indexes.md) | A multi-statement report under READ COMMITTED vs `REPEATABLE READ READ ONLY` (gated race + control), the vacuum cost of long snapshots, audit indexes shaped by the first query that reads them, why an index does not fix counting, personal data in an admin API |
 
 Add a row here whenever you add a note.
 

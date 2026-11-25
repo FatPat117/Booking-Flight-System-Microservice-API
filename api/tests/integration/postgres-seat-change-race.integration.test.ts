@@ -63,6 +63,7 @@ function runtimeDependencies(
 ) {
   return {
     bookingRepository: createPostgresBookingRepository(dataSource),
+    flightRepository: createPostgresFlightRepository(dataSource),
     paymentRepository: createPostgresPaymentRepository(dataSource),
     idempotencyRepository: createPostgresIdempotencyRepository(dataSource),
     paymentGateway: gateway,

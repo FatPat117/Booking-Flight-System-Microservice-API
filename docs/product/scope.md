@@ -186,10 +186,17 @@ As the system, I want flights to stop selling 1 hour before departure and to be 
 ### Admin
 
 **US-ADM-01 (Should): Flight manifest.** As an admin, I want the list of confirmed passengers on a flight with their seats. A `HELD` booking is not on the manifest.
+- `GET /api/admin/flights/:id/manifest`: the flight, per fare class the seats `total` / `booked` / `held` and the number of held bookings, and the `CONFIRMED` passengers in seat order with `reference`, `name`, `seat`, `fareClass` only (Decision 19).
+- The counts and the list come from one snapshot: the `booked` seats equal the passengers listed.
+- Every view is audited (`FLIGHT_MANIFEST_VIEWED`, no names); unknown flight `404`; user `403`.
 
 **US-ADM-02 (Could): Load factor.** As an admin, I want each flight's load factor (booked ÷ total FlightSeats) per fare class.
+- `GET /api/admin/reports/load-factor?dateFrom=&dateTo=[&origin=]`: flights departing on those local dates of their origin (at most 31 days), keyset pages of at most 50.
+- Per class `total`, `sold`, `held` (valid holds only), `available` (a lapsed hold counts as available) and `loadFactor = sold ÷ total`; `available + held + sold = total`.
 
 **US-ADM-03 (Could): Query the audit log.** As an admin, I want to filter audit entries by target and time range. This needs the first indexes on `audit_logs`, deferred until a query exists (see the CreateAuditLogs migration).
+- `GET /api/admin/audit-logs`: a target (`targetType` + `targetId`) or a range (`from`, `to`, at most 31 days) is required (`422` otherwise); `actorType`, `actorId`, `action` narrow it.
+- Newest first, keyset pages of at most 100; a cursor from another filter is `400 INVALID_CURSOR`.
 
 ## Won't
 

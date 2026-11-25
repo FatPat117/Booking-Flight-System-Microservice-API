@@ -77,22 +77,837 @@
       "key": "day48bReference",
       "value": ""
     },
-    { "key": "day49bFlightId", "value": "" },
-    { "key": "day49bBookingId", "value": "" },
-    { "key": "day49bKey", "value": "" },
-    { "key": "day49bConfirmedBody", "value": "" },
-    { "key": "day51FlightA", "value": "" },
-    { "key": "day51FlightB", "value": "" },
-    { "key": "day51FlightC", "value": "" },
-    { "key": "day51FlightD", "value": "" },
-    { "key": "day51Cursor", "value": "" },
-    { "key": "day51FirstId", "value": "" },
-    { "key": "day52FlightId", "value": "" },
-    { "key": "day52HeldBookingId", "value": "" },
-    { "key": "day52PaidBookingId", "value": "" },
-    { "key": "day52PayKey", "value": "" }
+    {
+      "key": "day49bFlightId",
+      "value": ""
+    },
+    {
+      "key": "day49bBookingId",
+      "value": ""
+    },
+    {
+      "key": "day49bKey",
+      "value": ""
+    },
+    {
+      "key": "day49bConfirmedBody",
+      "value": ""
+    },
+    {
+      "key": "day51FlightA",
+      "value": ""
+    },
+    {
+      "key": "day51FlightB",
+      "value": ""
+    },
+    {
+      "key": "day51FlightC",
+      "value": ""
+    },
+    {
+      "key": "day51FlightD",
+      "value": ""
+    },
+    {
+      "key": "day51Cursor",
+      "value": ""
+    },
+    {
+      "key": "day51FirstId",
+      "value": ""
+    },
+    {
+      "key": "day52FlightId",
+      "value": ""
+    },
+    {
+      "key": "day52HeldBookingId",
+      "value": ""
+    },
+    {
+      "key": "day52PaidBookingId",
+      "value": ""
+    },
+    {
+      "key": "day52PayKey",
+      "value": ""
+    },
+    {
+      "key": "run",
+      "value": ""
+    },
+    {
+      "key": "origin",
+      "value": ""
+    },
+    {
+      "key": "destination",
+      "value": ""
+    },
+    {
+      "key": "day45Airport",
+      "value": ""
+    },
+    {
+      "key": "day45AirportLower",
+      "value": ""
+    },
+    {
+      "key": "fn_VN461",
+      "value": ""
+    },
+    {
+      "key": "fn_VN462",
+      "value": ""
+    },
+    {
+      "key": "fn_VN463",
+      "value": ""
+    },
+    {
+      "key": "fn_VN464",
+      "value": ""
+    },
+    {
+      "key": "fn_VN471",
+      "value": ""
+    },
+    {
+      "key": "fn_VN481",
+      "value": ""
+    },
+    {
+      "key": "fn_VN482",
+      "value": ""
+    },
+    {
+      "key": "fn_VN491",
+      "value": ""
+    },
+    {
+      "key": "fn_VN492",
+      "value": ""
+    },
+    {
+      "key": "fn_VN493",
+      "value": ""
+    },
+    {
+      "key": "fn_VN496",
+      "value": ""
+    },
+    {
+      "key": "fn_VN501",
+      "value": ""
+    },
+    {
+      "key": "fn_VN511",
+      "value": ""
+    },
+    {
+      "key": "fn_VN512",
+      "value": ""
+    },
+    {
+      "key": "fn_VN513",
+      "value": ""
+    },
+    {
+      "key": "fn_VN514",
+      "value": ""
+    },
+    {
+      "key": "fn_VN522",
+      "value": ""
+    },
+    {
+      "key": "fn_VN888",
+      "value": ""
+    },
+    {
+      "key": "fn_VN29",
+      "value": ""
+    },
+    {
+      "key": "reg_A321",
+      "value": ""
+    },
+    {
+      "key": "reg_A322",
+      "value": ""
+    },
+    {
+      "key": "reg_A322_lower",
+      "value": ""
+    },
+    {
+      "key": "reg_A323",
+      "value": ""
+    },
+    {
+      "key": "reg_A588",
+      "value": ""
+    },
+    {
+      "key": "reg_A632",
+      "value": ""
+    },
+    {
+      "key": "reg_B210",
+      "value": ""
+    },
+    {
+      "key": "date_2026_11_20",
+      "value": ""
+    },
+    {
+      "key": "date_2026_11_21",
+      "value": ""
+    },
+    {
+      "key": "date_2026_12_01",
+      "value": ""
+    },
+    {
+      "key": "date_2026_12_05",
+      "value": ""
+    },
+    {
+      "key": "date_2026_12_06",
+      "value": ""
+    },
+    {
+      "key": "date_2026_12_07",
+      "value": ""
+    },
+    {
+      "key": "date_2026_12_08",
+      "value": ""
+    },
+    {
+      "key": "date_2026_12_10",
+      "value": ""
+    },
+    {
+      "key": "date_2026_12_11",
+      "value": ""
+    },
+    {
+      "key": "date_2026_12_12",
+      "value": ""
+    },
+    {
+      "key": "date_2026_12_14",
+      "value": ""
+    },
+    {
+      "key": "date_2026_12_20",
+      "value": ""
+    },
+    {
+      "key": "date_2027_01_11",
+      "value": ""
+    },
+    {
+      "key": "date_2027_01_12",
+      "value": ""
+    },
+    {
+      "key": "date_2027_01_13",
+      "value": ""
+    },
+    {
+      "key": "date_2027_01_14",
+      "value": ""
+    },
+    {
+      "key": "date_2027_01_19",
+      "value": ""
+    },
+    {
+      "key": "date_2027_02_16",
+      "value": ""
+    },
+    {
+      "key": "day49FlightId",
+      "value": ""
+    },
+    {
+      "key": "day49BookingId",
+      "value": ""
+    },
+    {
+      "key": "day49cFlightId",
+      "value": ""
+    },
+    {
+      "key": "day49cBookingId",
+      "value": ""
+    },
+    {
+      "key": "day49cKey",
+      "value": ""
+    },
+    {
+      "key": "day50FlightId",
+      "value": ""
+    },
+    {
+      "key": "day50BookingId",
+      "value": ""
+    },
+    {
+      "key": "day50Key",
+      "value": ""
+    },
+    {
+      "key": "day53FlightId",
+      "value": ""
+    },
+    {
+      "key": "day53PaidBookingId",
+      "value": ""
+    },
+    {
+      "key": "day53Total",
+      "value": ""
+    },
+    {
+      "key": "day53PayKey",
+      "value": ""
+    },
+    {
+      "key": "day53Cursor",
+      "value": ""
+    }
   ],
   "item": [
+    {
+      "name": "Setup — run data (Day 53)",
+      "description": "Runs first. Logs alice, bob and carol in (alice must be admin: `postman/run-all.sh` promotes her), draws a run code, three unused airport codes and a date shift, and registers this run's airports and aircraft. Every later folder uses these variables instead of fixed names, so the whole collection runs again on the same database. Day 53 step 0.3.",
+      "item": [
+        {
+          "name": "Run names, dates and airport codes (GET /ready)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ready",
+            "description": "Draws this run's code and dates. Nothing is written."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// One run of the collection gets names nobody used before, so it runs again on the",
+                  "// (Environment scope, not collection: newman exports the environment between the",
+                  "// two parts of postman/run-all.sh, and runtime collection variables it does not.)",
+                  "// same database: a run code on flight numbers and registrations, fresh airports for",
+                  "// the searches, and dates shifted to the future by whole days.",
+                  "const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';",
+                  "const run = Array.from({ length: 4 }, () => ALPHABET[Math.floor(Math.random() * ALPHABET.length)]).join('');",
+                  "pm.environment.set('run', run);",
+                  "",
+                  "// The folders were written for 2026-11-20 … 2027-02-16. Every date moves by the same",
+                  "// number of whole days, so the first is 30 days after today in Vietnam (UTC+7, no DST):",
+                  "// times of day and the UTC/local relations Day 51 checks stay exactly as written.",
+                  "const DATES = [\"2026-11-20\", \"2026-11-21\", \"2026-12-01\", \"2026-12-05\", \"2026-12-06\", \"2026-12-07\", \"2026-12-08\", \"2026-12-10\", \"2026-12-11\", \"2026-12-12\", \"2026-12-14\", \"2026-12-20\", \"2027-01-11\", \"2027-01-12\", \"2027-01-13\", \"2027-01-14\", \"2027-01-19\", \"2027-02-16\"];",
+                  "const DAY_MS = 24 * 60 * 60 * 1000;",
+                  "const local = new Date(Date.now() + 7 * 60 * 60 * 1000);",
+                  "const first = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) + 30 * DAY_MS;",
+                  "const shift = first - Date.parse(DATES[0] + 'T00:00:00Z');",
+                  "DATES.forEach((date) => pm.environment.set('date_' + date.replace(/-/g, '_'), new Date(Date.parse(date + 'T00:00:00Z') + shift).toISOString().slice(0, 10)));",
+                  "",
+                  "const FLIGHT_NUMBERS = [\"VN461\", \"VN462\", \"VN463\", \"VN464\", \"VN471\", \"VN481\", \"VN482\", \"VN491\", \"VN492\", \"VN493\", \"VN496\", \"VN501\", \"VN511\", \"VN512\", \"VN513\", \"VN514\", \"VN522\", \"VN888\", \"VN29\"];",
+                  "FLIGHT_NUMBERS.forEach((number) => pm.environment.set('fn_' + number, number + run));",
+                  "",
+                  "// One copy of each seeded layout per run: the same seats, a registration of its own,",
+                  "// so no flight of an earlier run makes this run's aircraft unavailable.",
+                  "const REGISTRATION_LETTERS = { A321: 'A', A323: 'B', A632: 'C', A588: 'D', B210: 'E', A322: 'F' };",
+                  "Object.entries(REGISTRATION_LETTERS).forEach(([name, letter]) => pm.environment.set('reg_' + name, 'VN-' + letter + run));",
+                  "pm.environment.set('reg_A322_lower', ('VN-F' + run).toLowerCase());",
+                  "",
+                  "// Three airport codes nobody registered: origin and destination of this run's flights,",
+                  "// and the one Day 45 registers. Read every page of GET /api/airports first.",
+                  "const taken = new Set();",
+                  "const pickCodes = () => {",
+                  "  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';",
+                  "  const codes = [];",
+                  "  while (codes.length < 3) {",
+                  "    const code = Array.from({ length: 3 }, () => letters[Math.floor(Math.random() * 26)]).join('');",
+                  "    if (!taken.has(code) && !codes.includes(code)) codes.push(code);",
+                  "  }",
+                  "  pm.environment.set('origin', codes[0]);",
+                  "  pm.environment.set('destination', codes[1]);",
+                  "  pm.environment.set('day45Airport', codes[2]);",
+                  "  pm.environment.set('day45AirportLower', codes[2].toLowerCase());",
+                  "  console.log('run', run, 'airports', codes.join(' '), 'first date', pm.variables.get('date_' + DATES[0].replace(/-/g, '_')));",
+                  "};",
+                  "const readPage = (page) => pm.sendRequest(pm.variables.replaceIn('{{baseUrl}}/api/airports?pageSize=100&page=' + page), (error, response) => {",
+                  "  if (error) throw error;",
+                  "  const body = response.json();",
+                  "  body.items.forEach((airport) => taken.add(airport.code));",
+                  "  if (page * body.pagination.pageSize < body.pagination.totalItems) readPage(page + 1); else pickCodes();",
+                  "});",
+                  "readPage(1);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('api ready', () => pm.response.to.have.status(200));",
+                  "pm.test('three unused airport codes chosen', () => pm.expect(pm.variables.get('day45Airport')).to.match(/^[A-Z]{3}$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register alice (201, or 409 when an earlier run did)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"secret123\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Log in alice (sets accessToken)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"secret123\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('accessToken', pm.response.json().accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register bob (201, or 409 when an earlier run did)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bob@example.com\",\n  \"password\": \"secret123\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Log in bob (sets userAccessToken)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"bob@example.com\",\n  \"password\": \"secret123\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('userAccessToken', pm.response.json().accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register carol (201, or 409 when an earlier run did)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"carol@example.com\",\n  \"password\": \"secret123\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Log in carol (sets userBAccessToken)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{identityBaseUrl}}/api/identity/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"carol@example.com\",\n  \"password\": \"secret123\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.environment.set('userBAccessToken', pm.response.json().accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/whoami as alice (must be admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/whoami"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('alice is admin (run postman/run-all.sh, or promote-to-admin once)', () => pm.expect(pm.response.json().role).to.eql('admin'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/airports (this run's origin, 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/airports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{origin}}\",\n  \"name\": \"Postman run {{run}} origin\",\n  \"city\": \"Postman\",\n  \"timeZone\": \"Asia/Ho_Chi_Minh\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/airports (this run's destination, 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/airports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{destination}}\",\n  \"name\": \"Postman run {{run}} destination\",\n  \"city\": \"Postman\",\n  \"timeZone\": \"Asia/Ho_Chi_Minh\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/aircraft (VN-A321's layout for this run, 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/aircraft",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"registration\": \"{{reg_A321}}\",\n  \"model\": \"Airbus A321\",\n  \"seatLayout\": {\n    \"cabins\": [\n      {\n        \"fareClass\": \"BUSINESS\",\n        \"fromRow\": 1,\n        \"toRow\": 2,\n        \"seatLetters\": \"ACDF\"\n      },\n      {\n        \"fareClass\": \"ECONOMY\",\n        \"fromRow\": 3,\n        \"toRow\": 30,\n        \"seatLetters\": \"ABCDEF\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('the seeded layout', () => pm.expect(pm.response.json().seatsByFareClass).to.eql({\"ECONOMY\": 168, \"BUSINESS\": 8}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/aircraft (VN-A323's layout for this run, 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/aircraft",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"registration\": \"{{reg_A323}}\",\n  \"model\": \"Airbus A321neo\",\n  \"seatLayout\": {\n    \"cabins\": [\n      {\n        \"fareClass\": \"BUSINESS\",\n        \"fromRow\": 1,\n        \"toRow\": 2,\n        \"seatLetters\": \"ACDF\"\n      },\n      {\n        \"fareClass\": \"ECONOMY\",\n        \"fromRow\": 3,\n        \"toRow\": 33,\n        \"seatLetters\": \"ABCDEF\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('the seeded layout', () => pm.expect(pm.response.json().seatsByFareClass).to.eql({\"ECONOMY\": 186, \"BUSINESS\": 8}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/aircraft (VN-A632's layout for this run, 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/aircraft",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"registration\": \"{{reg_A632}}\",\n  \"model\": \"Airbus A321\",\n  \"seatLayout\": {\n    \"cabins\": [\n      {\n        \"fareClass\": \"BUSINESS\",\n        \"fromRow\": 1,\n        \"toRow\": 2,\n        \"seatLetters\": \"ACDF\"\n      },\n      {\n        \"fareClass\": \"ECONOMY\",\n        \"fromRow\": 3,\n        \"toRow\": 12,\n        \"seatLetters\": \"ABCDEF\"\n      },\n      {\n        \"fareClass\": \"ECONOMY\",\n        \"fromRow\": 14,\n        \"toRow\": 32,\n        \"seatLetters\": \"ABCDEF\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('the seeded layout', () => pm.expect(pm.response.json().seatsByFareClass).to.eql({\"ECONOMY\": 174, \"BUSINESS\": 8}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/aircraft (VN-A588's layout for this run, 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/aircraft",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"registration\": \"{{reg_A588}}\",\n  \"model\": \"Airbus A320neo\",\n  \"seatLayout\": {\n    \"cabins\": [\n      {\n        \"fareClass\": \"ECONOMY\",\n        \"fromRow\": 1,\n        \"toRow\": 30,\n        \"seatLetters\": \"ABCDEF\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('the seeded layout', () => pm.expect(pm.response.json().seatsByFareClass).to.eql({\"ECONOMY\": 180, \"BUSINESS\": 0}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/aircraft (VN-B210's layout for this run, 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/aircraft",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"registration\": \"{{reg_B210}}\",\n  \"model\": \"ATR 72-600\",\n  \"seatLayout\": {\n    \"cabins\": [\n      {\n        \"fareClass\": \"ECONOMY\",\n        \"fromRow\": 1,\n        \"toRow\": 17,\n        \"seatLetters\": \"ACDF\"\n      }\n    ]\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('the seeded layout', () => pm.expect(pm.response.json().seatsByFareClass).to.eql({\"ECONOMY\": 68, \"BUSINESS\": 0}));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
     {
       "name": "Health",
       "description": "Public liveness and readiness checks (Day 11). /ready checks Postgres (booking_db) since Day 40 -> 200 {status:ok, checks:{database:{status:ok}}} or 503.",
@@ -202,6 +1017,100 @@
       ]
     },
     {
+      "name": "Flights (Write)",
+      "description": "Protected write endpoint. Requires Authorization: Bearer {{accessToken}} with role=admin (Day 34).\nMissing/invalid token -> 401; valid token but role != admin -> 403 FORBIDDEN.\nDay 29: x-request-id becomes correlationId on flight.created outbox + flight_created_consumed logs.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{accessToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "POST /api/flights",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const body = pm.response.json();",
+                  "  if (body && body.id) {",
+                  "    pm.collectionVariables.set('flightId', body.id);",
+                  "    pm.environment.set('flightId', body.id);",
+                  "  }",
+                  "}",
+                  "const requestId = pm.request.headers.get('x-request-id');",
+                  "if (requestId) {",
+                  "  console.log('Day 29: grep this correlationId in api + flight-notifier logs →', requestId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}",
+                "description": "Day 29: becomes correlationId on outbox flight.created (and consumer logs)"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN888}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"departureAt\": \"{{date_2026_12_10}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_10}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"{{reg_A321}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights",
+            "description": "201 Created + Location header. Auth: Authorization Bearer {{accessToken}} with role=admin.\nDay 46: origin/destination are registered IATA codes and aircraftRegistration a registered aircraft (run the seed); the flight starts SCHEDULED — open it before booking.\nDay 47: availableSeats = the aircraft's seat count (VN-A321: 176); the flight gets its own copy of the seats.\nDay 29: wait ~5s then grep {{requestId}} in flight-notifier for flight_created_consumed."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/flights (duplicate)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-request-id",
+                "value": "{{requestId}}-duplicate"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN888}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"departureAt\": \"{{date_2026_12_10}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_10}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"{{reg_A321}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/flights",
+            "description": "Run after a successful create with the same payload. Expect 409 FLIGHT_ALREADY_EXISTS."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/flights/:id/open",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/flights/{{flightId}}/open",
+            "description": "Day 46: a new flight is SCHEDULED; open it before the Bookings folder or every booking answers 409 SALES_CLOSED. 200 with status OPEN; 409 INVALID_FLIGHT_STATUS on a second run."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Flights (Read)",
       "description": "Public read endpoints. No authentication required.",
       "item": [
@@ -277,100 +1186,6 @@
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "Flights (Write)",
-      "description": "Protected write endpoint. Requires Authorization: Bearer {{accessToken}} with role=admin (Day 34).\nMissing/invalid token -> 401; valid token but role != admin -> 403 FORBIDDEN.\nDay 29: x-request-id becomes correlationId on flight.created outbox + flight_created_consumed logs.",
-      "auth": {
-        "type": "bearer",
-        "bearer": [
-          {
-            "key": "token",
-            "value": "{{accessToken}}",
-            "type": "string"
-          }
-        ]
-      },
-      "item": [
-        {
-          "name": "POST /api/flights",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code === 201) {",
-                  "  const body = pm.response.json();",
-                  "  if (body && body.id) {",
-                  "    pm.collectionVariables.set('flightId', body.id);",
-                  "    pm.environment.set('flightId', body.id);",
-                  "  }",
-                  "}",
-                  "const requestId = pm.request.headers.get('x-request-id');",
-                  "if (requestId) {",
-                  "  console.log('Day 29: grep this correlationId in api + flight-notifier logs →', requestId);",
-                  "}"
-                ]
-              }
-            }
-          ],
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "x-request-id",
-                "value": "{{requestId}}",
-                "description": "Day 29: becomes correlationId on outbox flight.created (and consumer logs)"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"VN-A321\"\n}"
-            },
-            "url": "{{baseUrl}}/api/flights",
-            "description": "201 Created + Location header. Auth: Authorization Bearer {{accessToken}} with role=admin.\nDay 46: origin/destination are registered IATA codes and aircraftRegistration a registered aircraft (run the seed); the flight starts SCHEDULED — open it before booking.\nDay 47: availableSeats = the aircraft's seat count (VN-A321: 176); the flight gets its own copy of the seats.\nDay 29: wait ~5s then grep {{requestId}} in flight-notifier for flight_created_consumed."
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/flights (duplicate)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "x-request-id",
-                "value": "{{requestId}}-duplicate"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN888\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-10T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-10T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"VN-A321\"\n}"
-            },
-            "url": "{{baseUrl}}/api/flights",
-            "description": "Run after a successful create with the same payload. Expect 409 FLIGHT_ALREADY_EXISTS."
-          },
-          "response": []
-        },
-        {
-          "name": "POST /api/flights/:id/open",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": "{{baseUrl}}/api/flights/{{flightId}}/open",
-            "description": "Day 46: a new flight is SCHEDULED; open it before the Bookings folder or every booking answers 409 SALES_CLOSED. 200 with status OPEN; 409 INVALID_FLIGHT_STATUS on a second run."
-          },
-          "response": []
         }
       ]
     },
@@ -772,7 +1587,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"cxr\",\n  \"name\": \"Cam Ranh International\",\n  \"city\": \"Nha Trang\",\n  \"timeZone\": \"Asia/Ho_Chi_Minh\"\n}"
+              "raw": "{\n  \"code\": \"{{day45AirportLower}}\",\n  \"name\": \"Cam Ranh International\",\n  \"city\": \"Nha Trang\",\n  \"timeZone\": \"Asia/Ho_Chi_Minh\"\n}"
             },
             "url": "{{baseUrl}}/api/airports",
             "description": "US-REF-01. The code is upper-cased before saving. No Location header (no GET-by-code route)."
@@ -785,7 +1600,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('201', () => pm.response.to.have.status(201));",
-                  "pm.test('code normalized to CXR', () => pm.expect(pm.response.json().code).to.eql('CXR'));"
+                  "pm.test(('code normalized to ' + pm.variables.get('day45Airport')), () => pm.expect(pm.response.json().code).to.eql((pm.variables.get('day45Airport'))));"
                 ]
               }
             }
@@ -807,7 +1622,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"code\": \"CXR\",\n  \"name\": \"Cam Ranh International\",\n  \"city\": \"Nha Trang\",\n  \"timeZone\": \"Asia/Ho_Chi_Minh\"\n}"
+              "raw": "{\n  \"code\": \"{{day45Airport}}\",\n  \"name\": \"Cam Ranh International\",\n  \"city\": \"Nha Trang\",\n  \"timeZone\": \"Asia/Ho_Chi_Minh\"\n}"
             },
             "url": "{{baseUrl}}/api/airports"
           },
@@ -930,7 +1745,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"registration\": \"vn-a322\",\n  \"model\": \"Airbus A321neo\",\n  \"seatLayout\": {\n    \"cabins\": [\n      { \"fareClass\": \"BUSINESS\", \"fromRow\": 1, \"toRow\": 2, \"seatLetters\": \"ACDF\" },\n      { \"fareClass\": \"ECONOMY\", \"fromRow\": 3, \"toRow\": 7, \"seatLetters\": \"ABCDEF\" }\n    ]\n  }\n}"
+              "raw": "{\n  \"registration\": \"{{reg_A322_lower}}\",\n  \"model\": \"Airbus A321neo\",\n  \"seatLayout\": {\n    \"cabins\": [\n      { \"fareClass\": \"BUSINESS\", \"fromRow\": 1, \"toRow\": 2, \"seatLetters\": \"ACDF\" },\n      { \"fareClass\": \"ECONOMY\", \"fromRow\": 3, \"toRow\": 7, \"seatLetters\": \"ABCDEF\" }\n    ]\n  }\n}"
             },
             "url": "{{baseUrl}}/api/aircraft",
             "description": "US-REF-02. Answers seat counts per fare class, not the expanded seats."
@@ -1060,7 +1875,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN461\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN461}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A323}}\",\n  \"departureAt\": \"{{date_2026_11_20}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_11_20}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "US-FLT-01. Airports by IATA code, aircraft by registration. Seats come from the aircraft layout; the flight starts SCHEDULED (not bookable yet)."
@@ -1100,7 +1915,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN462\",\n  \"origin\": \"HAN\",\n  \"destination\": \"SGN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T10:30:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T12:30:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN462}}\",\n  \"origin\": \"{{destination}}\",\n  \"destination\": \"{{origin}}\",\n  \"aircraftRegistration\": \"{{reg_A323}}\",\n  \"departureAt\": \"{{date_2026_11_20}}T10:30:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_11_20}}T12:30:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "BR-FLT-03/08: the aircraft is busy until arrival + 45 min. Decided by the EXCL_flights_aircraft_schedule exclusion constraint, so two admins racing cannot both win."
@@ -1135,7 +1950,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN462\",\n  \"origin\": \"HAN\",\n  \"destination\": \"SGN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2026-11-20T10:45:00+07:00\",\n  \"arrivalAt\": \"2026-11-20T12:45:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN462}}\",\n  \"origin\": \"{{destination}}\",\n  \"destination\": \"{{origin}}\",\n  \"aircraftRegistration\": \"{{reg_A323}}\",\n  \"departureAt\": \"{{date_2026_11_20}}T10:45:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_11_20}}T12:45:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "The occupancy window is half-open, [departure, arrival + 45 min): the boundary itself is free. This flight is left SCHEDULED for the SALES_CLOSED request below."
@@ -1170,7 +1985,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN463\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-11-21T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-21T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"availableSeats\": 300\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN463}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A321}}\",\n  \"departureAt\": \"{{date_2026_11_21}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_11_21}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"availableSeats\": 300\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "Capacity is no longer client-set. Rejected loudly (UNSUPPORTED_FIELD) instead of silently ignored, so an old client notices the breaking change."
@@ -1208,7 +2023,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN464\",\n  \"origin\": \"XXX\",\n  \"destination\": \"YYY\",\n  \"aircraftRegistration\": \"VN-NOPE\",\n  \"departureAt\": \"2026-11-21T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-11-21T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN464}}\",\n  \"origin\": \"XXX\",\n  \"destination\": \"YYY\",\n  \"aircraftRegistration\": \"VN-NOPE\",\n  \"departureAt\": \"{{date_2026_11_21}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_11_21}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -1402,7 +2217,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN471\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-01T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-01T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN471}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A321}}\",\n  \"departureAt\": \"{{date_2026_12_01}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_01}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "BR-SEAT-03: the flight's seat inventory is copied from the aircraft layout in the same transaction."
@@ -1683,12 +2498,18 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN481\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-05T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-05T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN481}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A321}}\",\n  \"departureAt\": \"{{date_2026_12_05}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_05}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -1710,7 +2531,12 @@
           "name": "POST /api/flights/:id/open (→ 200 OPEN)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/flights/{{day48FlightId}}/open"
           },
           "response": [],
@@ -1719,7 +2545,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('200 OPEN', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('OPEN'); });"]
+                "exec": [
+                  "pm.test('200 OPEN', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('OPEN'); });"
+                ]
               }
             }
           ]
@@ -1729,8 +2557,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -1763,8 +2597,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -1791,8 +2631,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userBAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userBAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -1843,8 +2689,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userBAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userBAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -1859,7 +2711,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('422 UNKNOWN_SEAT 99K', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details).to.eql([{ field: 'seat', code: 'UNKNOWN_SEAT', message: '99K' }]); });"]
+                "exec": [
+                  "pm.test('422 UNKNOWN_SEAT 99K', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details).to.eql([{ field: 'seat', code: 'UNKNOWN_SEAT', message: '99K' }]); });"
+                ]
               }
             }
           ]
@@ -1869,8 +2723,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -1885,7 +2745,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('422 with one issue', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details.map((d) => d.code)).to.eql(['INVALID_PASSENGER_COUNT']); });"]
+                "exec": [
+                  "pm.test('422 with one issue', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details.map((d) => d.code)).to.eql(['INVALID_PASSENGER_COUNT']); });"
+                ]
               }
             }
           ]
@@ -1895,8 +2757,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -1911,7 +2779,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('422 MIXED_SEAT_SELECTION', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details.map((d) => d.code)).to.eql(['MIXED_SEAT_SELECTION']); });"]
+                "exec": [
+                  "pm.test('422 MIXED_SEAT_SELECTION', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details.map((d) => d.code)).to.eql(['MIXED_SEAT_SELECTION']); });"
+                ]
               }
             }
           ]
@@ -1921,8 +2791,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -1937,7 +2813,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('422 UNSUPPORTED_FIELD', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details[0].code).to.eql('UNSUPPORTED_FIELD'); });"]
+                "exec": [
+                  "pm.test('422 UNSUPPORTED_FIELD', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details[0].code).to.eql('UNSUPPORTED_FIELD'); });"
+                ]
               }
             }
           ]
@@ -1946,7 +2824,12 @@
           "name": "GET /api/bookings/by-reference/:reference (bob → 200)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/bookings/by-reference/{{day48Reference}}",
             "description": "US-BOOK-04."
           },
@@ -1956,7 +2839,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('200, the same booking', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('day48BookingId')); });"]
+                "exec": [
+                  "pm.test('200, the same booking', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('day48BookingId')); });"
+                ]
               }
             }
           ]
@@ -1965,7 +2850,12 @@
           "name": "GET /api/bookings/by-reference/:reference (carol → 404)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{userBAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userBAccessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/bookings/by-reference/{{day48Reference}}",
             "description": "BR-AUTH-02: another account's reference answers like a missing one."
           },
@@ -1975,7 +2865,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('404 BOOKING_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error.code).to.eql('BOOKING_NOT_FOUND'); });"]
+                "exec": [
+                  "pm.test('404 BOOKING_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error.code).to.eql('BOOKING_NOT_FOUND'); });"
+                ]
               }
             }
           ]
@@ -1984,7 +2876,12 @@
           "name": "DELETE the 3-passenger HELD booking (bob → 200)",
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/bookings/{{day48BookingId}}",
             "description": "A HELD booking can always be cancelled (BR-BOOK-06 applies to CONFIRMED only)."
           },
@@ -1994,7 +2891,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('200 CANCELLED', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().booking.status).to.equal('CANCELLED'); });"]
+                "exec": [
+                  "pm.test('200 CANCELLED', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().booking.status).to.equal('CANCELLED'); });"
+                ]
               }
             }
           ]
@@ -2031,12 +2930,18 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN482\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-06T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-06T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN482}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A321}}\",\n  \"departureAt\": \"{{date_2026_12_06}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_06}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -2058,7 +2963,12 @@
           "name": "POST /api/flights/:id/open (→ 200 OPEN)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/flights/{{day48bFlightId}}/open"
           },
           "response": [],
@@ -2067,7 +2977,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('200 OPEN', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('OPEN'); });"]
+                "exec": [
+                  "pm.test('200 OPEN', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('OPEN'); });"
+                ]
               }
             }
           ]
@@ -2077,8 +2989,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -2098,6 +3016,7 @@
                   "pm.test('deadline 15 minutes ahead', () => pm.expect(Date.parse(body.holdExpiresAt) - Date.parse(body.createdAt)).to.eql(15 * 60 * 1000));",
                   "pm.collectionVariables.set('day48bBookingId', body.id);",
                   "pm.collectionVariables.set('day48bReference', body.reference);",
+                  "pm.environment.set('day48bReference', body.reference); // read by postman/run-all.sh",
                   "console.log(`Before folder 2: docker compose exec -T postgres psql -U booking -d booking_db -c \"UPDATE bookings SET hold_expires_at = now() - interval '1 second' WHERE reference = '${body.reference}'\"`);"
                 ]
               }
@@ -2108,7 +3027,12 @@
           "name": "GET /api/bookings/:id (bob → HELD: the deadline has not passed)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/bookings/{{day48bBookingId}}"
           },
           "response": [],
@@ -2117,7 +3041,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('200 HELD', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('HELD'); });"]
+                "exec": [
+                  "pm.test('200 HELD', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('HELD'); });"
+                ]
               }
             }
           ]
@@ -2153,7 +3079,12 @@
           "name": "GET /api/bookings (bob → newest booking reads EXPIRED, before or after the job)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/bookings?pageSize=1"
           },
           "response": [],
@@ -2178,7 +3109,12 @@
           "name": "GET /api/bookings/by-reference/:reference (bob → EXPIRED)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/bookings/by-reference/{{day48bReference}}"
           },
           "response": [],
@@ -2187,7 +3123,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('200 EXPIRED', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('EXPIRED'); });"]
+                "exec": [
+                  "pm.test('200 EXPIRED', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.eql('EXPIRED'); });"
+                ]
               }
             }
           ]
@@ -2196,7 +3134,12 @@
           "name": "DELETE the lapsed hold (bob → 409 BOOKING_EXPIRED)",
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/bookings/{{day48bBookingId}}"
           },
           "response": [],
@@ -2205,7 +3148,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('409 BOOKING_EXPIRED', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().error.code).to.eql('BOOKING_EXPIRED'); });"]
+                "exec": [
+                  "pm.test('409 BOOKING_EXPIRED', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().error.code).to.eql('BOOKING_EXPIRED'); });"
+                ]
               }
             }
           ]
@@ -2214,7 +3159,12 @@
           "name": "DELETE the lapsed hold (carol → 404, not 409)",
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Authorization", "value": "Bearer {{userBAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userBAccessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/bookings/{{day48bBookingId}}"
           },
           "response": [],
@@ -2223,7 +3173,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('404 BOOKING_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error.code).to.eql('BOOKING_NOT_FOUND'); });"]
+                "exec": [
+                  "pm.test('404 BOOKING_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error.code).to.eql('BOOKING_NOT_FOUND'); });"
+                ]
               }
             }
           ]
@@ -2241,7 +3193,10 @@
               "listen": "prerequest",
               "script": {
                 "type": "text/javascript",
-                "exec": ["// The expiry job runs every 60 s (Decision 12).", "setTimeout(() => {}, 65000);"]
+                "exec": [
+                  "// The expiry job runs every 60 s (Decision 12).",
+                  "setTimeout(() => {}, 65000);"
+                ]
               }
             },
             {
@@ -2261,8 +3216,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userBAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userBAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -2289,7 +3250,12 @@
           "name": "DELETE the expired booking again (bob → still 409 BOOKING_EXPIRED)",
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Authorization", "value": "Bearer {{userAccessToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
             "url": "{{baseUrl}}/api/bookings/{{day48bBookingId}}"
           },
           "response": [],
@@ -2298,7 +3264,9 @@
               "listen": "test",
               "script": {
                 "type": "text/javascript",
-                "exec": ["pm.test('409 BOOKING_EXPIRED', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().error.code).to.eql('BOOKING_EXPIRED'); });"]
+                "exec": [
+                  "pm.test('409 BOOKING_EXPIRED', () => { pm.response.to.have.status(409); pm.expect(pm.response.json().error.code).to.eql('BOOKING_EXPIRED'); });"
+                ]
               }
             }
           ]
@@ -2314,12 +3282,18 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN491\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-07T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-07T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN491}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A321}}\",\n  \"departureAt\": \"{{date_2026_12_07}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_07}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -2345,12 +3319,18 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN492\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-B210\",\n  \"departureAt\": \"2026-12-07T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-07T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN492}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_B210}}\",\n  \"departureAt\": \"{{date_2026_12_07}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_07}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -2376,12 +3356,18 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN491\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-07T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-07T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN491}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A321}}\",\n  \"departureAt\": \"{{date_2026_12_07}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_07}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"priceInCents\": 1500000,\n  \"currency\": \"VND\"\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -2407,12 +3393,18 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{accessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN491\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-07T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-07T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN491}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A321}}\",\n  \"departureAt\": \"{{date_2026_12_07}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_07}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -2441,7 +3433,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
             ],
             "url": "{{baseUrl}}/api/flights/{{day49FlightId}}/open"
           },
@@ -2488,8 +3483,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -2521,7 +3522,10 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{userAccessToken}}" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
             ],
             "url": "{{baseUrl}}/api/bookings/{{day49BookingId}}"
           },
@@ -2566,7 +3570,7 @@
             "url": "{{baseUrl}}/api/flights",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN493\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-B210\",\n  \"departureAt\": \"2026-12-08T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-08T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN493}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_B210}}\",\n  \"departureAt\": \"{{date_2026_12_08}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_08}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000 }\n}"
             }
           },
           "response": [],
@@ -3035,7 +4039,7 @@
                   "  pm.response.to.have.status(200);",
                   "  const seats = pm.response.json().rows.flatMap((row) => row.seats);",
                   "  const paid = JSON.parse(pm.collectionVariables.get('day49bConfirmedBody')).booking.passengers.map((p) => p.seat);",
-                    "  pm.expect(seats.filter((s) => s.status === 'BOOKED').map((s) => s.code)).to.eql(paid);",
+                  "  pm.expect(seats.filter((s) => s.status === 'BOOKED').map((s) => s.code)).to.eql(paid);",
                   "  pm.expect(seats.filter((s) => s.status === 'HELD')).to.have.lengthOf(0);",
                   "});"
                 ]
@@ -3066,7 +4070,7 @@
             "url": "{{baseUrl}}/api/flights",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN496\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-B210\",\n  \"departureAt\": \"2026-12-11T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-11T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN496}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_B210}}\",\n  \"departureAt\": \"{{date_2026_12_11}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_11}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000 }\n}"
             }
           },
           "response": [],
@@ -3374,7 +4378,7 @@
             "url": "{{baseUrl}}/api/flights",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN501\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2026-12-14T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-14T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN501}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A321}}\",\n  \"departureAt\": \"{{date_2026_12_14}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_14}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 }\n}"
             }
           },
           "response": [],
@@ -3741,7 +4745,7 @@
             "url": "{{baseUrl}}/api/flights",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN511\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A321\",\n  \"departureAt\": \"2027-01-12T06:00:00+07:00\",\n  \"arrivalAt\": \"2027-01-12T08:00:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000,\n    \"BUSINESS\": 4200000\n  }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN511}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A321}}\",\n  \"departureAt\": \"{{date_2027_01_12}}T06:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2027_01_12}}T08:00:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000,\n    \"BUSINESS\": 4200000\n  }\n}"
             }
           },
           "response": [],
@@ -3800,7 +4804,7 @@
             "url": "{{baseUrl}}/api/flights",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN512\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A588\",\n  \"departureAt\": \"2027-01-12T10:00:00+07:00\",\n  \"arrivalAt\": \"2027-01-12T12:00:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1200000\n  }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN512}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A588}}\",\n  \"departureAt\": \"{{date_2027_01_12}}T10:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2027_01_12}}T12:00:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1200000\n  }\n}"
             }
           },
           "response": [],
@@ -3859,7 +4863,7 @@
             "url": "{{baseUrl}}/api/flights",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN513\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A632\",\n  \"departureAt\": \"2027-01-13T23:30:00+07:00\",\n  \"arrivalAt\": \"2027-01-14T01:30:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000,\n    \"BUSINESS\": 4200000\n  }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN513}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A632}}\",\n  \"departureAt\": \"{{date_2027_01_13}}T23:30:00+07:00\",\n  \"arrivalAt\": \"{{date_2027_01_14}}T01:30:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000,\n    \"BUSINESS\": 4200000\n  }\n}"
             }
           },
           "response": [],
@@ -3918,7 +4922,7 @@
             "url": "{{baseUrl}}/api/flights",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN514\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A323\",\n  \"departureAt\": \"2027-01-12T12:00:00+07:00\",\n  \"arrivalAt\": \"2027-01-12T14:00:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000,\n    \"BUSINESS\": 4200000\n  }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN514}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A323}}\",\n  \"departureAt\": \"{{date_2027_01_12}}T12:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2027_01_12}}T14:00:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000,\n    \"BUSINESS\": 4200000\n  }\n}"
             }
           },
           "response": [],
@@ -3940,7 +4944,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-13&passengers=2&limit=50"
+            "url": "{{baseUrl}}/api/flights/search?origin={{origin}}&destination={{destination}}&departureDateFrom={{date_2027_01_12}}&departureDateTo={{date_2027_01_13}}&passengers=2&limit=50"
           },
           "response": [],
           "event": [
@@ -3960,8 +4964,8 @@
                   "pm.test('the SCHEDULED VN514 is not on sale, so not found', () => pm.expect(ids).to.not.include(d));",
                   "const first = items.find((item) => item.id === a);",
                   "pm.test('VN511 is on 12 Jan local although it is 23:00 UTC on the 11th', () => {",
-                  "  pm.expect(first.departureAt).to.eql('2027-01-11T23:00:00.000Z');",
-                  "  pm.expect(first.departureLocal).to.eql('2027-01-12T06:00:00+07:00');",
+                  "  pm.expect(first.departureAt).to.eql((pm.variables.get('date_2027_01_11') + 'T23:00:00.000Z'));",
+                  "  pm.expect(first.departureLocal).to.eql((pm.variables.get('date_2027_01_12') + 'T06:00:00+07:00'));",
                   "});",
                   "pm.test('per-class availability, cheapest first, and the lowest fare with room', () => {",
                   "  pm.expect(first.availability.map((entry) => entry.fareClass)).to.eql(['ECONOMY', 'BUSINESS']);",
@@ -3978,7 +4982,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-13&passengers=2&limit=50&sort=price"
+            "url": "{{baseUrl}}/api/flights/search?origin={{origin}}&destination={{destination}}&departureDateFrom={{date_2027_01_12}}&departureDateTo={{date_2027_01_13}}&passengers=2&limit=50&sort=price"
           },
           "response": [],
           "event": [
@@ -4000,7 +5004,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-13&passengers=2&limit=1"
+            "url": "{{baseUrl}}/api/flights/search?origin={{origin}}&destination={{destination}}&departureDateFrom={{date_2027_01_12}}&departureDateTo={{date_2027_01_13}}&passengers=2&limit=1"
           },
           "response": [],
           "event": [
@@ -4024,7 +5028,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-13&passengers=2&limit=1&cursor={{day51Cursor}}"
+            "url": "{{baseUrl}}/api/flights/search?origin={{origin}}&destination={{destination}}&departureDateFrom={{date_2027_01_12}}&departureDateTo={{date_2027_01_13}}&passengers=2&limit=1&cursor={{day51Cursor}}"
           },
           "response": [],
           "event": [
@@ -4045,7 +5049,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-13&passengers=3&limit=1&cursor={{day51Cursor}}"
+            "url": "{{baseUrl}}/api/flights/search?origin={{origin}}&destination={{destination}}&departureDateFrom={{date_2027_01_12}}&departureDateTo={{date_2027_01_13}}&passengers=3&limit=1&cursor={{day51Cursor}}"
           },
           "response": [],
           "event": [
@@ -4066,7 +5070,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-01-12&departureDateTo=2027-01-19&passengers=10"
+            "url": "{{baseUrl}}/api/flights/search?origin={{origin}}&destination={{destination}}&departureDateFrom={{date_2027_01_12}}&departureDateTo={{date_2027_01_19}}&passengers=10"
           },
           "response": [],
           "event": [
@@ -4099,7 +5103,7 @@
                   "pm.test('200', () => pm.response.to.have.status(200));",
                   "const body = pm.response.json();",
                   "pm.test('free seats per class', () => pm.expect(body.availability.map((a) => [a.fareClass, a.availableSeats])).to.eql([['ECONOMY', 168], ['BUSINESS', 8]]));",
-                  "pm.test('local times', () => pm.expect([body.departureLocal, body.arrivalLocal, body.arrivalDayOffset]).to.eql(['2027-01-12T06:00:00+07:00', '2027-01-12T08:00:00+07:00', 0]));"
+                  "pm.test('local times', () => pm.expect([body.departureLocal, body.arrivalLocal, body.arrivalDayOffset]).to.eql([(pm.variables.get('date_2027_01_12') + 'T06:00:00+07:00'), (pm.variables.get('date_2027_01_12') + 'T08:00:00+07:00'), 0]));"
                 ]
               }
             }
@@ -4230,7 +5234,7 @@
             "url": "{{baseUrl}}/api/flights",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN522\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"aircraftRegistration\": \"VN-A588\",\n  \"departureAt\": \"2027-02-16T08:00:00+07:00\",\n  \"arrivalAt\": \"2027-02-16T10:10:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000\n  }\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN522}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A588}}\",\n  \"departureAt\": \"{{date_2027_02_16}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2027_02_16}}T10:10:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000\n  }\n}"
             }
           },
           "response": [],
@@ -4490,7 +5494,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/flights/search?origin=SGN&destination=HAN&departureDateFrom=2027-02-16&passengers=1"
+            "url": "{{baseUrl}}/api/flights/search?origin={{origin}}&destination={{destination}}&departureDateFrom={{date_2027_02_16}}&passengers=1"
           },
           "response": [],
           "event": [
@@ -4647,6 +5651,470 @@
       ]
     },
     {
+      "name": "Day 53 — Admin reports",
+      "description": "US-ADM-01..03, Decision 19. Builds its own flight on this run's A588 copy (Setup), books 5A + 5B (paid) and 6C (held), then reads the manifest (403 for a user, only CONFIRMED passengers with four fields, the hold counted, 404 for an unknown flight), the load factor for the flight's local date (sold/held/available, 422 over 31 days) and the audit log (422 without a target or range, the manifest view audited with a count only, keyset pages with a cursor, 400 for a cursor of another filter, 401 without a token).",
+      "item": [
+        {
+          "name": "POST /api/flights (VN531 on this run's A588 copy, 14:00 local → 201)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"flightNumber\": \"VN531{{run}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"aircraftRegistration\": \"{{reg_A588}}\",\n  \"departureAt\": \"{{date_2027_02_16}}T14:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2027_02_16}}T16:10:00+07:00\",\n  \"fares\": {\n    \"ECONOMY\": 1500000\n  }\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day53FlightId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /api/flights/:id/open (→ 200)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day53FlightId}}/open"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OPEN', () => pm.expect(pm.response.json().status).to.eql('OPEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking [5A, 5B] (bob → 201 HELD)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day53FlightId}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    {\n      \"name\": \"Nguyen Thi Hoa\",\n      \"seat\": \"5A\"\n    },\n    {\n      \"name\": \"Tran Van Binh\",\n      \"seat\": \"5B\"\n    }\n  ]\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('day53PaidBookingId', body.id);",
+                  "pm.collectionVariables.set('day53Total', JSON.stringify(body.total));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST payments for 5A + 5B (bob → 201 CONFIRMED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{day53PayKey}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/bookings/{{day53PaidBookingId}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodToken\": \"tok_success\",\n  \"amount\": {{day53Total}}\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// One key per run, so the folder can run again.",
+                  "pm.collectionVariables.set('day53PayKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 CONFIRMED', () => { pm.response.to.have.status(201); pm.expect(pm.response.json().booking.status).to.eql('CONFIRMED'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST booking [6C] (bob → 201 HELD, not paid)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/flights/{{day53FlightId}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"passengers\": [\n    {\n      \"name\": \"Pham Held\",\n      \"seat\": \"6C\"\n    }\n  ]\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 HELD', () => pm.expect(pm.response.json().status).to.eql('HELD'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET manifest (bob → 403)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{userAccessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/flights/{{day53FlightId}}/manifest"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 FORBIDDEN', () => { pm.response.to.have.status(403); pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET manifest (admin → 200: only CONFIRMED passengers, four fields each, the hold counted)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/flights/{{day53FlightId}}/manifest"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('passengers 5A and 5B in seat order', () => pm.expect(body.passengers.map((p) => p.seat)).to.eql(['5A', '5B']));",
+                  "pm.test('exactly reference, name, seat, fareClass', () => body.passengers.forEach((p) => pm.expect(Object.keys(p).sort()).to.eql(['fareClass', 'name', 'reference', 'seat'])));",
+                  "pm.test('one held booking, counted, never named', () => { pm.expect(body.heldBookings).to.eql(1); pm.expect(JSON.stringify(body)).to.not.include('Pham Held'); });",
+                  "pm.test('ECONOMY 180 seats: booked 2, held 1, available 177', () => pm.expect(body.classes).to.eql([{ fareClass: 'ECONOMY', total: 180, booked: 2, held: 1, available: 177 }]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET manifest of an unknown flight (admin → 404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/flights/00000000-0000-4000-8000-000000000000/manifest"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 FLIGHT_NOT_FOUND', () => { pm.response.to.have.status(404); pm.expect(pm.response.json().error.code).to.eql('FLIGHT_NOT_FOUND'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET load factor for the flight's local date (admin → 200)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/reports/load-factor?dateFrom={{date_2027_02_16}}&dateTo={{date_2027_02_16}}&origin={{origin}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const item = pm.response.json().items.find((i) => i.id === pm.collectionVariables.get('day53FlightId'));",
+                  "pm.test('the flight is listed', () => pm.expect(item).to.be.an('object'));",
+                  "pm.test('sold 2, held 1, available 177 of 180; loadFactor 0.0111', () => pm.expect(item.classes).to.eql([{ fareClass: 'ECONOMY', total: 180, sold: 2, held: 1, available: 177, loadFactor: 0.0111 }]));",
+                  "pm.test('departureLocal in the origin zone', () => pm.expect(item.departureLocal).to.match(/T14:00:00\\+07:00$/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET load factor over 32 days (admin → 422)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/reports/load-factor?dateFrom=2027-01-01&dateTo=2027-02-01"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 DATE_RANGE_TOO_LONG', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details[0].code).to.eql('DATE_RANGE_TOO_LONG'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET audit logs with neither target nor range (admin → 422)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/audit-logs?action=FLIGHT_MANIFEST_VIEWED"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('422 FILTER_REQUIRED', () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.details[0].code).to.eql('FILTER_REQUIRED'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET audit logs: the manifest view (admin → 1 entry, a count, no name)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/audit-logs?targetType=flight&targetId={{day53FlightId}}&action=FLIGHT_MANIFEST_VIEWED"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const items = pm.response.json().items;",
+                  "pm.test('one FLIGHT_MANIFEST_VIEWED by the admin account', () => { pm.expect(items.length).to.eql(1); pm.expect(items[0].actor.type).to.eql('account'); });",
+                  "pm.test('metadata is the count only', () => pm.expect(items[0].metadata).to.eql({ passengerCount: 2 }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET audit logs of the paid booking, 1 per page (admin → newest first, a cursor)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/audit-logs?targetType=booking&targetId={{day53PaidBookingId}}&limit=1"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('BOOKING_CONFIRMED first, more after it', () => { pm.expect(body.items[0].action).to.eql('BOOKING_CONFIRMED'); pm.expect(body.page.hasNextPage).to.eql(true); });",
+                  "pm.collectionVariables.set('day53Cursor', body.page.nextCursor);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the next page with the cursor (admin → BOOKING_CREATED, the last)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/audit-logs?targetType=booking&targetId={{day53PaidBookingId}}&limit=1&cursor={{day53Cursor}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('BOOKING_CREATED, no further page', () => { pm.expect(body.items.map((e) => e.action)).to.eql(['BOOKING_CREATED']); pm.expect(body.page.nextCursor).to.eql(null); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET the cursor with another filter (admin → 400)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/audit-logs?targetType=flight&targetId={{day53FlightId}}&limit=1&cursor={{day53Cursor}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 INVALID_CURSOR', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().error.code).to.eql('INVALID_CURSOR'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET audit logs without a token (→ 401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/audit-logs?targetType=flight&targetId={{day53FlightId}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Day 29 — Correlation investigate",
       "description": "Fixed requestId for log grep across api + flight-notifier.",
       "item": [
@@ -4706,7 +6174,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN29\",\n  \"origin\": \"SGN\",\n  \"destination\": \"DAD\",\n  \"departureAt\": \"2026-12-20T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-20T09:30:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1200000, \"BUSINESS\": 3500000 },\n  \"aircraftRegistration\": \"VN-A632\"\n}"
+              "raw": "{\n  \"flightNumber\": \"{{fn_VN29}}\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"DAD\",\n  \"departureAt\": \"{{date_2026_12_20}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_20}}T09:30:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1200000, \"BUSINESS\": 3500000 },\n  \"aircraftRegistration\": \"{{reg_A632}}\"\n}"
             },
             "url": "{{baseUrl}}/api/flights",
             "description": "Generates a fresh requestId each run (needs alice's admin accessToken and the seed: VN-A632).\nThen: open Postman Console for the id, wait ~5s, search flight-notifier log for correlationId.\nVN29 on 2026-12-20 can be created once: a second run answers 409 FLIGHT_ALREADY_EXISTS."
@@ -5069,7 +6537,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN999\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-11T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-11T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"VN-A321\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN999\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"departureAt\": \"{{date_2026_12_11}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_11}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"{{reg_A321}}\"\n}"
             },
             "url": "{{baseUrl}}/api/flights"
           },
@@ -5102,7 +6570,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"flightNumber\": \"VN403\",\n  \"origin\": \"SGN\",\n  \"destination\": \"HAN\",\n  \"departureAt\": \"2026-12-12T08:00:00+07:00\",\n  \"arrivalAt\": \"2026-12-12T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"VN-A321\"\n}"
+              "raw": "{\n  \"flightNumber\": \"VN403\",\n  \"origin\": \"{{origin}}\",\n  \"destination\": \"{{destination}}\",\n  \"departureAt\": \"{{date_2026_12_12}}T08:00:00+07:00\",\n  \"arrivalAt\": \"{{date_2026_12_12}}T10:00:00+07:00\",\n  \"fares\": { \"ECONOMY\": 1500000, \"BUSINESS\": 4200000 },\n  \"aircraftRegistration\": \"{{reg_A321}}\"\n}"
             },
             "description": "Login as bob first (role=user). Expect 403 FORBIDDEN."
           },

@@ -51,4 +51,8 @@ export class FlightEntity {
 
   @Column({ type: "text" })
   status!: string;
+
+  /** Day 53: set by the cancellation cascade once no live booking is left. */
+  @Column({ type: "timestamptz", name: "cascade_completed_at", nullable: true })
+  cascadeCompletedAt!: Date | null;
 }

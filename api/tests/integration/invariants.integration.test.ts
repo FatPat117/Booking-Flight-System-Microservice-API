@@ -288,3 +288,26 @@ test("the cascade is unfinished while a cancelled flight has a CONFIRMED or vali
   );
   await assert.rejects(assertCascadeComplete(dataSource, NOW));
 });
+
+test("a flight marked complete while a booking on it is still live is caught; a hold that lapsed before the mark is not", async () => {
+  const { flightId, paid, heldBookingId } = await world();
+  await cancelFlightInPlace(flightId);
+  // The held booking's hold lapses at NOW + 15 min: marked after it, it is the expiry job's.
+  const afterLapse = new Date(NOW.getTime() + 16 * 60_000);
+  await dataSource.query(
+    `UPDATE "flights" SET "cascade_completed_at" = $2 WHERE "id" = $1`,
+    [flightId, afterLapse],
+  );
+
+  await expectViolation(undefined, /a flight whose cascade is complete has no live booking/);
+  const violation = (await findInvariantViolations(dataSource)).find((v) =>
+    v.startsWith("a flight whose cascade is complete"),
+  );
+  const referenceOf = async (id: string) =>
+    ((await dataSource.query(`SELECT "reference" FROM "bookings" WHERE "id" = $1`, [id])) as Array<{ reference: string }>)[0]?.reference;
+  const paidReference = await referenceOf(paid.bookingId);
+  const heldReference = await referenceOf(heldBookingId);
+  assert.ok(paidReference !== undefined && heldReference !== undefined);
+  assert.ok(violation?.includes(paidReference), "the CONFIRMED booking is the one named");
+  assert.ok(!violation?.includes(heldReference), "the lapsed hold is not");
+});

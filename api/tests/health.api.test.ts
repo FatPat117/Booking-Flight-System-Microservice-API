@@ -25,6 +25,7 @@ import {
   createUnusedFlightSeatMap,
   createUnusedOpenFlight,
   createUnusedPayForBooking,
+  createUnusedAdminReports,
   createUnusedReferenceData,
 } from "./fakes/in-memory.js";
 import { TEST_AIRPORTS } from "./fixtures/flights.js";
@@ -111,6 +112,7 @@ function createTestContext() {
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
+    ...createUnusedAdminReports(),
     listFlights,
     logger: createMemoryLogger(),
     healthChecks,
@@ -214,6 +216,7 @@ test("GET /ready returns 503 when database is unavailable", async () => {
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
+    ...createUnusedAdminReports(),
     listFlights,
     logger: createMemoryLogger(),
     healthChecks: unhealthyHealthChecks,

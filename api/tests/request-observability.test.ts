@@ -24,6 +24,7 @@ import {
   createUnusedFlightSeatMap,
   createUnusedOpenFlight,
   createUnusedPayForBooking,
+  createUnusedAdminReports,
   createUnusedReferenceData,
 } from "./fakes/in-memory.js";
 import { TEST_AIRPORTS } from "./fixtures/flights.js";
@@ -136,6 +137,7 @@ function createTestContext() {
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
+    ...createUnusedAdminReports(),
     listFlights,
     logger,
     healthChecks: createInMemoryHealthChecks(),
@@ -291,6 +293,7 @@ test("logs unexpected errors with request id without leaking them to client", as
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
+    ...createUnusedAdminReports(),
     listFlights,
     logger,
     healthChecks: {

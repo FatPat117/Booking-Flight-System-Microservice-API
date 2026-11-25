@@ -13,12 +13,15 @@ export const FLIGHT_CANCELLATION_ACTOR: AuditActor = {
  * - cancelled: bookings moved to CANCELLED (reason AIRLINE) in this run.
  * - refundsStarted: of those, the paid ones whose payment is now
  *   REFUND_PENDING (the reconciliation job refunds them).
+ * - flightsCompleted: cancelled flights marked complete at the end of this
+ *   run (no live booking left); later claims skip them.
  * - exhausted: stopped at `maxPerRun`, so more may be left; the next run
- *   continues.
+ *   continues (and marks nothing complete).
  */
 export type CascadeFlightCancellationsResult = Readonly<{
   cancelled: number;
   refundsStarted: number;
+  flightsCompleted: number;
   exhausted: boolean;
 }>;
 
@@ -89,7 +92,10 @@ export function createCascadeFlightCancellations(
       });
 
       if (result === undefined) {
-        return { cancelled, refundsStarted, exhausted: false };
+        // The claim found nothing: every pending cancelled flight with no
+        // live booking is done for good (see completeFlightCancellations).
+        const flightsCompleted = await bookingRepository.completeFlightCancellations(now);
+        return { cancelled, refundsStarted, flightsCompleted, exhausted: false };
       }
       cancelled += 1;
       if (result.refund !== null) {
@@ -97,6 +103,6 @@ export function createCascadeFlightCancellations(
       }
     }
 
-    return { cancelled, refundsStarted, exhausted: true };
+    return { cancelled, refundsStarted, flightsCompleted: 0, exhausted: true };
   };
 }

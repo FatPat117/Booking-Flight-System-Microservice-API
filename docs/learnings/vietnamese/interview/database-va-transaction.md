@@ -128,3 +128,32 @@ khoá cuối tôi đã thấy" — `(departure_at, id) > (…)`, khoá phải l�
 hoà. Cursor = base64url JSON gồm khoá + SHA-256 gắn với tham số tìm kiếm → cursor của câu tìm khác
 bị `400`. Server không lưu gì. Cái giá: không nhảy tới trang N, không có `total` (lấy `limit + 1` để
 biết còn trang sau). List admin vẫn OFFSET vì cần nhảy trang và tổng số.
+
+### 16. Báo cáo gồm hai câu SQL hiện số liệu tự mâu thuẫn khi có tải — vì sao, sửa thế nào? (Day 53)
+
+**Trả lời:** READ COMMITTED chụp snapshot **cho từng câu lệnh**. Nếu một booking bị huỷ và commit
+giữa câu đếm ghế và câu liệt kê hành khách, báo cáo hiện "3 ghế bán" phía trên danh sách 1 người.
+Có hai cách sửa:
+- Gộp lại thành **một câu** SQL.
+- Chạy hai câu trong **`REPEATABLE READ READ ONLY`**: mọi câu thấy snapshot của câu đầu tiên.
+  Transaction chỉ đọc ở mức này không bao giờ gặp lỗi serialization, nên không cần thử lại.
+
+Snapshot dài cản vacuum, nên báo cáo phải có trần.
+
+**Bằng chứng:** race test có cổng chặn đặt giữa hai câu.
+- RR RO cho 3/3.
+- Đối chứng READ COMMITTED cho 3/1.
+- Mutation đổi sang READ COMMITTED làm test fail.
+
+### 17. Bảng audit chỉ tăng: khi nào tạo index, hình dạng thế nào? (Day 53)
+
+**Trả lời:** Tạo index **khi có truy vấn đầu tiên đọc bảng**, không phải lúc tạo bảng (Day 38 cố ý
+chưa tạo). Hình dạng lấy từ chính truy vấn đó:
+- Cột so bằng đứng trước, rồi tới cột sắp xếp kèm tie-breaker:
+  `(target_type, target_id, occurred_at DESC, id DESC)` và `(occurred_at DESC, id DESC)`.
+- API từ chối truy vấn mà không index nào phục vụ được (`422 FILTER_REQUIRED`).
+- Tạo `CONCURRENTLY` để không chặn ghi.
+
+**Bằng chứng:** trên 300 000 dòng, truy vấn theo đối tượng từ 48,8 ms còn 0,08 ms (6 538 → 19
+buffer). Lọc theo actor (không có index) trên 31 ngày vẫn đọc khoảng 51 000 dòng. Đó là cái giá được
+ghi rõ, chứ không bị giấu.

@@ -38,6 +38,9 @@ import {
 } from "./observability/request-context.js";
 import { createRequestObservabilityMiddleware } from "./observability/request-observability.js";
 import type { PayForBooking } from "./payments/pay-for-booking.js";
+import type { GetFlightManifest } from "./reports/get-flight-manifest.js";
+import type { GetLoadFactor } from "./reports/get-load-factor.js";
+import type { QueryAuditLog } from "./reports/query-audit-log.js";
 import { toPaymentView } from "./payments/payment-response.js";
 import {
   isValidIdempotencyKey,
@@ -62,6 +65,9 @@ export type AppDependencies = {
   registerAirport: RegisterAirport;
   listAirports: ListAirports;
   registerAircraft: RegisterAircraft;
+  getFlightManifest: GetFlightManifest;
+  getLoadFactor: GetLoadFactor;
+  queryAuditLog: QueryAuditLog;
   logger: Logger;
   healthChecks: HealthChecks;
   jwtSecret: string;
@@ -111,6 +117,9 @@ export function createApp(dependencies: AppDependencies) {
     registerAirport,
     listAirports,
     registerAircraft,
+    getFlightManifest,
+    getLoadFactor,
+    queryAuditLog,
     logger,
     healthChecks,
     jwtSecret,
@@ -822,6 +831,68 @@ export function createApp(dependencies: AppDependencies) {
       });
     },
   );
+
+  // ---- Admin reports (US-ADM-01..03, Decision 19): read-only, admin only ----
+
+  app.get(
+    "/api/admin/flights/:id/manifest",
+    requireJwt,
+    requireRole("admin"),
+    async (req: Request<{ id: string }>, res) => {
+      const result = await getFlightManifest(req.params.id, toActor(currentUser()));
+
+      if (result.outcome === "not-found") {
+        return sendApiError(res, 404, {
+          code: "FLIGHT_NOT_FOUND",
+          message: "Flight was not found",
+        });
+      }
+
+      return res.status(200).json(result.manifest);
+    },
+  );
+
+  app.get("/api/admin/reports/load-factor", requireJwt, requireRole("admin"), async (req, res) => {
+    const result = await getLoadFactor(req.query);
+
+    if (result.outcome === "validation_failed") {
+      return sendApiError(res, 422, {
+        code: "VALIDATION_FAILED",
+        message: "Request contains invalid report parameters",
+        details: result.issues,
+      });
+    }
+
+    if (result.outcome === "invalid_cursor") {
+      return sendApiError(res, 400, {
+        code: "INVALID_CURSOR",
+        message: "cursor does not belong to this report; start again without it",
+      });
+    }
+
+    return res.status(200).json({ items: result.items, page: result.page });
+  });
+
+  app.get("/api/admin/audit-logs", requireJwt, requireRole("admin"), async (req, res) => {
+    const result = await queryAuditLog(req.query);
+
+    if (result.outcome === "validation_failed") {
+      return sendApiError(res, 422, {
+        code: "VALIDATION_FAILED",
+        message: "Request contains invalid audit log filters",
+        details: result.issues,
+      });
+    }
+
+    if (result.outcome === "invalid_cursor") {
+      return sendApiError(res, 400, {
+        code: "INVALID_CURSOR",
+        message: "cursor does not belong to this query; start again without it",
+      });
+    }
+
+    return res.status(200).json({ items: result.items, page: result.page });
+  });
 
   app.use(notFoundHandler);
   app.use(createErrorHandler(logger));

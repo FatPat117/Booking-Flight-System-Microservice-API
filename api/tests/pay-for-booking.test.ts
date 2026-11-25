@@ -109,6 +109,7 @@ async function createRuntime(
 
   const dependencies = {
     bookingRepository,
+    flightRepository,
     paymentRepository,
     idempotencyRepository,
     paymentGateway: gateway,
@@ -366,6 +367,33 @@ test("a charge that lands after the flight was cancelled is refunded: the bookin
     runtime.auditRecorder.records.filter((record) => record.action === "BOOKING_CONFIRMED").length,
     0,
   );
+});
+
+test("a booking whose flight is already cancelled is refused in phase 1: 409 flight-cancelled, stored with the key, no charge, no payment (Day 53)", async () => {
+  const runtime = await createRuntime();
+  const flight = runtime.flights.flights.get(runtime.booking.flightId);
+  assert.ok(flight);
+  flight.status = "CANCELLED";
+
+  const result = await runtime.payForBooking(runtime.booking.id, SCOPE_A, ACTOR_A, request());
+
+  assert.deepEqual(result.outcome === "answered" && result.response, {
+    status: 409,
+    body: {
+      error: {
+        code: "BOOKING_NOT_PAYABLE",
+        message: "The booking's flight was cancelled; it can no longer be paid",
+      },
+    },
+  });
+  assert.equal(runtime.gateway.charges.length, 0);
+  assert.equal(await runtime.paymentRepository.findById(FIRST_PAYMENT_ID), undefined);
+  assert.equal(runtime.bookingRepository.peek(runtime.booking.id)?.status, "HELD");
+
+  // A final answer: the same key replays it, still without a charge.
+  const replay = await runtime.payForBooking(runtime.booking.id, SCOPE_A, ACTOR_A, request());
+  assert.equal(replay.outcome === "answered" && replay.replayed, true);
+  assert.equal(runtime.gateway.charges.length, 0);
 });
 
 test("an amount other than the booking total is amount-mismatch, charges nothing, and frees the key (BR-PAY-03)", async () => {

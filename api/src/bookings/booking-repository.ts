@@ -357,9 +357,25 @@ export type BookingRepository = Readonly<{
    *
    * Concurrency: a booking another transaction has locked (a customer's
    * cancel, a second cascade instance) is skipped, not waited for, like
-   * expireDueHolds. Lowest id first, so runs are deterministic.
+   * expireDueHolds. Flight by flight (lowest flight id, then lowest booking
+   * id), so runs are deterministic.
+   *
+   * Only flights whose cascade is not yet complete are read
+   * (completeFlightCancellations), so finished cancellations cost nothing.
    *
    * No scope: the system acts on every account's bookings.
    */
   claimLiveBookingOfCancelledFlight(now: Date): Promise<string | undefined>;
+  /**
+   * Marks each CANCELLED flight not yet complete that has no live booking
+   * at `now` as complete; returns how many. The claim skips them from then
+   * on (Day 53).
+   *
+   * Final, because a CANCELLED flight never gains a live booking again: a
+   * hold is refused once the cancel commits (onSaleSql, under the flight's
+   * share lock), confirmHold refuses a CANCELLED flight, a seat change
+   * creates no booking, and cancelling is never undone. A lapsed HELD
+   * booking left on it is the expiry job's and is not live.
+   */
+  completeFlightCancellations(now: Date): Promise<number>;
 }>;

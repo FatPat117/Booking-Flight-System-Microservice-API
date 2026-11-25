@@ -41,6 +41,7 @@ import {
   createInMemoryIdempotencyRepository,
   createInMemoryPaymentRepository,
   createInMemoryTransactionRunner,
+  createUnusedAdminReports,
   createUnusedReferenceData,
   type FakePaymentGateway,
   type InMemoryAuditRecorder,
@@ -135,6 +136,7 @@ function createContext(): {
     payForBooking: createPayForBooking({
       ...common,
       bookingRepository,
+      flightRepository,
       paymentRepository,
       idempotencyRepository: createInMemoryIdempotencyRepository(),
       paymentGateway: gateway,
@@ -147,6 +149,7 @@ function createContext(): {
     listBookings: createListBookings({ bookingRepository, getCurrentTime }),
     listFlights: createListFlights({ flightRepository, getCurrentTime }),
     ...createUnusedReferenceData(),
+    ...createUnusedAdminReports(),
     logger: createMemoryLogger(),
     healthChecks: createInMemoryHealthChecks(),
     jwtSecret: TEST_JWT_SECRET,
@@ -1000,6 +1003,20 @@ test("POST payment answers 201 with the payment and the CONFIRMED booking, whose
   const fetched = await request(app).get(`/api/bookings/${bookingId}`).set(as(USER_A));
   assert.equal(fetched.body.status, "CONFIRMED");
   assert.deepEqual(await seatStatuses(app, flightId), { "1A": "BOOKED", "1B": "AVAILABLE" });
+});
+
+test("POST payment on a booking whose flight the admin cancelled is 409 BOOKING_NOT_PAYABLE before any charge (Day 53)", async () => {
+  const { app, gateway } = createContext();
+  const flightId = await seedFlight(app, 2);
+  const bookingId = (await book(app, USER_A, flightId)).body.id as string;
+  const cancelled = await request(app).post(`/api/flights/${flightId}/cancel`).set(as(ADMIN));
+  assert.equal(cancelled.status, 200);
+
+  const paid = await pay(app, USER_A, bookingId);
+
+  assert.equal(paid.status, 409);
+  assert.equal(paid.body.error.code, "BOOKING_NOT_PAYABLE");
+  assert.equal(gateway.charges.length, 0);
 });
 
 test("a repeat with the same key and body gets the identical status and body, marked Idempotent-Replayed, charged once", async () => {

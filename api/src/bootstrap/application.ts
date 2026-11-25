@@ -71,6 +71,10 @@ import { createPaymentReconciliationJob } from "../jobs/payment-reconciliation-j
 import { createIdempotencyKeyCleanupJob } from "../jobs/idempotency-key-cleanup-job.js";
 import { createFlightsSummaryJob } from "../jobs/flights-summary-job.js";
 import { createInMemoryJobScheduler } from "../jobs/in-memory-job-scheduler.js";
+import { createGetFlightManifest, type GetFlightManifest } from "../reports/get-flight-manifest.js";
+import { createGetLoadFactor, type GetLoadFactor } from "../reports/get-load-factor.js";
+import { createPostgresAdminReports } from "../reports/postgres/postgres-admin-reports.js";
+import { createQueryAuditLog, type QueryAuditLog } from "../reports/query-audit-log.js";
 import { connectPublisherWithRetry } from "../messaging/connect-with-retry.js";
 import type { MessagePublisher } from "../messaging/message-publisher.js";
 import { createOutboxRelayJob } from "../outbox/outbox-relay-job.js";
@@ -149,6 +153,9 @@ export type Application = Readonly<{
   registerAirport: RegisterAirport;
   listAirports: ListAirports;
   registerAircraft: RegisterAircraft;
+  getFlightManifest: GetFlightManifest;
+  getLoadFactor: GetLoadFactor;
+  queryAuditLog: QueryAuditLog;
   healthChecks: HealthChecks;
   close(): Promise<void>;
 }>;
@@ -298,6 +305,7 @@ export async function createApplication(
 
   const payForBooking = createPayForBooking({
     bookingRepository,
+    flightRepository,
     paymentRepository,
     idempotencyRepository,
     paymentGateway,
@@ -395,6 +403,19 @@ export async function createApplication(
     getCurrentTime: () => new Date(),
   });
 
+  // Decision 19: the second read port, beside FlightSearch.
+  const adminReports = createPostgresAdminReports(dataSource);
+  const getFlightManifest = createGetFlightManifest({
+    adminReports,
+    auditRecorder,
+    transactionRunner,
+    generateAuditId: () => crypto.randomUUID(),
+    getRequestId: () => getRequestContext()?.requestId,
+    getCurrentTime: () => new Date(),
+  });
+  const getLoadFactor = createGetLoadFactor({ adminReports, getCurrentTime: () => new Date() });
+  const queryAuditLog = createQueryAuditLog({ adminReports });
+
   const registerAirport = createRegisterAirport({
     airportRepository,
     auditRecorder,
@@ -484,6 +505,9 @@ export async function createApplication(
     registerAirport,
     listAirports,
     registerAircraft,
+    getFlightManifest,
+    getLoadFactor,
+    queryAuditLog,
     healthChecks,
     async close() {
       // Same order as before (Day 17): stop the job before closing what it

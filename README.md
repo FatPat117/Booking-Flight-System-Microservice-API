@@ -155,6 +155,7 @@ POST /api/flights/:id/open
 - **Booking** holds a seat only while the effective status is `OPEN`; the condition is part of the seat-hold `UPDATE` itself, so a flight cannot close between a check and the write → otherwise `409 SALES_CLOSED`.
 - Responses keep `origin`/`destination` as IATA codes (read through a join, not stored) and add `originAirportId`, `destinationAirportId`, `aircraftId`, `status`.
 - **Cancelling** a `SCHEDULED`, `OPEN` or `CLOSED` flight: `POST /api/flights/:id/cancel` (admin), Day 52 — see [Flight cancellation cascade](#flight-cancellation-cascade-day-52).
+- **Admin reports** (manifest, load factor, audit log), Day 53 — see [Admin reports](#admin-reports-day-53).
 
 Rules: BR-FLT-01..08 in [docs/product/domain-model.md](docs/product/domain-model.md).
 
@@ -367,6 +368,35 @@ POST /api/flights/:id/cancel            (again, or after a timeout)
 - **Measured** (Day 52, 100 paid bookings on a 120-seat test flight in `booking_test`): the cancel's transaction 3–8 ms; the cascade's transactions median 5–9 ms; a hold on the same flight is refused in 19–55 ms. Option A (everything in one transaction, test-only) held the flight row 536–601 ms and made that hold wait as long, and deadlocked with a chosen-seat hold in 3 of 3 forced rounds. Details in `.cursor/progress/DAY-52.md`.
 - On the compose stack (e2e): cancel answered in 34 ms with 3 bookings remaining; the cascade had cancelled them 8 s later; both refunds were `REFUNDED` about 18 s after that.
 
+## Admin reports (Day 53)
+
+```http
+GET /api/admin/flights/:id/manifest                                   (admin)
+→ 200 { "flight": { …, "departureLocal": "…+07:00", "status": "OPEN" },
+        "classes": [ { "fareClass": "ECONOMY", "total": 180, "booked": 2, "held": 1, "available": 177 } ],
+        "heldBookings": 1,
+        "passengers": [ { "reference": "C6A88W", "name": "…", "seat": "5A", "fareClass": "ECONOMY" } ] }
+
+GET /api/admin/reports/load-factor?dateFrom=2027-01-15&dateTo=2027-01-31[&origin=SGN][&limit=50][&cursor=…]
+→ 200 { "items": [ { "id": "…", "flightNumber": "…", "departureLocal": "…", "status": "OPEN",
+                     "classes": [ { "fareClass": "ECONOMY", "total": 168, "sold": 2, "held": 1, "available": 165, "loadFactor": 0.0119 } ] } ],
+        "page": { "hasNextPage": false, "nextCursor": null } }
+
+GET /api/admin/audit-logs?targetType=booking&targetId=…   (or ?from=…&to=…; plus actorType, actorId, action, limit, cursor)
+→ 200 { "items": [ { "id", "action", "actor": { "type", "id" }, "target": { "type", "id" }, "requestId", "occurredAt", "metadata" } ],
+        "page": { "hasNextPage": true, "nextCursor": "…" } }
+```
+
+`401` without a token, `403` for a user, `404 FLIGHT_NOT_FOUND` for an unknown manifest, `422 VALIDATION_FAILED` for bad parameters (more than 31 days, no target and no range: `FILTER_REQUIRED`), `400 INVALID_CURSOR` for a cursor of another filter. Rules: Decision 19, US-ADM-01..03.
+
+- **Personal data is minimal.** The manifest lists `CONFIRMED` passengers only, with exactly `reference`, `name`, `seat` and `fareClass`: no price, owner, email or booking id. A `HELD` booking is counted, never named.
+- **Reading a manifest is audited** (`FLIGHT_MANIFEST_VIEWED`, metadata `{ passengerCount }`, no names) in a short transaction of its own after the read. If the audit write fails the request answers `500` and the manifest is not sent. The request log never contains a body, so no passenger name reaches a log line (checked on the compose stack).
+- **One snapshot per report.** The manifest is two statements in one `REPEATABLE READ READ ONLY` transaction, so its counts and its list always agree; at READ COMMITTED a cancel between them gave "3 booked" above 1 passenger (Day 53 race test, control). Load factor and audit pages are one statement each.
+- **Load factor** reads each flight's departure date in its own origin's zone, at most 31 days, every route or one origin. `held` counts valid holds only; a lapsed hold the job has not swept counts as `available`, so `available + held + sold = total`. `loadFactor = sold ÷ total`, 4 decimals.
+- **Audit log** needs a target or a range (at most 31 days) so an index always serves it: `idx_audit_logs_target_occurred` and `idx_audit_logs_occurred` (migration `AddReportIndexes`, built `CONCURRENTLY`). Newest first, keyset pages on `(occurredAt, id)`. Actor and action only narrow a query; they have no index.
+- **A read port of its own:** `AdminReports` (`src/reports/`), beside `FlightSearch`.
+- **Measured** on `booking_test` (20 400 flights, 3.9 M seats, 300 000 audit rows; one client, warm, median of 7): audit by target 0.6–0.7 ms (48.8 ms before the index), by one day 0.8–1.2 ms, load factor of 50 flights 8 ms, manifest of a full flight 5–9 ms. The read-side evidence table for every read is in `.cursor/progress/DAY-53.md`.
+
 ## Audit trail
 
 Every successful write records an audit entry in the `audit_logs` table, in the same Postgres transaction as the write itself. If the audit insert fails, the whole write rolls back.
@@ -387,6 +417,7 @@ Every successful write records an audit entry in the `audit_logs` table, in the 
 | `PAYMENT_REFUND_FAILED` | `payment-reconciliation-job`, refund given up (BR-PAY-09) | `system` / `payment-reconciliation`; target `payment` (metadata: `reason`, `attempts`) |
 | `AIRPORT_REGISTERED` | `POST /api/airports` | `account` / admin's JWT `sub` |
 | `AIRCRAFT_REGISTERED` | `POST /api/aircraft` | `account` / admin's JWT `sub` (metadata: seats per fare class) |
+| `FLIGHT_MANIFEST_VIEWED` | `GET /api/admin/flights/:id/manifest` (Day 53) | `account` / admin's JWT `sub`; target `flight` (metadata: `passengerCount` only — reading personal data is recorded, the names are not) |
 
 Stored fields: audit id, action, actor type and id, target type and id, request id, occurred timestamp, metadata (jsonb).
 
@@ -426,7 +457,7 @@ Current jobs:
 | `booking-hold-expiry-job` | 60s (default) | Expires lapsed holds in batches of 50, at most 20 per run (see Hold expiry) |
 | `payment-reconciliation-job` | 30s (default) | Finishes `PROCESSING` / `REFUND_PENDING` payments in leased batches of 20, at most 5 per run (see Day 49C) |
 | `idempotency-key-cleanup-job` | 1h (default) | Deletes `COMPLETED` Idempotency-Keys older than 24 h, batches of 500, at most 20 per run |
-| `flight-cancellation-cascade-job` | 30s (default) | Cancels the live bookings of `CANCELLED` flights, one per transaction, at most 500 per run (Day 52, see Flight cancellation cascade) |
+| `flight-cancellation-cascade-job` | 30s (default) | Cancels the live bookings of `CANCELLED` flights, one per transaction, at most 500 per run (Day 52, see Flight cancellation cascade); then marks each cancelled flight with nothing live left `cascade_completed_at`, so later runs skip it (Day 53) |
 
 Design notes:
 
@@ -554,6 +585,8 @@ The application runs TypeORM migrations (`api/src/postgres/migrations/`) on star
 | `AddPassengerFareSnapshot` | `booking_passengers.fare_class`, `price_vnd`, priced from the seat's class at migration time; refuses with a list if a seated passenger cannot be priced; CHECK seat, class and price are NULL together |
 | `CreatePayments` / `CreateIdempotencyKeys` | `payments` (status CHECK, partial unique indexes: one `PROCESSING` and one `SUCCEEDED` per booking) and `idempotency_keys` (PK account, operation, key; response stored as `json`) — Day 49B |
 | `AddBookingCancellationReason` | `bookings.cancellation_reason` (`CUSTOMER` / `AIRLINE`), existing `CANCELLED` rows backfilled `CUSTOMER`, CHECK that it is set exactly when the status is `CANCELLED` — Day 52 |
+| `AddFlightCascadeCompletedAt` | `flights.cascade_completed_at` (set by the cascade job once no live booking is left; CHECK only on a `CANCELLED` flight), backfilled for flights already done, partial index `idx_flights_cascade_pending` on the pending ones (Day 53) |
+| `AddReportIndexes` | `idx_audit_logs_target_occurred`, `idx_audit_logs_occurred` (the audit log query, shaped by it) and `idx_flights_departure` (load factor over every route), built `CONCURRENTLY` with `transaction = false` (Day 53) |
 | `AddPaymentReconciliation` | `payments.payment_method_token` (only while `PROCESSING`), `attempts`, `next_attempt_at` (only while `PROCESSING`/`REFUND_PENDING`), status `REFUND_FAILED`, partial index `IDX_payments_due`, `UQ_idempotency_keys_payment_id`; refuses with a list while a `PROCESSING` payment exists (it has no token to charge again with) — Day 49C |
 
 Since Day 46 each migration runs in its own transaction (`migrationsTransactionMode: "each"`): a refused contract migration keeps the expand and backfill, so the missing data can be fixed by hand and the migrations re-run. The aircraft of an existing flight cannot be guessed, so it is assigned by hand, e.g. `UPDATE flights SET aircraft_id = (SELECT id FROM aircraft WHERE registration = 'VN-A321') WHERE flight_number = 'VN123';`. A fare cannot be guessed either (no exchange rate belongs in a migration): `INSERT INTO flight_fares (flight_id, fare_class, amount_vnd) VALUES ('<id>', 'BUSINESS', 4200000);`.
@@ -691,12 +724,13 @@ Import `postman/Booking-microservices.postman_collection.json` and `postman/Book
 
 - `owner_account_id` has no foreign key to Identity's accounts (different database by design) — deleting an account does not touch its bookings
 - Only the creation of a flight has an event; opening and cancelling are audited only (each cancelled booking has its own `booking-cancelled`)
-- A flight's live bookings stay live for up to one cascade interval (~30 s) after the flight is cancelled; payment phase 1 does not check the flight, so a payment started in that gap is charged, then refunded (Day 52)
+- A flight's live bookings stay live for up to one cascade interval (~30 s) after the flight is cancelled. Payment phase 1 refuses an already cancelled flight (Day 53), but a cancel committing while a payment is at the gateway still ends in a charge and a refund
 - A cancel waits until no hold holds the flight's share lock, and a hold arriving meanwhile is granted the share lock ahead of it (Day 52 race test "A (queue)"); a steady stream of holds could delay a cancel, each hold being milliseconds
-- The cascade's claim reads every booking of every cancelled flight through `idx_bookings_flight_id` on each run; cancelled flights accumulate, so a partial index on live bookings would be the first lever if it grows
 - Flight number + departure stays unique for a cancelled flight: the same flight cannot be created again at the same time (`409 FLIGHT_ALREADY_EXISTS`)
 - `Flight` is both the write model and the read shape of `GET /api/flights`; search and flight details read through a separate `FlightSearch` port with its own shape (Day 51), the same database
 - Two overlapping flights of one aircraft inserted at the same instant can deadlock (`40P01`) instead of failing the exclusion constraint; the loser is answered `409 AIRCRAFT_UNAVAILABLE`, which is safe to retry if the winner also rolled back
+- Load factor and the manifest count `flight_seats` rows on every request (about one heap block per seat); fine at 50 flights a page, a per-class counter or a covering index if reports ever span thousands of flights (Day 53 evidence table)
+- The audit log filtered by actor alone (no target, a long range) reads every entry of the range: actor has no index until a query needs one
 - `REFUND_FAILED` has no endpoint: a person settles it with the provider and psql, and the only alert is an error log line and an audit row until phase G
 - The simulated provider remembers charges in the api process: after a restart, reconciliation of a payment whose first charge went through charges it again (a real provider keeps its idempotency keys)
 - A request still charging when reconciliation has already settled its payment (it outlived timeout + 30 s) answers `500`; its phase 3 rolls back and the same key then gets the job's answer (Day 49C race test)

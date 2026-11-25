@@ -38,6 +38,9 @@ validate input (ngoài transaction)  →  transactionRunner.run(
 | `POST /api/airports` | admin | RegisterAirport | 201 | 422, 409 `AIRPORT_ALREADY_EXISTS` | [reference-data](./reference-data.md) |
 | `GET /api/airports` | public | ListAirports | 200 | 422 | [reference-data](./reference-data.md) |
 | `POST /api/aircraft` | admin | RegisterAircraft | 201 | 422, 409 `AIRCRAFT_ALREADY_EXISTS` | [reference-data](./reference-data.md) |
+| `GET /api/admin/flights/:id/manifest` | admin | GetFlightManifest (Day 53) | 200 (đọc trong `REPEATABLE READ READ ONLY`, ghi audit việc xem) | 401, 403, 404 `FLIGHT_NOT_FOUND`, 500 nếu không ghi được audit | [admin-reports](./admin-reports.md) |
+| `GET /api/admin/reports/load-factor` | admin | GetLoadFactor (Day 53) | 200 `{ items, page }` | 401, 403, 422, 400 `INVALID_CURSOR` | [admin-reports](./admin-reports.md) |
+| `GET /api/admin/audit-logs` | admin | QueryAuditLog (Day 53) | 200 `{ items, page }` | 401, 403, 422 `FILTER_REQUIRED`, 400 `INVALID_CURSOR` | [admin-reports](./admin-reports.md) |
 | `GET /api/whoami` | JWT bất kỳ | — | 200 | 401 | [identity](./identity.md) |
 | `GET /live` (identity :3001) | public | — | 200 | — | [identity](./identity.md) |
 | `POST /api/identity/register` | public (identity :3001) | RegisterUser | 201 | 422, 409 `EMAIL_ALREADY_REGISTERED` | [identity](./identity.md) |
@@ -61,3 +64,4 @@ Lỗi chung cho mọi route: `400 MALFORMED_JSON`, `401` (thiếu/sai/hết hạ
 | PayForBooking | `BOOKING_CONFIRMED` (target booking); `PAYMENT_FAILED`, `PAYMENT_REFUND_PENDING` (target payment); `PAYMENT_REFUNDED` actor `system/payment-refund` | `booking-confirmed` (chỉ khi thành công) |
 | RegisterAirport | `AIRPORT_REGISTERED` | — |
 | RegisterAircraft | `AIRCRAFT_REGISTERED` | — |
+| GetFlightManifest (Day 53, chỉ đọc) | `FLIGHT_MANIFEST_VIEWED` (metadata `passengerCount`, không tên), transaction riêng sau khi đọc | — |

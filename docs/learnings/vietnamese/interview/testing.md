@@ -117,3 +117,16 @@ giả lập nhận `timers` (`wait`, `timeoutSignal`), mặc định là thời 
 điều khiển — `wait` chỉ xong khi test cho phép, timeout chỉ bắn khi test `abort`. Thay vì assert
 `45 ≤ elapsed < 1000 ms`, test assert "chưa xong trước khi timeout bắn, xong với `unknown` sau đó".
 Thêm `--test-reporter=spec` để lần sau fail thì biết tên.
+
+### 16. Test của bạn "xanh" ngay lần đầu — sao biết nó bắt được lỗi? (Day 53)
+
+**Trả lời:** Cố ý phá code xem test có đỏ không (mutation).
+- Với báo cáo: đếm hold quá hạn thành "đang giữ" → differential test và test tồn kho fail.
+- Lọc ngày theo UTC thay vì múi giờ sân bay → differential test fail.
+- Đổi keyset từ `<` thành `<=` → test duyệt trang fail vì có dòng trùng.
+- Bỏ `REPEATABLE READ` → race test snapshot fail.
+
+Mỗi lần phá xong đều khôi phục file và so bằng `cmp`.
+
+Thêm một bài học về treo: race test có cổng chặn mà fail giữa chừng sẽ để transaction mở, khiến cả
+bộ test treo im lặng. Vì vậy cả bộ unit và integration đều có `--test-timeout`.

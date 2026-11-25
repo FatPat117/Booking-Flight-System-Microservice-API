@@ -62,46 +62,11 @@ fix the code directly.
 
 ### After a day is completed
 
-- Write `.cursor/progress/DAY-XX.md` summarizing what was built and why.
-- Update `.cursor/progress/CURRENT.md` (last completed day, status, next day).
-- Update `docs/roadmap.md` only if the plan genuinely changed — add a line to its
-  "Roadmap history" table explaining why, and write an ADR if the order of phases changed.
-- Update the Vietnamese study notes in `docs/learnings/vietnamese/` (the one place where
-  Vietnamese is allowed in docs) so they stay current through the day just finished:
-  - `on-tap-nhanh-day-01-XX.md` — add the day's row to the timeline and any new technique,
-    measured number or gotcha; rename the file to the new last day and fix links to it.
-  - `race-conditions/` — a new file (or an update) when the day handled contested writes.
-  - `interview/` — new Q&A when the day produced something worth explaining in an interview.
-  - `use-cases/` — new or changed endpoints, outcomes and HTTP mappings.
-  - `migrations/danh-sach.md` — every new migration (what it does, why).
-  - Bump the "Cập nhật đến Day XX" line in `vietnamese/README.md` and check all relative
-    links still resolve.
-
-### Automation: progress check on `git push`
-
-A `pre-push` git hook (`scripts/git-hooks/pre-push`, wired up via
-`core.hooksPath` — set automatically by `npm install` through the `prepare`
-script) runs headless Claude Code once per push. It looks at the commits
-being pushed and decides whether `.cursor/progress/CURRENT.md` or a
-`DAY-XX.md` is now out of date, editing them if so.
-
-Guarantees baked into the hook:
-
-- It **never blocks or fails the push** — always exits `0`, even if Claude
-  errors, times out (180s), or hits its `$1.00` budget cap.
-- It **never runs `git add`/`git commit`** — any edit it makes is left
-  unstaged; review it with `git status`/`git diff` after the push like any
-  other change, then commit it yourself.
-- It's restricted to `Read/Edit/Grep/Glob` plus read-only `git show/log/diff`
-  — it cannot touch application code or run arbitrary commands.
-
-Chosen over a per-commit hook deliberately: most commits are small
-checkpoints with nothing day-level to log, so checking once per push (rather
-than on every commit) avoids paying the latency/cost of a mostly-no-op
-Claude call on every single commit.
-
-Skip it for one push with `SKIP_PROGRESS_HOOK=1 git push`; remove it entirely
-with `git config --unset core.hooksPath`.
+Run the `/day-close` skill (`.claude/skills/day-close/SKILL.md`): progress log,
+CURRENT.md, product docs, README, Postman, English learnings, the Vietnamese study
+notes in `docs/learnings/vietnamese/` (the one place where Vietnamese is allowed in
+docs), link check, reconciled test counts and a suggested commit message. Never
+`git commit`.
 
 ## Shared dev infrastructure
 

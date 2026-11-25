@@ -49,9 +49,9 @@ B does not finish sooner (both ~0.6–1.2 s in all); it makes no one wait for al
 **Trade-offs / costs**
 
 - An in-between state of up to one job interval (~30 s): the flight is `CANCELLED` while some bookings are still live. Every read that matters checks the flight (holds, search, payment phase 3), and the global invariants allow it only until the cascade has run.
-- Payment phase 1 does not check the flight, so a payment started in that gap is charged and then refunded.
+- Payment phase 1 did not check the flight, so a payment started in that gap was charged and then refunded. *Day 53:* phase 1 refuses an already cancelled flight; only a cancel committing during the payment still ends in a refund.
 - A cancel waits until no hold holds the flight's share lock, and holds arriving meanwhile get the share lock ahead of it (observed in Day 52 race test "A (queue)"): bounded by the length of a hold, not by a timeout.
-- The job's claim reads the bookings of every cancelled flight on each run; cancelled flights accumulate.
+- The job's claim read the bookings of every cancelled flight on each run, and cancelled flights accumulate. *Day 53:* `flights.cascade_completed_at` marks a finished cascade and the claim reads only the pending ones.
 
 **Why the reference repository's shape is not needed yet**
 

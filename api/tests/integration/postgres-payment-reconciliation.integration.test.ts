@@ -89,6 +89,7 @@ function memoryLogger() {
 function runtime(gateway: FakePaymentGateway, clock: { now: Date }, logger: Logger) {
   const repositories = {
     bookingRepository: createPostgresBookingRepository(dataSource),
+    flightRepository: createPostgresFlightRepository(dataSource),
     paymentRepository: createPostgresPaymentRepository(dataSource),
     idempotencyRepository: createPostgresIdempotencyRepository(dataSource),
     paymentGateway: gateway,

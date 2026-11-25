@@ -92,3 +92,18 @@ hiệu quả, mà consumer chưa dedupe theo `eventId`. Đây là bản trong-m�
 service ở giai đoạn F thì cùng hình dạng, nhưng giữa các service bằng message.
 **Lý do là dữ liệu:** `cancellation_reason` (`CUSTOMER`/`AIRLINE`) quyết định luật (mốc 24 h), nằm
 trong audit, event và báo cáo — không phải một cờ `force` ai cũng truyền được. ADR-011.
+
+### 13. Hệ thống của bạn đã cần CQRS chưa? Lấy gì làm căn cứ? (Day 53)
+
+**Trả lời:** Tôi đo trước khi trả lời.
+- **Đo**: mọi truy vấn đọc (tìm kiếm, chi tiết, sơ đồ ghế, booking của tôi, 3 báo cáo) trên 20 400
+  chuyến / 3,9 triệu ghế đều có median dưới 12 ms với 1 client, nên hiệu năng **chưa** là lý do.
+- **Phía đọc đã tách**: có 2 port đọc riêng (`FlightSearch`, `AdminReports`), mỗi port ra đời đúng
+  ngày một truy vấn cần hình dạng riêng. Đó là CQRS ở mức port, chưa cần bus hay store thứ hai.
+- **Phía ghi lặp lại**: 11 use case cùng khuôn "transaction + ghi + audit", 5 trong số đó thêm
+  outbox; 4 job cùng khuôn "claim `SKIP LOCKED`". Nếu đưa mediator hay pipeline vào thì đó mới là
+  lý do có số liệu.
+- **Thứ có thể cần read model trước tiên**: việc đếm ghế trong báo cáo (khoảng một heap block mỗi
+  ghế).
+
+**Bằng chứng:** bảng bằng chứng trong `.cursor/progress/DAY-53.md`.

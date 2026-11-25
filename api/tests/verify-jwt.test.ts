@@ -30,6 +30,7 @@ import {
   createUnusedFlightSeatMap,
   createUnusedOpenFlight,
   createUnusedPayForBooking,
+  createUnusedAdminReports,
   createUnusedReferenceData,
 } from "./fakes/in-memory.js";
 import { TEST_AIRPORTS } from "./fixtures/flights.js";
@@ -294,6 +295,7 @@ test("GET /api/whoami returns user from a valid JWT", async () => {
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
+    ...createUnusedAdminReports(),
     listFlights: createListFlights({
       flightRepository,
       getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),
@@ -352,6 +354,7 @@ test("GET /api/whoami returns 401 without a token", async () => {
     ...createUnusedBookingReads(),
     ...createUnusedPayForBooking(),
     ...createUnusedReferenceData(),
+    ...createUnusedAdminReports(),
     listFlights: createListFlights({
       flightRepository,
       getCurrentTime: () => new Date("2026-07-20T00:00:00.000Z"),

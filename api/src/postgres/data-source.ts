@@ -40,6 +40,8 @@ import { CreateIdempotencyKeys1790515600000 } from "./migrations/1790515600000-C
 import { AddPaymentReconciliation1790519200000 } from "./migrations/1790519200000-AddPaymentReconciliation.js";
 import { AddFlightSearchIndex1790522800000 } from "./migrations/1790522800000-AddFlightSearchIndex.js";
 import { AddBookingCancellationReason1790526400000 } from "./migrations/1790526400000-AddBookingCancellationReason.js";
+import { AddFlightCascadeCompletedAt1790530000000 } from "./migrations/1790530000000-AddFlightCascadeCompletedAt.js";
+import { AddReportIndexes1790533600000 } from "./migrations/1790533600000-AddReportIndexes.js";
 
 /**
  * Day 36+ — dev-complete only. Entities/migrations are added per Strangler
@@ -102,6 +104,8 @@ export function createBookingDataSource(config: PostgresConfig): DataSource {
       AddPaymentReconciliation1790519200000,
       AddFlightSearchIndex1790522800000,
       AddBookingCancellationReason1790526400000,
+      AddFlightCascadeCompletedAt1790530000000,
+      AddReportIndexes1790533600000,
     ],
   });
 }

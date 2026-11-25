@@ -1255,7 +1255,7 @@ export function runBookingRepositoryContract(
     assert.deepEqual(await statuses(subject, flight.id), ["1A:HELD"]);
   });
 
-  test(name("claimLiveBookingOfCancelledFlight finds live bookings of cancelled flights only, lowest id first, then nothing"), async () => {
+  test(name("claimLiveBookingOfCancelledFlight finds live bookings of cancelled flights only, lowest id first within a flight, then nothing"), async () => {
     const subject = await setup();
     const cancelled = await seedFlight(subject, 4);
     const open = await seedFlight(subject, 1);
@@ -1282,6 +1282,32 @@ export function runBookingRepositoryContract(
     assert.equal(await claimNext(), expected[0]);
     assert.equal(await claimNext(), expected[1]);
     assert.equal(await claimNext(), undefined);
+  });
+
+  test(name("completeFlightCancellations marks a cancelled flight once nothing live is left, never one with a live booking or one not cancelled, and the claim skips a marked flight"), async () => {
+    const subject = await setup();
+    const empty = await seedFlight(subject, 1);
+    const busy = await seedFlight(subject, 2);
+    const open = await seedFlight(subject, 1);
+    const valid = new Date(NOW.getTime() + HOLD_MS);
+    const live = await seedHold(subject, busy, valid);
+    await seedHold(subject, busy, NOW); // lapsed: the expiry job's, not live
+    await seedHold(subject, open, valid);
+    await subject.cancelFlight(empty.id);
+    await subject.cancelFlight(busy.id);
+
+    assert.equal(await subject.repository.completeFlightCancellations(NOW), 1); // empty only
+    assert.equal(await subject.repository.completeFlightCancellations(NOW), 0);
+
+    await subject.transaction(async () => {
+      assert.equal(await subject.repository.claimLiveBookingOfCancelledFlight(NOW), live.id);
+      assert.equal((await subject.repository.cancel(live.id, ADMIN, NOW, "AIRLINE")).outcome, "cancelled");
+    });
+    assert.equal(await subject.repository.completeFlightCancellations(NOW), 1); // busy, now done
+    assert.equal(
+      await subject.transaction(() => subject.repository.claimLiveBookingOfCancelledFlight(NOW)),
+      undefined,
+    );
   });
 
   test(name("findPage with the admin scope returns every account's bookings"), async () => {
